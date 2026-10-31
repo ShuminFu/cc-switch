@@ -2,7 +2,7 @@
 //!
 //! 提供获取、设置和测试全局代理的 Tauri 命令。
 
-use super::run_blocking_with_state;
+use super::timed_blocking_with_state;
 use crate::proxy::http_client;
 use serde::Serialize;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 #[tauri::command]
 #[specta::specta]
 pub async fn get_global_proxy_url(handle: tauri::AppHandle) -> Result<Option<String>, String> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("get_global_proxy_url", handle, move |state| {
         let result = state.db.get_global_proxy_url().map_err(|e| e.to_string())?;
         log::debug!(
             "[GlobalProxy] [GP-010] Read from database: {}",
@@ -38,7 +38,7 @@ pub async fn get_global_proxy_url(handle: tauri::AppHandle) -> Result<Option<Str
 #[tauri::command]
 #[specta::specta]
 pub async fn set_global_proxy_url(handle: tauri::AppHandle, url: String) -> Result<(), String> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("set_global_proxy_url", handle, move |state| {
         // 调试：显示接收到的 URL 信息（不包含敏感内容）
         let has_auth =
             url.contains('@') && (url.starts_with("http://") || url.starts_with("socks"));

@@ -4,7 +4,7 @@
 //! 是 `async` 命令，并把 DB 工作放进阻塞线程池（CMD-08 / PERF-12），
 //! 避免仪表盘查询卡住 UI 线程。
 
-use super::run_blocking_with_state;
+use super::timed_blocking_with_state;
 use crate::error::AppError;
 pub use crate::services::usage_stats::ModelPricingInfo;
 use crate::services::usage_stats::*;
@@ -23,7 +23,7 @@ pub async fn get_usage_summary(
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<UsageSummary, AppError> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("get_usage_summary", handle, move |state| {
         state.db.get_usage_summary(
             start_date,
             end_date,
@@ -44,7 +44,7 @@ pub async fn get_usage_summary_by_app(
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<Vec<UsageSummaryByApp>, AppError> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("get_usage_summary_by_app", handle, move |state| {
         state.db.get_usage_summary_by_app(
             start_date,
             end_date,
@@ -65,7 +65,7 @@ pub async fn get_usage_trends(
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<Vec<DailyStats>, AppError> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("get_usage_trends", handle, move |state| {
         state.db.get_daily_trends(
             start_date,
             end_date,
@@ -87,7 +87,7 @@ pub async fn get_provider_stats(
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<Vec<ProviderStats>, AppError> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("get_provider_stats", handle, move |state| {
         state.db.get_provider_stats(
             start_date,
             end_date,
@@ -109,7 +109,7 @@ pub async fn get_model_stats(
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<Vec<ModelStats>, AppError> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("get_model_stats", handle, move |state| {
         state.db.get_model_stats(
             start_date,
             end_date,
@@ -129,7 +129,7 @@ pub async fn get_request_logs(
     page: u32,
     page_size: u32,
 ) -> Result<PaginatedLogs, AppError> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("get_request_logs", handle, move |state| {
         state.db.get_request_logs(&filters, page, page_size)
     })
     .await
@@ -141,7 +141,7 @@ pub async fn get_request_detail(
     handle: AppHandle,
     request_id: String,
 ) -> Result<Option<RequestLogDetail>, AppError> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("get_request_detail", handle, move |state| {
         state.db.get_request_detail(&request_id)
     })
     .await
@@ -150,7 +150,7 @@ pub async fn get_request_detail(
 /// 获取模型定价列表
 #[tauri::command]
 pub async fn get_model_pricing(handle: AppHandle) -> Result<Vec<ModelPricingInfo>, AppError> {
-    run_blocking_with_state(handle, |state| {
+    timed_blocking_with_state("get_model_pricing", handle, |state| {
         log::info!("获取模型定价列表");
         state.db.ensure_model_pricing_seeded()?;
         let pricing = state.db.list_model_pricing()?;
@@ -239,7 +239,7 @@ pub async fn update_model_pricing(
         cache_creation_cost,
     )?;
 
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("update_model_pricing", handle, move |state| {
         state.db.upsert_model_pricing(&pricing)?;
 
         let model_id = &pricing.model_id;
@@ -262,7 +262,7 @@ pub async fn check_provider_limits(
     let app_type = crate::app_config::AppType::from_str(&app_type)?
         .as_str()
         .to_string();
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("check_provider_limits", handle, move |state| {
         state.db.check_provider_limits(&provider_id, &app_type)
     })
     .await
@@ -272,7 +272,7 @@ pub async fn check_provider_limits(
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_model_pricing(handle: AppHandle, model_id: String) -> Result<(), AppError> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("delete_model_pricing", handle, move |state| {
         state.db.delete_model_pricing(&model_id)?;
         log::info!("已删除模型定价: {model_id}");
         Ok(())
@@ -300,7 +300,7 @@ pub async fn sync_session_usage(
 pub async fn get_usage_data_sources(
     handle: AppHandle,
 ) -> Result<Vec<crate::services::session_usage::DataSourceSummary>, AppError> {
-    run_blocking_with_state(handle, |state| {
+    timed_blocking_with_state("get_usage_data_sources", handle, |state| {
         crate::services::session_usage::get_data_source_breakdown(&state.db)
     })
     .await

@@ -1,12 +1,14 @@
 pub mod annotations;
 pub mod cache;
 pub mod index;
+pub mod paging;
 pub mod providers;
 pub mod registry;
 pub mod resume;
 pub mod source;
 pub mod terminal;
 pub mod trash;
+pub mod usage;
 
 use serde::{Deserialize, Serialize};
 
@@ -99,6 +101,33 @@ fn resolve(
 pub fn load_messages(provider_id: &str, source_path: &str) -> Result<Vec<SessionMessage>, String> {
     let (provider, validated) = resolve(provider_id, source_path)?;
     provider.load_messages(&validated)
+}
+
+/// One bounded page of a transcript (SESS-14).
+pub fn load_messages_page(
+    provider_id: &str,
+    source_path: &str,
+    offset: usize,
+    limit: usize,
+    max_content_bytes: usize,
+) -> Result<paging::SessionMessagePage, String> {
+    let (provider, validated) = resolve(provider_id, source_path)?;
+    let all = paging::load_cached(provider_id, source_path, || {
+        provider.load_messages(&validated)
+    })?;
+    Ok(paging::page(&all, offset, limit, max_content_bytes))
+}
+
+/// Lightweight table of contents for a transcript (SESS-14).
+pub fn load_session_turns(
+    provider_id: &str,
+    source_path: &str,
+) -> Result<Vec<paging::SessionTurn>, String> {
+    let (provider, validated) = resolve(provider_id, source_path)?;
+    let all = paging::load_cached(provider_id, source_path, || {
+        provider.load_messages(&validated)
+    })?;
+    Ok(paging::turns(&all))
 }
 
 pub fn delete_session(

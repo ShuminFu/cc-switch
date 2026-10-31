@@ -857,6 +857,8 @@ pub fn run() {
             commands::get_app_config_dirs,
             commands::get_mcp_sync_skips,
             commands::get_import_candidates,
+            commands::scan_external_imports,
+            commands::import_external_config,
             commands::preview_live_write,
             commands::validate_provider_settings,
             commands::get_codex_history_backup_usage,
@@ -896,6 +898,7 @@ pub fn run() {
             commands::restart_app,
             commands::install_update_and_restart,
             commands::check_app_update_available,
+            commands::check_app_update,
             commands::check_for_updates,
             commands::is_portable_mode,
             commands::copy_text_to_clipboard,
@@ -911,6 +914,7 @@ pub fn run() {
             commands::upsert_claude_mcp_server,
             commands::delete_claude_mcp_server,
             commands::validate_mcp_command,
+            commands::test_mcp_server,
             // usage query
             commands::queryProviderUsage,
             commands::testUsageScript,
@@ -988,7 +992,6 @@ pub fn run() {
             commands::delete_db_backup,
             commands::sync_current_providers_live,
             // Deep link import
-            commands::parse_deeplink,
             commands::deeplink_frontend_ready,
             features::policy::get_managed_policy_status,
             features::deeplink_nav::take_deeplink_action,
@@ -1017,7 +1020,6 @@ pub fn run() {
             features::db_recovery::restore_backup_for_recovery,
             features::prompt_share::copy_prompt_to_apps,
             commands::merge_deeplink_config,
-            commands::import_from_deeplink,
             commands::import_from_deeplink_unified,
             commands::import_deeplink_bundle,
             commands::discard_pending_deeplink,
@@ -1128,6 +1130,10 @@ pub fn run() {
             commands::get_session_index_snapshot,
             commands::search_sessions,
             commands::get_session_messages,
+            commands::get_session_messages_page,
+            commands::list_session_turns,
+            commands::get_session_usage_summaries,
+            commands::instrument::get_command_stats,
             commands::delete_session,
             commands::delete_sessions,
             commands::list_session_trash,
@@ -1661,63 +1667,11 @@ fn run_startup_imports(
     timings.push(emit_startup_progress(app, phase.finish()));
     phase = init_status::StartupPhase::start("mcp_import");
 
-    // 3. 导入 MCP 服务器配置（表空时触发）
-    if app_state.db.is_mcp_table_empty().unwrap_or(false) {
-        log::info!("MCP table empty, importing from live configurations...");
-
-        match crate::services::mcp::McpService::import_from_claude(app_state) {
-            Ok(count) if count > 0 => {
-                changed = true;
-                log::info!("✓ Imported {count} MCP server(s) from Claude");
-            }
-            Ok(_) => log::debug!("○ No Claude MCP servers found to import"),
-            Err(e) => log::warn!("✗ Failed to import Claude MCP: {e}"),
-        }
-
-        match crate::services::mcp::McpService::import_from_codex(app_state) {
-            Ok(count) if count > 0 => {
-                changed = true;
-                log::info!("✓ Imported {count} MCP server(s) from Codex");
-            }
-            Ok(_) => log::debug!("○ No Codex MCP servers found to import"),
-            Err(e) => log::warn!("✗ Failed to import Codex MCP: {e}"),
-        }
-
-        match crate::services::mcp::McpService::import_from_gemini(app_state) {
-            Ok(count) if count > 0 => {
-                changed = true;
-                log::info!("✓ Imported {count} MCP server(s) from Gemini");
-            }
-            Ok(_) => log::debug!("○ No Gemini MCP servers found to import"),
-            Err(e) => log::warn!("✗ Failed to import Gemini MCP: {e}"),
-        }
-
-        match crate::services::mcp::McpService::import_from_grokbuild(app_state) {
-            Ok(count) if count > 0 => {
-                changed = true;
-                log::info!("✓ Imported {count} MCP server(s) from Grok Build");
-            }
-            Ok(_) => log::debug!("○ No Grok Build MCP servers found to import"),
-            Err(e) => log::warn!("✗ Failed to import Grok Build MCP: {e}"),
-        }
-
-        match crate::services::mcp::McpService::import_from_opencode(app_state) {
-            Ok(count) if count > 0 => {
-                changed = true;
-                log::info!("✓ Imported {count} MCP server(s) from OpenCode");
-            }
-            Ok(_) => log::debug!("○ No OpenCode MCP servers found to import"),
-            Err(e) => log::warn!("✗ Failed to import OpenCode MCP: {e}"),
-        }
-
-        match crate::services::mcp::McpService::import_from_hermes(app_state) {
-            Ok(count) if count > 0 => {
-                changed = true;
-                log::info!("✓ Imported {count} MCP server(s) from Hermes");
-            }
-            Ok(_) => log::debug!("○ No Hermes MCP servers found to import"),
-            Err(e) => log::warn!("✗ Failed to import Hermes MCP: {e}"),
-        }
+    // 3. 导入 MCP 服务器配置：表空时完整导入；之后每次启动也做一次增量导入，
+    // 让用户直接在应用里添加的服务器（`claude mcp add`、手改 config.toml）
+    // 在下一次投影前成为 DB 行，而不是被当作"已禁用"删除（CFG-40）。
+    if import_live_mcp_servers(app_state) {
+        changed = true;
     }
 
     timings.push(emit_startup_progress(app, phase.finish()));
@@ -1751,6 +1705,78 @@ fn run_startup_imports(
 
 /// 发射一次启动进度事件（前端未监听时无副作用），返回原计时以便汇总。
 /// Restore Codex live files from an interrupted switch; runs off the main thread.
+/// Import MCP servers from every app's live config (CFG-40).
+///
+/// On first launch (empty table) this is the initial import. On later
+/// launches it picks up servers that were added directly in an app since the
+/// last run: an unknown id becomes a new row enabled for that app, a known id
+/// gets that app's flag switched on. Without this, projection would treat a
+/// hand-added entry whose id exists in the DB but is disabled for that app as
+/// one cc-switch owns and delete it on the next sync. Returns whether the DB
+/// changed.
+fn import_live_mcp_servers(app_state: &AppState) -> bool {
+    let first_run = app_state.db.is_mcp_table_empty().unwrap_or(false);
+    let mut changed = false;
+    if first_run {
+        log::info!("MCP table empty, importing from live configurations...");
+    }
+
+    match crate::services::mcp::McpService::import_from_claude(app_state) {
+        Ok(count) if count > 0 => {
+            changed = true;
+            log::info!("✓ Imported {count} MCP server(s) from Claude");
+        }
+        Ok(_) => log::debug!("○ No Claude MCP servers found to import"),
+        Err(e) => log::warn!("✗ Failed to import Claude MCP: {e}"),
+    }
+
+    match crate::services::mcp::McpService::import_from_codex(app_state) {
+        Ok(count) if count > 0 => {
+            changed = true;
+            log::info!("✓ Imported {count} MCP server(s) from Codex");
+        }
+        Ok(_) => log::debug!("○ No Codex MCP servers found to import"),
+        Err(e) => log::warn!("✗ Failed to import Codex MCP: {e}"),
+    }
+
+    match crate::services::mcp::McpService::import_from_gemini(app_state) {
+        Ok(count) if count > 0 => {
+            changed = true;
+            log::info!("✓ Imported {count} MCP server(s) from Gemini");
+        }
+        Ok(_) => log::debug!("○ No Gemini MCP servers found to import"),
+        Err(e) => log::warn!("✗ Failed to import Gemini MCP: {e}"),
+    }
+
+    match crate::services::mcp::McpService::import_from_grokbuild(app_state) {
+        Ok(count) if count > 0 => {
+            changed = true;
+            log::info!("✓ Imported {count} MCP server(s) from Grok Build");
+        }
+        Ok(_) => log::debug!("○ No Grok Build MCP servers found to import"),
+        Err(e) => log::warn!("✗ Failed to import Grok Build MCP: {e}"),
+    }
+
+    match crate::services::mcp::McpService::import_from_opencode(app_state) {
+        Ok(count) if count > 0 => {
+            changed = true;
+            log::info!("✓ Imported {count} MCP server(s) from OpenCode");
+        }
+        Ok(_) => log::debug!("○ No OpenCode MCP servers found to import"),
+        Err(e) => log::warn!("✗ Failed to import OpenCode MCP: {e}"),
+    }
+
+    match crate::services::mcp::McpService::import_from_hermes(app_state) {
+        Ok(count) if count > 0 => {
+            changed = true;
+            log::info!("✓ Imported {count} MCP server(s) from Hermes");
+        }
+        Ok(_) => log::debug!("○ No Hermes MCP servers found to import"),
+        Err(e) => log::warn!("✗ Failed to import Hermes MCP: {e}"),
+    }
+    changed
+}
+
 fn recover_codex_live_journal_at_startup() {
     match crate::codex_config::recover_codex_live_journal() {
         Ok(true) => log::warn!("Codex live files restored from an interrupted switch journal"),
@@ -2518,6 +2544,59 @@ mod tests {
         // No current log: nothing to do, previous kept.
         keep_previous_run_log(dir.path());
         assert!(dir.path().join("cc-switch.prev.log").exists());
+    }
+
+    #[test]
+    fn hand_added_mcp_entry_survives_the_next_projection() {
+        // CFG-40: X is in the DB for Claude only; the user then adds X to
+        // Codex by hand. The startup import must adopt it before a sync.
+        let home = crate::test_support::isolated_home();
+        let codex_dir = home.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        std::fs::write(
+            codex_dir.join("config.toml"),
+            "[mcp_servers.ctx7]\ncommand = \"npx\"\nargs = [\"-y\", \"ctx7\"]\n",
+        )
+        .unwrap();
+        let db = std::sync::Arc::new(crate::database::Database::memory().unwrap());
+        let state = crate::store::AppState::new(db.clone());
+        db.save_mcp_server(&crate::app_config::McpServer {
+            id: "ctx7".to_string(),
+            name: "ctx7".to_string(),
+            server: serde_json::json!({"type": "stdio", "command": "npx", "args": ["-y", "ctx7"]}),
+            apps: crate::app_config::McpApps {
+                claude: true,
+                ..Default::default()
+            },
+            description: None,
+            homepage: None,
+            docs: None,
+            tags: Vec::new(),
+        })
+        .unwrap();
+
+        crate::import_live_mcp_servers(&state);
+        assert!(db.get_all_mcp_servers().unwrap()["ctx7"].apps.codex);
+
+        crate::services::mcp::McpService::sync_enabled_for_app(
+            &state,
+            &crate::app_config::AppType::Codex,
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+        assert!(text.contains("[mcp_servers.ctx7]"), "{text}");
+
+        // A server cc-switch projected and the user then disabled is still removed.
+        let mut server = db.get_all_mcp_servers().unwrap()["ctx7"].clone();
+        server.apps.codex = false;
+        db.save_mcp_server(&server).unwrap();
+        crate::services::mcp::McpService::sync_enabled_for_app(
+            &state,
+            &crate::app_config::AppType::Codex,
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+        assert!(!text.contains("ctx7"), "{text}");
     }
 
     #[test]

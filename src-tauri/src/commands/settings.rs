@@ -386,15 +386,52 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
 #[tauri::command]
 #[specta::specta]
 pub async fn check_app_update_available(app: AppHandle) -> Result<Option<String>, String> {
+    Ok(check_app_update(app, None)
+        .await?
+        .map(|u| u.available_version))
+}
+
+/// An available update (CMD-39).
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdateInfo {
+    pub current_version: String,
+    pub available_version: String,
+    /// Release notes (`body` of the update manifest).
+    pub notes: Option<String>,
+    /// `pub_date` of the update manifest, as published.
+    pub pub_date: Option<String>,
+}
+
+/// Check the update endpoint (CMD-39). The frontend calls this instead of
+/// the updater plugin's JS API, so the webview needs no `updater:*` grant.
+/// `timeout_ms` defaults to 30 s.
+#[tauri::command]
+#[specta::specta]
+pub async fn check_app_update(
+    app: AppHandle,
+    timeout_ms: Option<u64>,
+) -> Result<Option<AppUpdateInfo>, String> {
+    let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(30_000).max(1));
     let updater = app
         .updater_builder()
+        .timeout(timeout)
         .build()
         .map_err(|e| format!("初始化更新器失败: {e}"))?;
     let update = updater
         .check()
         .await
         .map_err(|e| format!("检查更新失败: {e}"))?;
-    Ok(update.map(|u| u.version))
+    Ok(update.map(|u| AppUpdateInfo {
+        current_version: u.current_version.clone(),
+        available_version: u.version.clone(),
+        notes: u.body.clone(),
+        pub_date: u
+            .raw_json
+            .get("pub_date")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+    }))
 }
 
 /// 获取 app_config_dir 覆盖配置 (从 Store)

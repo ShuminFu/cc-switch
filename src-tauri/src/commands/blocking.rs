@@ -59,6 +59,30 @@ where
     .await
 }
 
+/// [`run_blocking`] timed and logged as command `name` (CMD-30).
+pub(crate) async fn timed_blocking<T, E, F>(name: &'static str, f: F) -> Result<T, E>
+where
+    F: FnOnce() -> Result<T, E> + Send + 'static,
+    T: Send + 'static,
+    E: BlockingTaskError + Send + 'static,
+{
+    super::instrument::timed(name, run_blocking(f)).await
+}
+
+/// [`run_blocking_with_state`] timed and logged as command `name` (CMD-30).
+pub(crate) async fn timed_blocking_with_state<T, E, F>(
+    name: &'static str,
+    app: AppHandle,
+    f: F,
+) -> Result<T, E>
+where
+    F: FnOnce(&AppState) -> Result<T, E> + Send + 'static,
+    T: Send + 'static,
+    E: BlockingTaskError + Send + 'static,
+{
+    super::instrument::timed(name, run_blocking_with_state(app, f)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::run_blocking;

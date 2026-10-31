@@ -61,13 +61,68 @@ pub async fn get_session_messages(
     providerId: String,
     sourcePath: String,
 ) -> Result<Vec<session_manager::SessionMessage>, String> {
-    let provider_id = providerId.clone();
-    let source_path = sourcePath.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        session_manager::load_messages(&provider_id, &source_path)
+        session_manager::load_messages(&providerId, &sourcePath)
     })
     .await
     .map_err(|e| format!("Failed to load session messages: {e}"))?
+}
+
+/// One bounded page of a transcript (SESS-14). `offset` defaults to 0,
+/// `limit` to 200 messages and `maxContentBytes` to 64 KiB per message; a page
+/// never carries more than 8 MiB of content. Indices whose content was cut are
+/// listed in `truncated` (ask again with a larger `maxContentBytes` and
+/// `limit: 1` to load one message in full).
+#[tauri::command]
+pub async fn get_session_messages_page(
+    providerId: String,
+    sourcePath: String,
+    offset: Option<usize>,
+    limit: Option<usize>,
+    maxContentBytes: Option<usize>,
+) -> Result<session_manager::paging::SessionMessagePage, String> {
+    use session_manager::paging::{DEFAULT_MAX_CONTENT_BYTES, DEFAULT_PAGE_LIMIT};
+    tauri::async_runtime::spawn_blocking(move || {
+        session_manager::load_messages_page(
+            &providerId,
+            &sourcePath,
+            offset.unwrap_or(0),
+            limit.unwrap_or(DEFAULT_PAGE_LIMIT),
+            maxContentBytes.unwrap_or(DEFAULT_MAX_CONTENT_BYTES),
+        )
+    })
+    .await
+    .map_err(|e| format!("Failed to load session messages: {e}"))?
+}
+
+/// Token and cost totals for sessions (SESS-17), keyed by session id. Ids
+/// without synced usage are absent. At most 2000 ids per call.
+#[tauri::command]
+pub async fn get_session_usage_summaries(
+    handle: tauri::AppHandle,
+    sessionIds: Vec<String>,
+) -> Result<
+    std::collections::HashMap<String, session_manager::usage::SessionUsageSummary>,
+    crate::error::AppError,
+> {
+    super::timed_blocking_with_state("get_session_usage_summaries", handle, move |state| {
+        session_manager::usage::summaries(&state.db, &sessionIds)
+    })
+    .await
+}
+
+/// Table of contents for a transcript: role, timestamp and a 160-char preview
+/// per message (SESS-14).
+#[tauri::command]
+pub async fn list_session_turns(
+    providerId: String,
+    sourcePath: String,
+) -> Result<Vec<session_manager::paging::SessionTurn>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        session_manager::load_session_turns(&providerId, &sourcePath)
+    })
+    .await
+    .map_err(|e| format!("Failed to load session turns: {e}"))?
 }
 
 /// Open a terminal that resumes a session. The resume command is rebuilt in
@@ -111,12 +166,8 @@ pub async fn delete_session(
     sessionId: String,
     sourcePath: String,
 ) -> Result<bool, String> {
-    let provider_id = providerId.clone();
-    let session_id = sessionId.clone();
-    let source_path = sourcePath.clone();
-
     tauri::async_runtime::spawn_blocking(move || {
-        session_manager::delete_session(&provider_id, &session_id, &source_path)
+        session_manager::delete_session(&providerId, &sessionId, &sourcePath)
     })
     .await
     .map_err(|e| format!("Failed to delete session: {e}"))?

@@ -3,7 +3,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use super::run_blocking_with_state;
+use super::{run_blocking_with_state, timed_blocking_with_state};
 
 use crate::database::Profile;
 use crate::services::profile::{ProfilePayload, ProfileScope, ProfileService};
@@ -145,7 +145,7 @@ fn list_profiles_inner(state: &AppState) -> Result<ProfilesResponse, String> {
 #[tauri::command]
 #[specta::specta]
 pub async fn list_profiles(handle: AppHandle) -> Result<ProfilesResponse, String> {
-    run_blocking_with_state(handle, list_profiles_inner).await
+    timed_blocking_with_state("list_profiles", handle, list_profiles_inner).await
 }
 
 #[tauri::command]
@@ -156,7 +156,7 @@ pub async fn create_profile(
     scope: String,
 ) -> Result<ProfileDto, String> {
     let scope = ProfileScope::parse(&scope).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("create_profile", handle, move |state| {
         ProfileService::create(state, &name, scope)
             .map(ProfileDto::from)
             .map_err(|e| e.to_string())
@@ -177,7 +177,7 @@ pub async fn update_profile(
         .map(|s| ProfileScope::parse(&s))
         .transpose()
         .map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("update_profile", handle, move |state| {
         ProfileService::update(state, &id, name, resnapshot.unwrap_or(false), scope)
             .map(ProfileDto::from)
             .map_err(|e| e.to_string())
@@ -188,7 +188,7 @@ pub async fn update_profile(
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_profile(handle: AppHandle, id: String) -> Result<(), String> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("delete_profile", handle, move |state| {
         ProfileService::delete(state, &id).map_err(|e| e.to_string())
     })
     .await
@@ -203,10 +203,11 @@ pub async fn clear_current_profile(
     scope: String,
 ) -> Result<Vec<String>, String> {
     let scope = ProfileScope::parse(&scope).map_err(|e| e.to_string())?;
-    let (warnings, should_stop_proxy) = run_blocking_with_state(app.clone(), move |state| {
-        ProfileService::clear_current(state, scope).map_err(|e| e.to_string())
-    })
-    .await?;
+    let (warnings, should_stop_proxy) =
+        timed_blocking_with_state("clear_current_profile", app.clone(), move |state| {
+            ProfileService::clear_current(state, scope).map_err(|e| e.to_string())
+        })
+        .await?;
     finish_profile_change(app, None, vec![scope], should_stop_proxy).await;
     Ok(warnings)
 }
@@ -225,10 +226,11 @@ pub async fn apply_profile(
 ) -> Result<Vec<String>, String> {
     let scope = ProfileScope::parse(&scope).map_err(|e| e.to_string())?;
     let profile_id = id.clone();
-    let (warnings, should_stop_proxy) = run_blocking_with_state(app.clone(), move |state| {
-        ProfileService::apply(state, &profile_id, scope).map_err(|e| e.to_string())
-    })
-    .await?;
+    let (warnings, should_stop_proxy) =
+        timed_blocking_with_state("apply_profile", app.clone(), move |state| {
+            ProfileService::apply(state, &profile_id, scope).map_err(|e| e.to_string())
+        })
+        .await?;
 
     finish_profile_change(app, Some(id), vec![scope], should_stop_proxy).await;
     Ok(warnings)

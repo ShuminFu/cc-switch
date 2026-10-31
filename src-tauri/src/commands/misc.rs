@@ -146,7 +146,7 @@ pub async fn open_provider_terminal(
     cwd: Option<String>,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    super::run_blocking_with_state(handle, move |state| {
+    super::timed_blocking_with_state("open_provider_terminal", handle, move |state| {
         cli_tools::open_provider_terminal(state, app_type, &providerId, cwd)
     })
     .await

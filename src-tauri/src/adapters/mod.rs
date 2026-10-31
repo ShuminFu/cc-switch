@@ -25,6 +25,7 @@
 //! overrides, backup locations) is in `docs/dev/config-adapters.md`; each
 //! adapter module's header names its row there (CFG-26).
 
+pub mod external_import;
 pub mod json5_doc;
 pub mod live_file;
 pub mod plan;

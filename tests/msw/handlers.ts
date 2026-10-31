@@ -361,6 +361,48 @@ export const handlers = [
     return success(getSessionMessages(providerId, sourcePath));
   }),
 
+  http.post(
+    `${TAURI_ENDPOINT}/get_session_messages_page`,
+    async ({ request }) => {
+      const { providerId, sourcePath, offset, limit } = await withJson<{
+        providerId: string;
+        sourcePath: string;
+        offset?: number;
+        limit?: number;
+      }>(request);
+      const all = getSessionMessages(providerId, sourcePath);
+      const start = Math.min(offset ?? 0, all.length);
+      const messages = all.slice(start, start + (limit ?? 200));
+      return success({
+        messages,
+        offset: start,
+        total: all.length,
+        hasMore: start + messages.length < all.length,
+        truncated: [],
+      });
+    },
+  ),
+
+  http.post(`${TAURI_ENDPOINT}/get_command_stats`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/check_app_update`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/get_session_usage_summaries`, () => success({})),
+
+  http.post(`${TAURI_ENDPOINT}/list_session_turns`, async ({ request }) => {
+    const { providerId, sourcePath } = await withJson<{
+      providerId: string;
+      sourcePath: string;
+    }>(request);
+    return success(
+      getSessionMessages(providerId, sourcePath).map((message, index) => ({
+        index,
+        role: message.role,
+        ts: message.ts,
+        preview: message.content.slice(0, 160),
+        contentBytes: message.content.length,
+      })),
+    );
+  }),
+
   http.post(`${TAURI_ENDPOINT}/delete_session`, async ({ request }) => {
     const { providerId, sessionId, sourcePath } = await withJson<{
       providerId: string;
@@ -735,6 +777,13 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/get_app_config_dirs`, () => success([])),
   http.post(`${TAURI_ENDPOINT}/get_mcp_sync_skips`, () => success([])),
   http.post(`${TAURI_ENDPOINT}/get_import_candidates`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/scan_external_imports`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/import_external_config`, () =>
+    success({ imported: [], skipped: [], rulesImported: 0 }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/test_mcp_server`, () =>
+    success({ ok: true, transport: "stdio", latencyMs: 1, tools: [] }),
+  ),
   http.post(`${TAURI_ENDPOINT}/preview_live_write`, async ({ request }) => {
     const { app, providerId } = await withJson<{
       app: AppId;

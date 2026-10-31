@@ -16,7 +16,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
-use super::{run_blocking, run_blocking_with_state};
+use super::{timed_blocking, timed_blocking_with_state};
 
 /// SkillService 状态包装
 pub struct SkillServiceState(pub Arc<SkillService>);
@@ -31,7 +31,7 @@ fn parse_app_type(app: &str) -> Result<AppType, String> {
 /// 获取所有已安装的 Skills
 #[tauri::command]
 pub async fn get_installed_skills(handle: AppHandle) -> Result<Vec<InstalledSkill>, String> {
-    run_blocking_with_state(handle, |state| {
+    timed_blocking_with_state("get_installed_skills", handle, |state| {
         SkillService::get_all_installed(&state.db).map_err(|e| e.to_string())
     })
     .await
@@ -39,13 +39,16 @@ pub async fn get_installed_skills(handle: AppHandle) -> Result<Vec<InstalledSkil
 
 #[tauri::command]
 pub async fn get_skill_backups() -> Result<Vec<SkillBackupEntry>, String> {
-    run_blocking(|| SkillService::list_backups().map_err(|e| e.to_string())).await
+    timed_blocking("get_skill_backups", || {
+        SkillService::list_backups().map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_skill_backup(backup_id: String) -> Result<bool, String> {
-    run_blocking(move || {
+    timed_blocking("delete_skill_backup", move || {
         SkillService::delete_backup(&backup_id).map_err(|e| e.to_string())?;
         Ok(true)
     })
@@ -79,7 +82,7 @@ pub async fn uninstall_skill_unified(
     id: String,
     handle: AppHandle,
 ) -> Result<SkillUninstallResult, String> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("uninstall_skill_unified", handle, move |state| {
         SkillService::uninstall(&state.db, &id).map_err(|e| e.to_string())
     })
     .await
@@ -92,7 +95,7 @@ pub async fn restore_skill_backup(
     handle: AppHandle,
 ) -> Result<InstalledSkill, String> {
     let app_type = parse_app_type(&current_app)?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("restore_skill_backup", handle, move |state| {
         SkillService::restore_from_backup(&state.db, &backup_id, &app_type)
             .map_err(|e| e.to_string())
     })
@@ -109,7 +112,7 @@ pub async fn toggle_skill_app(
     handle: AppHandle,
 ) -> Result<bool, String> {
     let app_type = parse_app_type(&app)?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("toggle_skill_app", handle, move |state| {
         SkillService::toggle_app(&state.db, &id, &app_type, enabled).map_err(|e| e.to_string())?;
         Ok(true)
     })
@@ -119,7 +122,7 @@ pub async fn toggle_skill_app(
 /// 扫描未管理的 Skills（遍历所有应用的 skills 目录）
 #[tauri::command]
 pub async fn scan_unmanaged_skills(handle: AppHandle) -> Result<Vec<UnmanagedSkill>, String> {
-    run_blocking_with_state(handle, |state| {
+    timed_blocking_with_state("scan_unmanaged_skills", handle, |state| {
         SkillService::scan_unmanaged(&state.db).map_err(|e| e.to_string())
     })
     .await
@@ -131,7 +134,7 @@ pub async fn import_skills_from_apps(
     imports: Vec<ImportSkillSelection>,
     handle: AppHandle,
 ) -> Result<Vec<InstalledSkill>, String> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("import_skills_from_apps", handle, move |state| {
         SkillService::import_from_apps(&state.db, imports).map_err(|e| e.to_string())
     })
     .await
@@ -187,7 +190,7 @@ pub async fn migrate_skill_storage(
     handle: AppHandle,
 ) -> Result<MigrationResult, String> {
     // 迁移会整目录复制/移动文件，放到阻塞线程池执行。
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("migrate_skill_storage", handle, move |state| {
         SkillService::migrate_storage(&state.db, target).map_err(|e| e.to_string())
     })
     .await
@@ -296,7 +299,7 @@ pub async fn uninstall_skill(
     directory: String,
     handle: AppHandle,
 ) -> Result<SkillUninstallResult, String> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("uninstall_skill", handle, move |state| {
         uninstall_skill_by_directory(state, &directory)
     })
     .await
@@ -310,7 +313,7 @@ pub async fn uninstall_skill_for_app(
     handle: AppHandle,
 ) -> Result<SkillUninstallResult, String> {
     let _ = parse_app_type(&app)?; // 验证参数
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("uninstall_skill_for_app", handle, move |state| {
         uninstall_skill_by_directory(state, &directory)
     })
     .await
@@ -336,7 +339,7 @@ fn uninstall_skill_by_directory(
 /// 获取技能仓库列表
 #[tauri::command]
 pub async fn get_skill_repos(handle: AppHandle) -> Result<Vec<SkillRepo>, String> {
-    run_blocking_with_state(handle, |state| {
+    timed_blocking_with_state("get_skill_repos", handle, |state| {
         state.db.get_skill_repos().map_err(|e| e.to_string())
     })
     .await
@@ -345,7 +348,7 @@ pub async fn get_skill_repos(handle: AppHandle) -> Result<Vec<SkillRepo>, String
 /// 添加技能仓库
 #[tauri::command]
 pub async fn add_skill_repo(repo: SkillRepo, handle: AppHandle) -> Result<bool, String> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("add_skill_repo", handle, move |state| {
         state.db.save_skill_repo(&repo).map_err(|e| e.to_string())?;
         Ok(true)
     })
@@ -360,7 +363,7 @@ pub async fn remove_skill_repo(
     name: String,
     handle: AppHandle,
 ) -> Result<bool, String> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("remove_skill_repo", handle, move |state| {
         state
             .db
             .delete_skill_repo(&owner, &name)
@@ -379,7 +382,7 @@ pub async fn install_skills_from_zip(
 ) -> Result<Vec<InstalledSkill>, String> {
     let app_type = parse_app_type(&current_app)?;
     super::validation::validate_skill_archive_path(std::path::Path::new(&file_path))?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("install_skills_from_zip", handle, move |state| {
         let path = std::path::Path::new(&file_path);
         SkillService::install_from_zip(&state.db, path, &app_type).map_err(|e| e.to_string())
     })

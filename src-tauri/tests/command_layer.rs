@@ -11,9 +11,9 @@
 //! links the whole crate (~0.5 GB in debug).
 
 use cc_switch_lib::{
-    get_claude_settings_path, get_settings, list_db_backups, merge_deeplink_config, parse_deeplink,
-    read_json_file, switch_provider_test_hook, AppSettings, AppType, DeepLinkImportRequest,
-    MultiAppConfig, Prompt, PromptService, Provider, ProviderService,
+    get_claude_settings_path, get_settings, list_db_backups, merge_deeplink_config,
+    parse_deeplink_url, read_json_file, switch_provider_test_hook, AppSettings, AppType,
+    DeepLinkImportRequest, MultiAppConfig, Prompt, PromptService, Provider, ProviderService,
 };
 use serde_json::json;
 
@@ -202,11 +202,13 @@ fn save_settings_payload_from_frontend_deserialises() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn parse_deeplink_command_maps_errors_to_strings() {
+fn parse_deeplink_url_maps_errors_to_strings() {
+    // The `parse_deeplink` command was removed (SESS-25); the dialog receives
+    // parsed requests from the backend, which uses this parser.
     let _env = TestEnv::new();
-    let ok = parse_deeplink(
+    let ok = parse_deeplink_url(
         "ccswitch://v1/import?resource=provider&app=claude&name=Demo&endpoint=https%3A%2F%2Fapi.example.com&apiKey=sk-demo"
-            .to_string(),
+        ,
     )
     .expect("valid deep link parses");
     assert_eq!(ok.resource, "provider");
@@ -217,7 +219,8 @@ fn parse_deeplink_command_maps_errors_to_strings() {
     assert_eq!(wire["apiKey"], "sk-demo");
     assert!(wire.get("api_key").is_none());
 
-    let err = parse_deeplink("https://not-a-deeplink.example".to_string())
+    let err = parse_deeplink_url("https://not-a-deeplink.example")
+        .map_err(|e| e.to_string())
         .expect_err("non ccswitch URL must be rejected");
     assert!(!err.is_empty());
 }

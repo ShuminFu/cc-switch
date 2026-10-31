@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use tauri::{AppHandle, Emitter, State};
 
-use super::{run_blocking, run_blocking_with_state};
+use super::{timed_blocking, timed_blocking_with_state};
 
 use crate::app_config::AppType;
 use crate::commands::copilot::CopilotAuthState;
@@ -20,7 +20,7 @@ pub async fn get_providers(
     app: String,
 ) -> Result<IndexMap<String, Provider>, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("get_providers", handle, move |state| {
         ProviderService::list(state, app_type).map_err(|e| e.to_string())
     })
     .await
@@ -30,7 +30,7 @@ pub async fn get_providers(
 #[specta::specta]
 pub async fn get_current_provider(handle: AppHandle, app: String) -> Result<String, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("get_current_provider", handle, move |state| {
         ProviderService::current(state, app_type).map_err(|e| e.to_string())
     })
     .await
@@ -44,7 +44,7 @@ pub async fn add_provider(
     #[allow(non_snake_case)] addToLive: Option<bool>,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("add_provider", handle, move |state| {
         let id = provider.id.clone();
         crate::features::config_history::track_provider_change(
             state,
@@ -67,7 +67,7 @@ pub async fn update_provider(
     #[allow(non_snake_case)] originalId: Option<String>,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("update_provider", handle, move |state| {
         let after_id = provider.id.clone();
         let before_id = originalId.clone().unwrap_or_else(|| after_id.clone());
         crate::features::config_history::track_provider_change(
@@ -87,7 +87,7 @@ pub async fn update_provider(
 #[specta::specta]
 pub async fn delete_provider(handle: AppHandle, app: String, id: String) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("delete_provider", handle, move |state| {
         crate::features::config_history::track_provider_change(
             state,
             &app_type.clone(),
@@ -110,7 +110,7 @@ pub async fn remove_provider_from_live_config(
     id: String,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("remove_provider_from_live_config", handle, move |state| {
         ProviderService::remove_from_live_config(state, app_type, &id)
             .map(|_| true)
             .map_err(|e| e.to_string())
@@ -146,7 +146,7 @@ pub async fn switch_provider(
     id: String,
 ) -> Result<SwitchResult, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("switch_provider", handle, move |state| {
         switch_provider_internal(state, app_type, &id).map_err(|e| e.to_string())
     })
     .await
@@ -192,7 +192,7 @@ pub fn import_default_config_test_hook(
 #[specta::specta]
 pub async fn import_default_config(handle: AppHandle, app: String) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("import_default_config", handle, move |state| {
         import_default_config_internal(state, app_type).map_err(Into::into)
     })
     .await
@@ -219,7 +219,12 @@ pub fn get_claude_desktop_default_routes(
 pub async fn import_claude_desktop_providers_from_claude(
     handle: AppHandle,
 ) -> Result<usize, String> {
-    run_blocking_with_state(handle, import_claude_desktop_providers_inner).await
+    timed_blocking_with_state(
+        "import_claude_desktop_providers_from_claude",
+        handle,
+        import_claude_desktop_providers_inner,
+    )
+    .await
 }
 
 fn import_claude_desktop_providers_inner(state: &AppState) -> Result<usize, String> {
@@ -276,7 +281,7 @@ fn import_claude_desktop_providers_inner(state: &AppState) -> Result<usize, Stri
 #[tauri::command]
 #[specta::specta]
 pub async fn ensure_claude_desktop_official_provider(handle: AppHandle) -> Result<bool, String> {
-    run_blocking_with_state(handle, |state| {
+    timed_blocking_with_state("ensure_claude_desktop_official_provider", handle, |state| {
         state
             .db
             .ensure_official_seed_by_id(
@@ -291,7 +296,7 @@ pub async fn ensure_claude_desktop_official_provider(handle: AppHandle) -> Resul
 #[tauri::command]
 #[specta::specta]
 pub async fn ensure_codex_official_provider(handle: AppHandle) -> Result<bool, String> {
-    run_blocking_with_state(handle, |state| {
+    timed_blocking_with_state("ensure_codex_official_provider", handle, |state| {
         state
             .db
             .ensure_official_seed_by_id(crate::database::CODEX_OFFICIAL_PROVIDER_ID, AppType::Codex)
@@ -518,8 +523,10 @@ pub async fn testUsageScript(
 #[specta::specta]
 pub async fn read_live_provider_settings(app: String) -> Result<serde_json::Value, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking(move || ProviderService::read_live_settings(app_type).map_err(|e| e.to_string()))
-        .await
+    timed_blocking("read_live_provider_settings", move || {
+        ProviderService::read_live_settings(app_type).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -539,7 +546,7 @@ pub async fn get_custom_endpoints(
     #[allow(non_snake_case)] providerId: String,
 ) -> Result<Vec<crate::settings::CustomEndpoint>, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("get_custom_endpoints", handle, move |state| {
         ProviderService::get_custom_endpoints(state, app_type, &providerId)
             .map_err(|e| e.to_string())
     })
@@ -555,7 +562,7 @@ pub async fn add_custom_endpoint(
     url: String,
 ) -> Result<(), String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("add_custom_endpoint", handle, move |state| {
         ProviderService::add_custom_endpoint(state, app_type, &providerId, url)
             .map_err(|e| e.to_string())
     })
@@ -571,7 +578,7 @@ pub async fn remove_custom_endpoint(
     url: String,
 ) -> Result<(), String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("remove_custom_endpoint", handle, move |state| {
         ProviderService::remove_custom_endpoint(state, app_type, &providerId, url)
             .map_err(|e| e.to_string())
     })
@@ -587,7 +594,7 @@ pub async fn update_endpoint_last_used(
     url: String,
 ) -> Result<(), String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("update_endpoint_last_used", handle, move |state| {
         ProviderService::update_endpoint_last_used(state, app_type, &providerId, url)
             .map_err(|e| e.to_string())
     })
@@ -601,7 +608,7 @@ pub async fn update_providers_sort_order(
     updates: Vec<ProviderSortUpdate>,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("update_providers_sort_order", handle, move |state| {
         ProviderService::update_sort_order(state, app_type, updates).map_err(|e| e.to_string())
     })
     .await
@@ -630,7 +637,7 @@ fn emit_universal_provider_synced(app: &AppHandle, action: &str, id: &str) {
 pub async fn get_universal_providers(
     handle: AppHandle,
 ) -> Result<HashMap<String, UniversalProvider>, String> {
-    run_blocking_with_state(handle, |state| {
+    timed_blocking_with_state("get_universal_providers", handle, |state| {
         ProviderService::list_universal(state).map_err(|e| e.to_string())
     })
     .await
@@ -641,7 +648,7 @@ pub async fn get_universal_provider(
     handle: AppHandle,
     id: String,
 ) -> Result<Option<UniversalProvider>, String> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("get_universal_provider", handle, move |state| {
         ProviderService::get_universal(state, &id).map_err(|e| e.to_string())
     })
     .await
@@ -653,10 +660,11 @@ pub async fn upsert_universal_provider(
     provider: UniversalProvider,
 ) -> Result<bool, String> {
     let id = provider.id.clone();
-    let result = run_blocking_with_state(app.clone(), move |state| {
-        ProviderService::upsert_universal(state, provider).map_err(|e| e.to_string())
-    })
-    .await?;
+    let result =
+        timed_blocking_with_state("upsert_universal_provider", app.clone(), move |state| {
+            ProviderService::upsert_universal(state, provider).map_err(|e| e.to_string())
+        })
+        .await?;
 
     emit_universal_provider_synced(&app, "upsert", &id);
 
@@ -667,10 +675,11 @@ pub async fn upsert_universal_provider(
 #[specta::specta]
 pub async fn delete_universal_provider(app: AppHandle, id: String) -> Result<bool, String> {
     let id_for_task = id.clone();
-    let result = run_blocking_with_state(app.clone(), move |state| {
-        ProviderService::delete_universal(state, &id_for_task).map_err(|e| e.to_string())
-    })
-    .await?;
+    let result =
+        timed_blocking_with_state("delete_universal_provider", app.clone(), move |state| {
+            ProviderService::delete_universal(state, &id_for_task).map_err(|e| e.to_string())
+        })
+        .await?;
 
     emit_universal_provider_synced(&app, "delete", &id);
 
@@ -681,7 +690,7 @@ pub async fn delete_universal_provider(app: AppHandle, id: String) -> Result<boo
 #[specta::specta]
 pub async fn sync_universal_provider(app: AppHandle, id: String) -> Result<bool, String> {
     let id_for_task = id.clone();
-    let result = run_blocking_with_state(app.clone(), move |state| {
+    let result = timed_blocking_with_state("sync_universal_provider", app.clone(), move |state| {
         ProviderService::sync_universal_to_apps(state, &id_for_task).map_err(|e| e.to_string())
     })
     .await?;
@@ -694,7 +703,7 @@ pub async fn sync_universal_provider(app: AppHandle, id: String) -> Result<bool,
 #[tauri::command]
 #[specta::specta]
 pub async fn import_opencode_providers_from_live(handle: AppHandle) -> Result<usize, String> {
-    run_blocking_with_state(handle, |state| {
+    timed_blocking_with_state("import_opencode_providers_from_live", handle, |state| {
         crate::services::provider::import_opencode_providers_from_live(state)
             .map_err(|e| e.to_string())
     })
@@ -704,7 +713,7 @@ pub async fn import_opencode_providers_from_live(handle: AppHandle) -> Result<us
 #[tauri::command]
 #[specta::specta]
 pub async fn get_opencode_live_provider_ids() -> Result<Vec<String>, String> {
-    run_blocking(|| {
+    timed_blocking("get_opencode_live_provider_ids", || {
         crate::opencode_config::get_providers()
             .map(|providers| providers.keys().cloned().collect())
             .map_err(|e| e.to_string())
