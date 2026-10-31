@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { DeepLinkImportDialog } from "@/components/DeepLinkImportDialog";
 import { FirstRunWizard } from "@/components/onboarding";
+import { CommandPalette } from "@/components/palette/CommandPalette";
 import OpenClawHealthBanner from "@/components/openclaw/OpenClawHealthBanner";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
 import { EnvConflictBanner } from "@/app/EnvConflictBanner";
@@ -39,7 +40,8 @@ const DEFAULT_DRAG_BAR_HEIGHT = isWindows() || isLinux() ? 0 : 28; // px
 const HEADER_HEIGHT = 64; // px
 
 /**
- * Keyboard navigation: Cmd/Ctrl+, opens settings, Escape goes to the parent
+ * Keyboard navigation: Cmd/Ctrl+, opens settings (Cmd/Ctrl+K opens the
+ * command palette, see CommandPalette), Escape goes to the parent
  * page unless a dialog or a text field has focus.
  */
 function useShellShortcuts() {
@@ -205,6 +207,7 @@ function AppShell() {
 
       <DeepLinkImportDialog />
       <FirstRunWizard />
+      <CommandPalette />
     </div>
   );
 }
