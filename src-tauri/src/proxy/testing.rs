@@ -258,7 +258,16 @@ pub(crate) mod golden {
     }
 
     async fn convert_stream(bridge: &str, input: &str, chunk_size: usize) -> Vec<Value> {
-        let upstream = stream::iter(sse_fixture_chunks(input, chunk_size));
+        convert_upstream(bridge, sse_fixture_chunks(input, chunk_size)).await
+    }
+
+    /// Run already-split upstream chunks through a stream bridge (TEST-15 uses this
+    /// with arbitrary partitions).
+    pub(crate) async fn convert_upstream(
+        bridge: &str,
+        chunks: Vec<Result<Bytes, std::io::Error>>,
+    ) -> Vec<Value> {
+        let upstream = stream::iter(chunks);
         let events = match bridge {
             "anthropic_chat" => {
                 collect_stream(streaming::create_anthropic_sse_stream(upstream)).await
@@ -982,5 +991,534 @@ pub(crate) mod roundtrip {
             "",
             "gemini -> anthropic"
         );
+    }
+}
+
+/// TEST-15: property tests for the streaming parsers. Third-party gateways deliver
+/// SSE with arbitrary chunk boundaries, CRLF, multi-byte text split mid-character and
+/// non-JSON `data:` lines; hand-written cases only cover the variants seen so far.
+///
+/// Case counts default to 64 and follow `PROPTEST_CASES` (the nightly job uses 2000).
+pub(crate) mod stream_properties {
+    use super::*;
+    use crate::proxy::sse::{append_utf8_safe, take_sse_block, SseBlockBuffer};
+    use crate::proxy::usage::parser::TokenUsage;
+    use proptest::prelude::*;
+    use proptest::sample::Index;
+
+    fn config(default_cases: u32) -> ProptestConfig {
+        let cases = std::env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default_cases);
+        ProptestConfig {
+            cases,
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        }
+    }
+
+    /// Every `<bridge>/stream/<case>.input.sse` fixture as `(bridge, text)`.
+    fn stream_fixtures() -> &'static [(String, String)] {
+        static FIXTURES: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+        FIXTURES.get_or_init(|| {
+            let mut out = Vec::new();
+            for bridge in std::fs::read_dir(fixtures_root()).expect("fixtures root") {
+                let bridge = bridge.expect("entry").path();
+                let name = bridge.file_name().unwrap().to_string_lossy().to_string();
+                if name == "e2e" {
+                    continue;
+                }
+                let dir = bridge.join("stream");
+                let Ok(entries) = std::fs::read_dir(&dir) else {
+                    continue;
+                };
+                let mut files: Vec<_> = entries
+                    .map(|e| e.expect("entry").path())
+                    .filter(|p| p.to_string_lossy().ends_with(".input.sse"))
+                    .collect();
+                files.sort();
+                for file in files {
+                    out.push((name.clone(), std::fs::read_to_string(&file).unwrap()));
+                }
+            }
+            assert!(out.len() >= 10, "stream corpus unexpectedly small");
+            out
+        })
+    }
+
+    /// Split `chunks` (as produced by `sse_fixture_chunks(.., 0)`) at the given cuts.
+    fn partition(
+        chunks: Vec<Result<Bytes, std::io::Error>>,
+        cuts: &[Index],
+    ) -> Vec<Result<Bytes, std::io::Error>> {
+        let mut out = Vec::new();
+        for chunk in chunks {
+            match chunk {
+                Ok(body) => {
+                    let mut points: Vec<usize> =
+                        cuts.iter().map(|c| c.index(body.len() + 1)).collect();
+                    points.push(0);
+                    points.push(body.len());
+                    points.sort_unstable();
+                    points.dedup();
+                    for w in points.windows(2) {
+                        out.push(Ok(body.slice(w[0]..w[1])));
+                    }
+                }
+                Err(e) => out.push(Err(e)),
+            }
+        }
+        out
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+    }
+
+    /// One SSE event: optional `event:` line plus a data payload.
+    fn sse_event() -> impl Strategy<Value = (Option<String>, String)> {
+        (
+            proptest::option::of("[a-z_.]{1,12}"),
+            // Includes multi-byte text and JSON-ish punctuation, never a newline.
+            "[a-zA-Z0-9 {}\":,_\\-\u{4e2d}\u{6587}\u{1f600}é]{0,40}",
+        )
+    }
+
+    fn render(events: &[(Option<String>, String)], crlf: bool) -> String {
+        let nl = if crlf { "\r\n" } else { "\n" };
+        let mut out = String::new();
+        for (event, data) in events {
+            if let Some(event) = event {
+                out.push_str(&format!("event: {event}{nl}"));
+            }
+            out.push_str(&format!("data: {data}{nl}{nl}"));
+        }
+        out
+    }
+
+    fn blocks_of(chunks: &[&[u8]]) -> Vec<Vec<u8>> {
+        let mut buffer = SseBlockBuffer::new();
+        let mut blocks = Vec::new();
+        for chunk in chunks {
+            buffer.push(chunk);
+            while let Some(block) = buffer.next_block() {
+                blocks.push(block.to_vec());
+            }
+        }
+        blocks
+    }
+
+    /// A JSON value built from the vocabulary the usage parsers look for.
+    fn usage_json() -> impl Strategy<Value = Value> {
+        let key = prop::sample::select(vec![
+            "usage",
+            "input_tokens",
+            "output_tokens",
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+            "cache_creation",
+            "ephemeral_5m_input_tokens",
+            "type",
+            "message",
+            "response",
+            "usageMetadata",
+            "promptTokenCount",
+            "candidatesTokenCount",
+            "cachedContentTokenCount",
+            "thoughtsTokenCount",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "prompt_tokens_details",
+            "input_tokens_details",
+            "cached_tokens",
+            "delta",
+            "model",
+            "id",
+        ]);
+        let leaf = prop_oneof![
+            Just(Value::Null),
+            any::<bool>().prop_map(Value::Bool),
+            any::<i64>().prop_map(|n| json!(n)),
+            (0u64..100_000).prop_map(|n| json!(n)),
+            any::<f64>().prop_map(|f| json!(f)),
+            "[a-z_]{0,12}".prop_map(Value::String),
+            prop::sample::select(vec![
+                "message_start",
+                "message_delta",
+                "response.completed",
+                "response.done"
+            ])
+            .prop_map(|s| json!(s)),
+        ];
+        leaf.prop_recursive(4, 48, 6, move |inner| {
+            prop_oneof![
+                prop::collection::vec(inner.clone(), 0..4).prop_map(Value::Array),
+                prop::collection::vec((key.clone(), inner), 0..6).prop_map(|pairs| {
+                    Value::Object(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+                }),
+            ]
+        })
+    }
+
+    proptest! {
+        #![proptest_config(config(24))]
+
+        /// Any partition of a recorded upstream stream (including cuts inside UTF-8
+        /// sequences, CRLF pairs and `data:` lines) converts to exactly the same event
+        /// sequence as the single-chunk stream. This is the shape of the 6d316c0 bug
+        /// (streamed tool-call identity/order depended on chunking).
+        #[test]
+        fn stream_bridges_are_chunking_invariant(
+            pick in any::<Index>(),
+            cuts in prop::collection::vec(any::<Index>(), 0..24),
+        ) {
+            let fixtures = stream_fixtures();
+            let (bridge, text) = &fixtures[pick.index(fixtures.len())];
+            let rt = runtime();
+            let whole = rt.block_on(golden::convert_upstream(bridge, sse_fixture_chunks(text, 0)));
+            let split = rt.block_on(golden::convert_upstream(
+                bridge,
+                partition(sse_fixture_chunks(text, 0), &cuts),
+            ));
+            prop_assert_eq!(whole, split, "{} depends on chunk boundaries", bridge);
+        }
+
+        /// Malformed upstream data (non-JSON `data:` lines, stray fields, truncated
+        /// tails) never panics a stream bridge.
+        #[test]
+        fn stream_bridges_never_panic_on_garbage(
+            bridge_idx in 0usize..5,
+            lines in prop::collection::vec(
+                prop_oneof![
+                    "data: [ -~]{0,30}",
+                    "event: [a-z_.]{0,15}",
+                    Just("data: [DONE]".to_string()),
+                    Just("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0}]}}]}".to_string()),
+                    Just("data: {\"type\":\"content_block_delta\"}".to_string()),
+                    ": comment".prop_map(|s: String| s),
+                    Just(String::new()),
+                ],
+                0..20,
+            ),
+            cuts in prop::collection::vec(any::<Index>(), 0..8),
+        ) {
+            let bridge = ["anthropic_chat", "anthropic_responses", "anthropic_gemini", "codex_chat", "codex_anthropic"][bridge_idx];
+            let text = lines.join("\n");
+            let chunks = partition(vec![Ok(Bytes::from(text))], &cuts);
+            let _ = runtime().block_on(golden::convert_upstream(bridge, chunks));
+        }
+
+        #[test]
+        fn sse_block_buffer_is_partition_invariant(
+            events in prop::collection::vec(sse_event(), 0..8),
+            crlf in any::<bool>(),
+            cuts in prop::collection::vec(any::<Index>(), 0..16),
+        ) {
+            let text = render(&events, crlf);
+            let bytes = text.as_bytes();
+            let whole = blocks_of(&[bytes]);
+            prop_assert_eq!(whole.len(), events.len());
+
+            let mut points: Vec<usize> = cuts.iter().map(|c| c.index(bytes.len() + 1)).collect();
+            points.extend([0, bytes.len()]);
+            points.sort_unstable();
+            points.dedup();
+            let pieces: Vec<&[u8]> = points.windows(2).map(|w| &bytes[w[0]..w[1]]).collect();
+            prop_assert_eq!(blocks_of(&pieces), whole);
+        }
+
+        #[test]
+        fn sse_block_buffer_agrees_with_string_splitter(
+            events in prop::collection::vec(sse_event(), 0..8),
+            crlf in any::<bool>(),
+        ) {
+            let text = render(&events, crlf);
+            let mut buffer = text.clone();
+            let mut from_string = Vec::new();
+            while let Some(block) = take_sse_block(&mut buffer) {
+                from_string.push(block.into_bytes());
+            }
+            prop_assert_eq!(blocks_of(&[text.as_bytes()]), from_string);
+        }
+
+        /// Valid UTF-8 split at any byte offsets is reassembled exactly.
+        #[test]
+        fn append_utf8_safe_reassembles_any_split(
+            text in "\\PC{0,64}",
+            cuts in prop::collection::vec(any::<Index>(), 0..12),
+        ) {
+            let bytes = text.as_bytes();
+            let mut points: Vec<usize> = cuts.iter().map(|c| c.index(bytes.len() + 1)).collect();
+            points.extend([0, bytes.len()]);
+            points.sort_unstable();
+            points.dedup();
+            let mut out = String::new();
+            let mut rem = Vec::new();
+            for w in points.windows(2) {
+                append_utf8_safe(&mut out, &mut rem, &bytes[w[0]..w[1]]);
+                prop_assert!(rem.len() <= 3);
+            }
+            prop_assert!(rem.is_empty());
+            prop_assert_eq!(out, text);
+        }
+
+        /// Arbitrary bytes never panic and never leave more than one incomplete
+        /// sequence buffered.
+        #[test]
+        fn append_utf8_safe_tolerates_arbitrary_bytes(
+            chunks in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..16), 0..8),
+        ) {
+            let mut out = String::new();
+            let mut rem = Vec::new();
+            for chunk in &chunks {
+                append_utf8_safe(&mut out, &mut rem, chunk);
+                prop_assert!(rem.len() <= 3, "remainder {:?}", rem);
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(config(256))]
+
+        /// The usage parsers see provider payloads that change shape without notice;
+        /// arbitrary JSON must yield `Some`/`None`, never a panic.
+        #[test]
+        fn usage_parsers_never_panic(body in usage_json(), events in prop::collection::vec(usage_json(), 0..6)) {
+            let _ = TokenUsage::from_claude_response(&body);
+            let _ = TokenUsage::from_codex_response(&body);
+            let _ = TokenUsage::from_codex_response_auto(&body);
+            let _ = TokenUsage::from_openai_response(&body);
+            let _ = TokenUsage::from_gemini_response(&body);
+            let _ = TokenUsage::from_claude_stream_events(&events);
+            let _ = TokenUsage::from_codex_stream_events_auto(&events);
+            let _ = TokenUsage::from_openai_stream_events(&events);
+            let _ = TokenUsage::from_gemini_stream_chunks(&events);
+        }
+    }
+}
+
+/// TEST-27: replayable usage corpus. Every `tests/fixtures/usage/<provider>/<case>.input.{json,sse}`
+/// is parsed with that provider's parser and compared against `<case>.expected.json`
+/// (`UPDATE_GOLDEN=1` rewrites them; review the diff). The end-to-end test then logs every
+/// parsed record through `UsageLogger` into an in-memory database and checks the stored
+/// token totals and costs.
+pub(crate) mod usage_corpus {
+    use super::*;
+    use crate::database::Database;
+    use crate::proxy::usage::logger::UsageLogger;
+    use crate::proxy::usage::parser::TokenUsage;
+    use rust_decimal::Decimal;
+    use std::sync::Arc;
+
+    fn usage_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("usage")
+    }
+
+    /// `(provider, case, input path)` for every fixture, sorted.
+    fn cases() -> Vec<(String, String, PathBuf)> {
+        let mut out = Vec::new();
+        for provider in std::fs::read_dir(usage_root()).expect("usage fixtures") {
+            let provider = provider.unwrap().path();
+            let name = provider.file_name().unwrap().to_string_lossy().to_string();
+            for file in std::fs::read_dir(&provider).unwrap() {
+                let path = file.unwrap().path();
+                let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+                if let Some(case) = file_name
+                    .strip_suffix(".input.json")
+                    .or_else(|| file_name.strip_suffix(".input.sse"))
+                {
+                    out.push((name.clone(), case.to_string(), path));
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// The proxy `app_type` whose usage semantics each provider family uses.
+    fn app_type(provider: &str) -> &'static str {
+        match provider {
+            "claude" => "claude",
+            "codex" | "openai" => "codex",
+            "gemini" => "gemini",
+            other => panic!("unknown usage provider dir {other}"),
+        }
+    }
+
+    fn parse(provider: &str, path: &Path) -> Option<TokenUsage> {
+        let text = std::fs::read_to_string(path).unwrap();
+        let is_stream = path.extension().is_some_and(|e| e == "sse");
+        if is_stream {
+            // The parsers take the JSON `data:` payloads; `[DONE]` is dropped.
+            let events: Vec<Value> = parse_sse_events(&text)
+                .into_iter()
+                .filter_map(|e| e.get("data").filter(|d| d.is_object()).cloned())
+                .collect();
+            match provider {
+                "claude" => TokenUsage::from_claude_stream_events(&events),
+                "codex" => TokenUsage::from_codex_stream_events_auto(&events),
+                "openai" => TokenUsage::from_openai_stream_events(&events),
+                "gemini" => TokenUsage::from_gemini_stream_chunks(&events),
+                other => panic!("no stream parser for {other}"),
+            }
+        } else {
+            let body: Value = serde_json::from_str(&text).unwrap();
+            match provider {
+                "claude" => TokenUsage::from_claude_response(&body),
+                "codex" => TokenUsage::from_codex_response_auto(&body),
+                "openai" => TokenUsage::from_openai_response(&body),
+                "gemini" => TokenUsage::from_gemini_response(&body),
+                other => panic!("no parser for {other}"),
+            }
+        }
+    }
+
+    fn as_json(usage: &Option<TokenUsage>) -> Value {
+        match usage {
+            None => Value::Null,
+            Some(u) => json!({
+                "input_tokens": u.input_tokens,
+                "output_tokens": u.output_tokens,
+                "cache_read_tokens": u.cache_read_tokens,
+                "cache_creation_tokens": u.cache_creation_tokens,
+                "model": u.model,
+                "message_id": u.message_id,
+            }),
+        }
+    }
+
+    #[test]
+    fn usage_corpus_matches_expected_records() {
+        let cases = cases();
+        assert!(cases.len() >= 25, "usage corpus has {} cases", cases.len());
+        for (provider, case, input) in &cases {
+            let actual = json!({ "usage": as_json(&parse(provider, input)) });
+            let expected = input
+                .parent()
+                .unwrap()
+                .join(format!("{case}.expected.json"));
+            assert_golden(&expected, &actual, false);
+        }
+    }
+
+    /// Raw payload -> parser -> calculator -> logger -> SQLite: the stored totals are
+    /// exactly the sum of the parsed records, and costs follow each app's input-token
+    /// semantics (cache tokens are not double-billed for Codex/Gemini totals).
+    #[test]
+    fn usage_corpus_replays_into_request_log_totals() {
+        let db = Arc::new(Database::memory().expect("memory db"));
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT OR REPLACE INTO model_pricing
+                   (model_id, display_name, input_cost_per_million, output_cost_per_million,
+                    cache_read_cost_per_million, cache_creation_cost_per_million)
+                 VALUES ('corpus-model', 'Corpus', '1', '2', '0.5', '4')",
+                [],
+            )
+            .unwrap();
+        }
+        let logger = UsageLogger::new(&db);
+        let mut expected = [0u64; 4];
+        let mut logged = 0;
+        for (provider, case, input) in cases() {
+            let Some(usage) = parse(&provider, &input) else {
+                continue;
+            };
+            if !usage.has_billable_tokens() {
+                continue;
+            }
+            expected[0] += usage.input_tokens as u64;
+            expected[1] += usage.output_tokens as u64;
+            expected[2] += usage.cache_read_tokens as u64;
+            expected[3] += usage.cache_creation_tokens as u64;
+            logger
+                .log_with_calculation(
+                    format!("corpus-{provider}-{case}"),
+                    "corpus-provider".into(),
+                    app_type(&provider).into(),
+                    "corpus-model".into(),
+                    "corpus-model".into(),
+                    "corpus-model".into(),
+                    usage,
+                    Decimal::ONE,
+                    10,
+                    None,
+                    200,
+                    None,
+                    None,
+                    input.extension().is_some_and(|e| e == "sse"),
+                )
+                .unwrap();
+            logged += 1;
+        }
+        assert!(logged >= 15, "only {logged} billable corpus records");
+        db.flush_usage_writes().unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let (count, input, output, cache_read, cache_creation): (i64, i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), SUM(input_tokens), SUM(output_tokens),
+                        SUM(cache_read_tokens), SUM(cache_creation_tokens)
+                 FROM proxy_request_logs WHERE provider_id = 'corpus-provider'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(count, logged as i64);
+        assert_eq!(
+            [
+                input as u64,
+                output as u64,
+                cache_read as u64,
+                cache_creation as u64
+            ],
+            expected
+        );
+
+        // Every priced row: total = input + output + cache parts, and never negative.
+        let mut stmt = conn
+            .prepare(
+                "SELECT request_id, input_cost_usd, output_cost_usd, cache_read_cost_usd,
+                        cache_creation_cost_usd, total_cost_usd
+                 FROM proxy_request_logs WHERE provider_id = 'corpus-provider'",
+            )
+            .unwrap();
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    [
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ],
+                ))
+            })
+            .unwrap();
+        for row in rows {
+            let (id, parts) = row.unwrap();
+            let d: Vec<Decimal> = parts.iter().map(|p| p.parse().unwrap()).collect();
+            assert!(d.iter().all(|x| *x >= Decimal::ZERO), "{id}: {parts:?}");
+            assert_eq!(d[0] + d[1] + d[2] + d[3], d[4], "{id}: {parts:?}");
+        }
     }
 }

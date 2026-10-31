@@ -1,0 +1,10 @@
+{
+  "usage": {
+    "input_tokens": 400,
+    "output_tokens": 60,
+    "cache_read_tokens": 100,
+    "cache_creation_tokens": 0,
+    "model": "hunyuan-hy3",
+    "message_id": null
+  }
+}

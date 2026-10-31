@@ -1,0 +1,10 @@
+{
+  "usage": {
+    "input_tokens": 300,
+    "output_tokens": 40,
+    "cache_read_tokens": 100,
+    "cache_creation_tokens": 0,
+    "model": "glm-4.6",
+    "message_id": "msg_s3"
+  }
+}

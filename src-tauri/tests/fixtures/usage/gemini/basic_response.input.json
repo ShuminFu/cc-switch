@@ -1,0 +1,19 @@
+{
+  "modelVersion": "gemini-2.5-pro",
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "hi"
+          }
+        ]
+      }
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 100,
+    "candidatesTokenCount": 20,
+    "totalTokenCount": 120
+  }
+}

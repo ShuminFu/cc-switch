@@ -1,0 +1,9 @@
+event: message_start
+data: {"type": "message_start", "message": {"id": "msg_s3", "model": "glm-4.6", "usage": {}}}
+
+event: message_delta
+data: {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"input_tokens": 300, "output_tokens": 40, "cache_read_input_tokens": 100}}
+
+event: message_stop
+data: {"type": "message_stop"}
+
