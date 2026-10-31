@@ -24,6 +24,35 @@ concurrency:
 #   Rust  -> rust-toolchain.toml
 
 jobs:
+  # TEST-23: warn (not fail) when a `fix` PR touches no test file.
+  regression-test-hint:
+    name: Regression test hint
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Warn on fix PRs without tests
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          case "$PR_TITLE" in
+            fix*|Fix*) ;;
+            *) echo "Not a fix PR; nothing to check."; exit 0 ;;
+          esac
+          changed=$(git diff --name-only "$BASE_SHA"...HEAD)
+          if echo "$changed" | grep -Eq '(^tests/|^e2e/|^src-tauri/tests/|\.test\.tsx?$|/tests?\.rs$|_tests?\.rs$)' \
+            || git diff "$BASE_SHA"...HEAD -- 'src-tauri/src/**.rs' | grep -Eq '^\+\s*#\[(tokio::)?test'; then
+            echo "Fix PR includes test changes."
+          else
+            echo "::warning title=No regression test::This fix PR changes no test file. Add a regression test or explain why in the PR description (see the PR template)."
+          fi
+
   frontend:
     name: Frontend Checks
     runs-on: ubuntu-latest
@@ -80,8 +109,18 @@ jobs:
       - name: Check i18n locale integrity
         run: pnpm i18n:check
 
+      # TEST-22: JUnit output for per-test results in the PR checks.
       - name: Unit tests (with coverage report)
-        run: pnpm test:coverage
+        run: pnpm test:coverage --reporter=default --reporter=junit --outputFile.junit=reports/vitest-junit.xml
+
+      - name: Upload frontend test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-junit
+          path: reports/vitest-junit.xml
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload coverage report
         if: always()
@@ -89,6 +128,25 @@ jobs:
         with:
           name: frontend-coverage
           path: coverage/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # TEST-17: renderer journeys in Chromium against a mocked Tauri IPC.
+      # Playwright is not a project dependency; install the pinned CLI here.
+      - name: Install Playwright (Chromium)
+        run: |
+          npm i -g playwright@1.63.0
+          npx --yes playwright@1.63.0 install --with-deps chromium
+
+      - name: E2E journeys (Playwright)
+        run: NODE_PATH="$(npm root -g)" pnpm test:e2e
+
+      - name: Upload E2E traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-traces
+          path: e2e/artifacts/
           if-no-files-found: ignore
           retention-days: 14
 
@@ -154,14 +212,30 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
 
+      # TEST-39: lint test code too (inline #[cfg(test)] modules and tests/).
       - name: Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
       - name: Check generated IPC bindings are up to date (src/lib/bindings.ts)
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib commands::bindings
 
+      # TEST-22: nextest isolates every test in its own process, retries
+      # failures (a pass on retry is reported as FLAKY) and writes JUnit.
+      # Profiles live in src-tauri/.config/nextest.toml.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Run tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo nextest run --manifest-path src-tauri/Cargo.toml --locked --profile ci
+
+      - name: Upload backend test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-junit-${{ matrix.os }}
+          path: src-tauri/target/nextest/ci/junit.xml
+          if-no-files-found: ignore
+          retention-days: 14
 
   supply-chain:
     name: Supply Chain (licenses, advisories)

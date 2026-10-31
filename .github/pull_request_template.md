@@ -19,6 +19,7 @@ Fixes #
 
 ## Checklist / 检查清单
 
+- [ ] Regression test added for every fix, or N/A because: ___ / 每个修复都附带回归测试，或说明不适用的原因
 - [ ] `pnpm typecheck` passes / 通过 TypeScript 类型检查
 - [ ] `pnpm format:check` passes / 通过代码格式检查
 - [ ] `cargo clippy` passes (if Rust code changed) / 通过 Clippy 检查（如修改了 Rust 代码）
