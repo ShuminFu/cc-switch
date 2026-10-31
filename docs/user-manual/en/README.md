@@ -42,7 +42,8 @@ CC Switch User Manual
     ├── 5.1 Configuration Files
     ├── 5.2 FAQ
     ├── 5.3 Deep Link Protocol
-    └── 5.4 Environment Variable Conflicts
+    ├── 5.4 Environment Variable Conflicts
+    └── 5.5 Command Line (ccs)
 ```
 
 ## File List
@@ -98,6 +99,7 @@ CC Switch User Manual
 | [5.2-questions.md](./5-faq/5.2-questions.md) | Frequently asked questions |
 | [5.3-deeplink.md](./5-faq/5.3-deeplink.md) | Deep link protocol, generation and usage |
 | [5.4-env-conflict.md](./5-faq/5.4-env-conflict.md) | Environment variable conflict detection and resolution |
+| [5.5-command-line.md](./5-faq/5.5-command-line.md) | `ccs` command-line companion and headless proxy mode |
 
 ## Quick Links
 
