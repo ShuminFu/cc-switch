@@ -1106,6 +1106,23 @@ pub fn set_provider(
     let mut normalized = provider_config;
     sanitize_hermes_provider_keys(&mut normalized);
 
+    // `null` in the payload is an explicit delete (CFG-18): the key is dropped
+    // from the entry and not carried over from disk below.
+    let deleted_keys: Vec<String> = normalized
+        .as_object_mut()
+        .map(|obj| {
+            let keys: Vec<String> = obj
+                .iter()
+                .filter(|(_, v)| v.is_null())
+                .map(|(k, _)| k.clone())
+                .collect();
+            for key in &keys {
+                obj.remove(key);
+            }
+            keys
+        })
+        .unwrap_or_default();
+
     // Normalize `models` from UI array to Hermes YAML dict before serializing.
     normalize_provider_models_for_write(&mut normalized);
 
@@ -1146,7 +1163,12 @@ pub fn set_provider(
             (existing.as_mapping(), &mut yaml_val)
         {
             for (k, v) in existing_map {
-                new_map.entry(k.clone()).or_insert_with(|| v.clone());
+                let deleted = k
+                    .as_str()
+                    .is_some_and(|key| deleted_keys.iter().any(|d| d == key));
+                if !deleted {
+                    new_map.entry(k.clone()).or_insert_with(|| v.clone());
+                }
             }
         }
         *existing = yaml_val;
@@ -2078,6 +2100,38 @@ custom_providers:
             assert_eq!(provider["api_key"], "sk-new");
             assert_eq!(provider["request_timeout_seconds"], 300);
             assert_eq!(provider["key_env"], "ACME_API_KEY");
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn set_provider_null_deletes_key_while_omitted_keys_survive() {
+        with_test_home(|| {
+            let yaml = "\
+custom_providers:
+  - name: acme
+    base_url: https://old.example.com
+    api_key: sk-old
+    rate_limit_delay: 2
+    headers:
+      X-Org: team
+";
+            let config_path = get_hermes_config_path();
+            fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+            fs::write(&config_path, yaml).unwrap();
+
+            let update = serde_json::json!({
+                "base_url": "https://old.example.com",
+                "api_key": "sk-old",
+                "headers": null
+            });
+            set_provider("acme", update).unwrap();
+
+            let provider = get_provider("acme").unwrap().unwrap();
+            assert!(provider.get("headers").is_none(), "{provider:?}");
+            assert_eq!(provider["rate_limit_delay"], 2);
+            let raw = fs::read_to_string(&config_path).unwrap();
+            assert!(!raw.contains("headers"), "{raw}");
         });
     }
 
