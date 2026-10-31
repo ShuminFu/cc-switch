@@ -46,7 +46,9 @@ describe("notification settings defaults", () => {
 describe("NotificationSettings", () => {
   it("renders defaults and saves the full toggle object", () => {
     const onChange = vi.fn();
-    render(<NotificationSettings settings={baseSettings} onChange={onChange} />);
+    render(
+      <NotificationSettings settings={baseSettings} onChange={onChange} />,
+    );
 
     const failover = screen.getByRole("switch", { name: "Failover switches" });
     const sync = screen.getByRole("switch", { name: "Sync errors" });
@@ -61,7 +63,9 @@ describe("NotificationSettings", () => {
 
   it("enables health probing with the default interval", () => {
     const onChange = vi.fn();
-    render(<NotificationSettings settings={baseSettings} onChange={onChange} />);
+    render(
+      <NotificationSettings settings={baseSettings} onChange={onChange} />,
+    );
 
     expect(screen.queryByText("Probe interval")).toBeNull();
     fireEvent.click(

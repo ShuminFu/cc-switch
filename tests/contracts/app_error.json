@@ -1,0 +1,54 @@
+{
+  "config": {
+    "code": "errors.config",
+    "message": "配置错误: bad value",
+    "params": {
+      "detail": "bad value"
+    }
+  },
+  "invalidInput": {
+    "code": "errors.invalidInput",
+    "message": "无效输入: name is empty",
+    "params": {
+      "detail": "name is empty"
+    }
+  },
+  "message": {
+    "code": "errors.message",
+    "message": "Provider not found",
+    "params": {
+      "detail": "Provider not found"
+    }
+  },
+  "httpStatus": {
+    "code": "errors.httpStatus",
+    "message": "HTTP 429: rate limited",
+    "params": {
+      "body": "rate limited",
+      "status": "429"
+    }
+  },
+  "localized": {
+    "code": "sync.conflict.remote_changed",
+    "message": "远端数据自上次同步后已被其他设备更新 (the remote data changed since the last sync)",
+    "params": {
+      "en": "the remote data changed since the last sync",
+      "zh": "远端数据自上次同步后已被其他设备更新"
+    }
+  },
+  "database": {
+    "code": "errors.database",
+    "message": "数据库错误: database is locked",
+    "params": {
+      "detail": "database is locked"
+    }
+  },
+  "allProvidersCircuitOpen": {
+    "code": "errors.allProvidersCircuitOpen",
+    "message": "所有供应商已熔断，无可用渠道"
+  },
+  "noProvidersConfigured": {
+    "code": "errors.noProvidersConfigured",
+    "message": "未配置供应商"
+  }
+}

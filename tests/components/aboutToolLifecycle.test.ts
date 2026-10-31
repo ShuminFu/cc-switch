@@ -94,7 +94,12 @@ describe("summarizeRun", () => {
 
     const notRunnable = summarizeRun(
       [
-        { toolName: "codex", detail: "x", soft: true, kind: "versionUnchanged" },
+        {
+          toolName: "codex",
+          detail: "x",
+          soft: true,
+          kind: "versionUnchanged",
+        },
         { toolName: "openclaw", detail: "y", soft: true, kind: "notRunnable" },
       ],
       0,

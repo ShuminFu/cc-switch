@@ -1,0 +1,10 @@
+{
+  "usage": {
+    "input_tokens": 700,
+    "output_tokens": 90,
+    "cache_read_tokens": 512,
+    "cache_creation_tokens": 0,
+    "model": "gpt-5-codex",
+    "message_id": null
+  }
+}

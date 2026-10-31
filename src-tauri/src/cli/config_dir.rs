@@ -50,9 +50,8 @@ impl ConfigDirSource {
 /// When `CC_SWITCH_TEST_HOME` is set (tests), it is derived from that home so a
 /// test never reads the real user's store file.
 pub fn gui_store_path() -> Option<PathBuf> {
-    let data_dir = match std::env::var("CC_SWITCH_TEST_HOME") {
-        Ok(home) if !home.trim().is_empty() => {
-            let home = PathBuf::from(home.trim());
+    let data_dir = match crate::config::test_home_override() {
+        Some(home) => {
             if cfg!(target_os = "macos") {
                 home.join("Library").join("Application Support")
             } else if cfg!(windows) {
@@ -61,7 +60,7 @@ pub fn gui_store_path() -> Option<PathBuf> {
                 home.join(".local").join("share")
             }
         }
-        _ => dirs::data_dir()?,
+        None => dirs::data_dir()?,
     };
     Some(data_dir.join(APP_IDENTIFIER).join(STORE_FILE_NAME))
 }

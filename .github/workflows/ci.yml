@@ -31,6 +31,36 @@ concurrency:
 #   Rust  -> rust-toolchain.toml
 
 jobs:
+  # TEST-23: warn (not fail) when a `fix` PR touches no test file.
+  regression-test-hint:
+    name: Regression test hint
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Warn on fix PRs without tests
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          case "$PR_TITLE" in
+            fix*|Fix*) ;;
+            *) echo "Not a fix PR; nothing to check."; exit 0 ;;
+          esac
+          changed=$(git diff --name-only "$BASE_SHA"...HEAD)
+          if echo "$changed" | grep -Eq '(^tests/|^e2e/|^src-tauri/tests/|\.test\.tsx?$|/tests?\.rs$|_tests?\.rs$)' \
+            || git diff "$BASE_SHA"...HEAD -- 'src-tauri/src/**.rs' | grep -Eq '^\+\s*#\[(tokio::)?test'; then
+            echo "Fix PR includes test changes."
+          else
+            echo "::warning title=No regression test::This fix PR changes no test file. Add a regression test or explain why in the PR description (see the PR template)."
+          fi
+
   frontend:
     name: Frontend Checks
     runs-on: ubuntu-latest
@@ -105,6 +135,25 @@ jobs:
           path: |
             coverage/
             reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # TEST-17: renderer journeys in Chromium against a mocked Tauri IPC.
+      # Playwright is not a project dependency; install the pinned CLI here.
+      - name: Install Playwright (Chromium)
+        run: |
+          npm i -g playwright@1.63.0
+          npx --yes playwright@1.63.0 install --with-deps chromium
+
+      - name: E2E journeys (Playwright)
+        run: NODE_PATH="$(npm root -g)" pnpm test:e2e
+
+      - name: Upload E2E traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-traces
+          path: e2e/artifacts/
           if-no-files-found: ignore
           retention-days: 14
 

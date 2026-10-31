@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useProviderActions } from "@/hooks/useProviderActions";
 import type { Provider, UsageScript } from "@/types";
+import { makeProvider } from "../factories";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -100,13 +101,15 @@ function createWrapper() {
 }
 
 function createProvider(overrides: Partial<Provider> = {}): Provider {
-  return {
-    id: "provider-1",
-    name: "Test Provider",
-    settingsConfig: {},
-    category: "official",
-    ...overrides,
-  };
+  return makeProvider(
+    {
+      id: "provider-1",
+      name: "Test Provider",
+      category: "official",
+      ...overrides,
+    },
+    { emptyConfig: true },
+  );
 }
 
 beforeEach(() => {
@@ -582,7 +585,9 @@ describe("useProviderActions", () => {
     });
 
     expect(toastErrorMock).toHaveBeenCalledTimes(1);
-    expect(toastErrorMock.mock.calls[0]?.[0]).toBe("Failed to save usage query configuration");
+    expect(toastErrorMock.mock.calls[0]?.[0]).toBe(
+      "Failed to save usage query configuration",
+    );
   });
 
   it("propagates addProvider errors to caller", async () => {

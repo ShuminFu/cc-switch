@@ -1,0 +1,70 @@
+name: Nightly
+
+# TEST-22: slow and network-dependent tests that do not belong on every PR.
+#
+# - property tests with a high case count (PROPTEST_CASES),
+# - the `#[ignore]` live S3 round-trips, when the S3_TEST_* secrets exist,
+# - the full Rust suite (no retries), so flaky tests surface as failures.
+
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-nightly:
+    name: Backend (proptest x2000, no retries)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust (from rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Install Linux system deps
+        uses: ./.github/actions/linux-deps
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: nightly-${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: nightly-${{ runner.os }}-cargo-
+
+      - name: Prepare dist
+        run: mkdir -p dist
+
+      - name: Full suite, high proptest case count
+        env:
+          PROPTEST_CASES: "2000"
+        # Plain `cargo test`, as in ci.yml: the `#[serial]` tests rely on
+        # in-process serialisation, so nextest is not used yet.
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --no-fail-fast
+
+      - name: Live S3 round-trip (ignored tests)
+        env:
+          S3_TEST_AK: ${{ secrets.S3_TEST_AK }}
+          S3_TEST_SK: ${{ secrets.S3_TEST_SK }}
+          S3_TEST_REGION: ${{ secrets.S3_TEST_REGION }}
+          S3_TEST_BUCKET: ${{ secrets.S3_TEST_BUCKET }}
+          S3_TEST_ENDPOINT: ${{ secrets.S3_TEST_ENDPOINT }}
+        shell: bash
+        run: |
+          if [ -z "$S3_TEST_ENDPOINT" ]; then
+            echo "::notice::S3_TEST_* secrets not configured; skipping live S3 tests"
+            exit 0
+          fi
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib services::s3 -- --ignored

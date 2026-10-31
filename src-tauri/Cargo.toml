@@ -149,6 +149,10 @@ panic = "unwind"
 strip = "debuginfo"
 
 [dev-dependencies]
+# TEST-37: integration tests (and the binaries they spawn) build the crate with
+# `test-hooks`, which enables the CC_SWITCH_TEST_HOME override and the
+# `*_test_hook` command seams. Release builds never see that feature.
+cc-switch = { path = ".", features = ["test-hooks"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
 serial_test = "3"
 tempfile = "3"

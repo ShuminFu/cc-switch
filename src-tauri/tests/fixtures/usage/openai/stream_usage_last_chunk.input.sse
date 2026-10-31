@@ -1,0 +1,8 @@
+data: {"id": "c1", "object": "chat.completion.chunk", "model": "qwen3-coder", "choices": [{"index": 0, "delta": {"content": "hi"}}]}
+
+data: {"id": "c1", "object": "chat.completion.chunk", "model": "qwen3-coder", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+
+data: {"id": "c1", "object": "chat.completion.chunk", "model": "qwen3-coder", "choices": [], "usage": {"prompt_tokens": 64, "completion_tokens": 12, "total_tokens": 76}}
+
+data: [DONE]
+

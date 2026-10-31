@@ -977,9 +977,16 @@ fn create_backup_retains_only_latest_entries() {
     for idx in 0..12 {
         let manual = backups_dir.join(format!("manual_{idx:02}.json"));
         fs::write(&manual, format!("{{\"idx\":{idx}}}")).expect("seed manual backup");
+        // TEST-10: backdate the seeds instead of sleeping so the new backup is
+        // strictly the newest by mtime (retention sorts by mtime).
+        let seeded_at =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(3600 - idx as u64);
+        fs::File::options()
+            .write(true)
+            .open(&manual)
+            .and_then(|f| f.set_modified(seeded_at))
+            .expect("backdate manual backup");
     }
-
-    std::thread::sleep(std::time::Duration::from_secs(1));
 
     let latest_backup_id =
         ConfigService::create_backup(&config_path).expect("create backup with cleanup");

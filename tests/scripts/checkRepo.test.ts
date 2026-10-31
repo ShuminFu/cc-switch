@@ -48,8 +48,10 @@ describe("scripts/check-repo.mjs", () => {
   });
 
   it("ignores headings inside code fences when comparing README structure", () => {
-    expect(evalWith(`m.headingLevels("# A\\n## B\\n\`\`\`\\n# not a heading\\n\`\`\`\\n### C")`)).toEqual([
-      1, 2, 3,
-    ]);
+    expect(
+      evalWith(
+        `m.headingLevels("# A\\n## B\\n\`\`\`\\n# not a heading\\n\`\`\`\\n### C")`,
+      ),
+    ).toEqual([1, 2, 3]);
   });
 });

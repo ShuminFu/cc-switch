@@ -1,0 +1,147 @@
+TrayModel {
+    texts: TrayTexts {
+        show_main: "メインウィンドウを開く",
+        open_website: "公式サイトを開く",
+        no_providers_label: "(プロバイダーなし)",
+        lightweight_mode: "軽量モード",
+        quit: "終了",
+        _auto_label: "自動 (フェイルオーバー)",
+        projects_label: "プロジェクト",
+        no_project_label: "プロジェクトを使用しない",
+    },
+    sections: [
+        TraySectionModel {
+            section: 0,
+            body: Providers {
+                label: "Claude · Relay B",
+                items: [
+                    TrayProviderItem {
+                        id: "official",
+                        label: "Claude Official",
+                        enabled: true,
+                        checked: false,
+                    },
+                    TrayProviderItem {
+                        id: "relay",
+                        label: "Relay B",
+                        enabled: true,
+                        checked: true,
+                    },
+                ],
+            },
+        },
+        TraySectionModel {
+            section: 1,
+            body: Providers {
+                label: "Codex",
+                items: [
+                    TrayProviderItem {
+                        id: "codex-a",
+                        label: "Codex A",
+                        enabled: true,
+                        checked: false,
+                    },
+                ],
+            },
+        },
+        TraySectionModel {
+            section: 2,
+            body: Empty {
+                label: "Gemini (プロバイダーなし)",
+            },
+        },
+        TraySectionModel {
+            section: 3,
+            body: Empty {
+                label: "Grok Build (プロバイダーなし)",
+            },
+        },
+    ],
+    profile_scopes: [
+        TrayProfileScopeModel {
+            scope: "claude",
+            label: "Claude Code",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: true,
+                },
+            ],
+            none_checked: false,
+        },
+        TrayProfileScopeModel {
+            scope: "claude-desktop",
+            label: "Claude Desktop",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "codex",
+            label: "Codex",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "gemini",
+            label: "Gemini",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "grokbuild",
+            label: "Grok Build",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "opencode",
+            label: "OpenCode",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "openclaw",
+            label: "OpenClaw",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+    ],
+    lightweight: false,
+}

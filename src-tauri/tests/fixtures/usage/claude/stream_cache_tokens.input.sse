@@ -1,0 +1,9 @@
+event: message_start
+data: {"type": "message_start", "message": {"id": "msg_s2", "model": "claude-opus-4-1", "usage": {"input_tokens": 4, "output_tokens": 1, "cache_read_input_tokens": 8000, "cache_creation_input_tokens": 512}}}
+
+event: message_delta
+data: {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 77}}
+
+event: message_stop
+data: {"type": "message_stop"}
+

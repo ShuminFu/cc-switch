@@ -48,7 +48,8 @@ pnpm dev
 | `pnpm test:unit` | Run unit tests (Vitest, `tests/`) |
 | `pnpm test:unit:watch` | Run unit tests in watch mode |
 | `pnpm lint` | ESLint check |
-| `pnpm format` | Format code (Prettier: `src/**`, `scripts/**`, `.github/**`) |
+| `pnpm format` | Format code (Prettier: `src/**`, `tests/**`, `scripts/**`, `.github/**`) |
+| `pnpm test:e2e` | Renderer journeys in Chromium (Playwright, mocked IPC) |
 | `pnpm format:check` | Check code formatting |
 | `pnpm i18n:check` | Check the four locale files are complete and consistent |
 | `pnpm check:repo` | Repository checks: labeler globs, release asset names in docs, README parity, image sizes |
@@ -67,6 +68,8 @@ cargo test --locked                      # Run tests
 ```
 
 `pnpm build` and `cargo` builds need a `dist/` directory at the repo root; run `pnpm build:renderer` (or `mkdir -p dist`) first if `cargo test` complains it is missing.
+
+See [tests/README.md](tests/README.md) for where tests go, the MSW-first mocking policy, factories and Rust test isolation.
 
 ## Code Style
 

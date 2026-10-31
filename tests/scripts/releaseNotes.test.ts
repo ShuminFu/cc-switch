@@ -18,7 +18,8 @@ function run(args: string[]) {
 }
 
 afterEach(() => {
-  for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  for (const d of dirs.splice(0))
+    fs.rmSync(d, { recursive: true, force: true });
 });
 
 describe("scripts/release-notes.mjs", () => {
@@ -57,7 +58,13 @@ describe("scripts/release-notes.mjs", () => {
 
   it("falls back to a generic text with --allow-missing", () => {
     const out = path.join(tmp(), "notes.txt");
-    const res = run(["--tag", "v0.0.1", "--allow-missing", "--updater-notes", out]);
+    const res = run([
+      "--tag",
+      "v0.0.1",
+      "--allow-missing",
+      "--updater-notes",
+      out,
+    ]);
     expect(res.status).toBe(0);
     expect(fs.readFileSync(out, "utf8")).toContain("CC Switch v0.0.1");
   });

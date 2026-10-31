@@ -188,6 +188,18 @@ jobs:
       - name: Setup Node.js, pnpm and frontend deps
         uses: ./.github/actions/setup-pnpm
 
+      # TEST-41: the `verify` job (ci.yml) never runs on ARM64, so the ARM64
+      # release runners execute the Rust and frontend suites themselves before
+      # anything is built, signed or uploaded.
+      - name: Unit tests on ARM64 release runner
+        if: matrix.arch == 'arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm test:unit
+          mkdir -p dist
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+
       # Only booleans go to GITHUB_ENV here; no secret material does.
       - name: Resolve signing configuration
         shell: bash

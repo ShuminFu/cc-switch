@@ -875,21 +875,7 @@ fn settings_store() -> &'static RwLock<AppSettings> {
 }
 
 fn resolve_override_path(raw: &str) -> PathBuf {
-    if raw == "~" {
-        if let Some(home) = dirs::home_dir() {
-            return home;
-        }
-    } else if let Some(stripped) = raw.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    } else if let Some(stripped) = raw.strip_prefix("~\\") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    }
-
-    PathBuf::from(raw)
+    crate::config::expand_tilde(raw)
 }
 
 pub fn get_settings() -> AppSettings {
@@ -1088,6 +1074,9 @@ pub fn reload_settings() -> Result<(), AppError> {
 }
 
 pub fn get_claude_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .claude_config_dir
@@ -1096,6 +1085,9 @@ pub fn get_claude_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_codex_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .codex_config_dir
@@ -1104,6 +1096,9 @@ pub fn get_codex_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_gemini_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .gemini_config_dir
@@ -1112,6 +1107,9 @@ pub fn get_gemini_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_grok_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .grok_config_dir
@@ -1120,6 +1118,9 @@ pub fn get_grok_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_opencode_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .opencode_config_dir
@@ -1128,6 +1129,9 @@ pub fn get_opencode_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_openclaw_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .openclaw_config_dir
@@ -1136,6 +1140,9 @@ pub fn get_openclaw_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_hermes_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .hermes_config_dir

@@ -1,0 +1,10 @@
+{
+  "usage": {
+    "input_tokens": 120,
+    "output_tokens": 45,
+    "cache_read_tokens": 0,
+    "cache_creation_tokens": 0,
+    "model": "claude-sonnet-4-5",
+    "message_id": "msg_basic"
+  }
+}

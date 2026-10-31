@@ -1,0 +1,10 @@
+{
+  "usage": {
+    "input_tokens": 4,
+    "output_tokens": 77,
+    "cache_read_tokens": 8000,
+    "cache_creation_tokens": 512,
+    "model": "claude-opus-4-1",
+    "message_id": "msg_s2"
+  }
+}

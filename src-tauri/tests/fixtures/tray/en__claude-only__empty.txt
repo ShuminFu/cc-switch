@@ -1,0 +1,22 @@
+TrayModel {
+    texts: TrayTexts {
+        show_main: "Open main window",
+        open_website: "Open Official Website",
+        no_providers_label: "(no providers)",
+        lightweight_mode: "Lightweight Mode",
+        quit: "Quit",
+        _auto_label: "Auto (Failover)",
+        projects_label: "Projects",
+        no_project_label: "No project",
+    },
+    sections: [
+        TraySectionModel {
+            section: 0,
+            body: Empty {
+                label: "Claude (no providers)",
+            },
+        },
+    ],
+    profile_scopes: [],
+    lightweight: false,
+}

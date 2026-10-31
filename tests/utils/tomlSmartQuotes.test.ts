@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+// (uses localStorage / the DOM; the rest of this folder runs under node, TEST-24)
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { parse as parseToml } from "smol-toml";

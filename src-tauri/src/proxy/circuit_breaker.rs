@@ -1012,4 +1012,151 @@ mod tests {
         assert_eq!(split_breaker_key("claude:"), None);
         assert_eq!(split_breaker_key("nokey"), None);
     }
+
+    // ---- TEST-19: deterministic state-machine transitions ------------------
+    // The Open → HalfOpen timeout is driven by backdating `last_opened_at`
+    // instead of sleeping, so these run in microseconds and never flake.
+
+    async fn backdate_open(breaker: &CircuitBreaker, secs: u64) {
+        let at = Instant::now()
+            .checked_sub(Duration::from_secs(secs))
+            .expect("monotonic clock far enough from boot");
+        *breaker.last_opened_at.write().await = Some(at);
+    }
+
+    fn threshold_config(failures: u32, timeout_seconds: u64) -> CircuitBreakerConfig {
+        CircuitBreakerConfig {
+            failure_threshold: failures,
+            success_threshold: 1,
+            timeout_seconds,
+            error_rate_threshold: 1.1, // rate never trips; consecutive count does
+            min_requests: 1000,
+        }
+    }
+
+    #[tokio::test]
+    async fn open_breaker_rejects_until_timeout_elapses() {
+        let breaker = CircuitBreaker::new(threshold_config(1, 60));
+        breaker.record_failure(false).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
+
+        backdate_open(&breaker, 59).await;
+        assert!(!breaker.allow_request().await.allowed);
+        assert!(!breaker.is_available().await);
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
+    }
+
+    #[tokio::test]
+    async fn open_breaker_half_opens_after_timeout_and_hands_out_one_probe() {
+        let breaker = CircuitBreaker::new(threshold_config(1, 60));
+        breaker.record_failure(false).await;
+        backdate_open(&breaker, 61).await;
+
+        let first = breaker.allow_request().await;
+        assert!(first.allowed && first.used_half_open_permit, "{first:?}");
+        assert_eq!(breaker.get_state().await, CircuitState::HalfOpen);
+        let second = breaker.allow_request().await;
+        assert!(!second.allowed, "only one probe in flight: {second:?}");
+    }
+
+    #[tokio::test]
+    async fn is_available_also_moves_open_to_half_open_after_timeout() {
+        let breaker = CircuitBreaker::new(threshold_config(1, 30));
+        breaker.record_failure(false).await;
+        backdate_open(&breaker, 31).await;
+        assert!(breaker.is_available().await);
+        assert_eq!(breaker.get_state().await, CircuitState::HalfOpen);
+    }
+
+    #[tokio::test]
+    async fn zero_timeout_half_opens_immediately() {
+        let breaker = CircuitBreaker::new(threshold_config(1, 0));
+        breaker.record_failure(false).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
+        assert!(breaker.allow_request().await.allowed);
+        assert_eq!(breaker.get_state().await, CircuitState::HalfOpen);
+    }
+
+    #[tokio::test]
+    async fn failed_probe_reopens_with_a_fresh_timeout() {
+        let breaker = CircuitBreaker::new(threshold_config(1, 60));
+        breaker.record_failure(false).await;
+        backdate_open(&breaker, 120).await;
+        let probe = breaker.allow_request().await;
+        assert!(probe.used_half_open_permit);
+
+        breaker.record_failure(probe.used_half_open_permit).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
+        let reopened_at = breaker.last_opened_at.read().await.expect("reopened");
+        assert!(reopened_at.elapsed() < Duration::from_secs(5));
+        assert!(!breaker.allow_request().await.allowed, "timeout restarted");
+    }
+
+    #[tokio::test]
+    async fn successful_probe_closes_and_clears_failure_streak() {
+        let breaker = CircuitBreaker::new(threshold_config(2, 60));
+        breaker.record_failure(false).await;
+        breaker.record_failure(false).await;
+        backdate_open(&breaker, 61).await;
+        let probe = breaker.allow_request().await;
+        breaker.record_success(probe.used_half_open_permit).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Closed);
+
+        // One failure after closing does not re-open a threshold-2 breaker.
+        breaker.record_failure(false).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Closed);
+    }
+
+    #[tokio::test]
+    async fn success_resets_the_consecutive_failure_count() {
+        let breaker = CircuitBreaker::new(threshold_config(3, 60));
+        for outcome in [false, false, true, false, false] {
+            if outcome {
+                breaker.record_success(false).await;
+            } else {
+                breaker.record_failure(false).await;
+            }
+        }
+        assert_eq!(breaker.get_state().await, CircuitState::Closed);
+        breaker.record_failure(false).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
+    }
+
+    #[tokio::test]
+    async fn error_rate_trips_once_min_requests_reached() {
+        // Table: (outcomes, expected state). true = success.
+        let cases: &[(&[bool], CircuitState)] = &[
+            (&[true, false, true], CircuitState::Closed), // below min_requests
+            (&[true, false, true, false], CircuitState::Open), // 50% >= 50%
+            (&[true, true, true, false], CircuitState::Closed), // 25%
+        ];
+        for (outcomes, expected) in cases {
+            let breaker = CircuitBreaker::new(CircuitBreakerConfig {
+                failure_threshold: 100,
+                success_threshold: 1,
+                timeout_seconds: 60,
+                error_rate_threshold: 0.5,
+                min_requests: 4,
+            });
+            for ok in outcomes.iter() {
+                if *ok {
+                    breaker.record_success(false).await;
+                } else {
+                    breaker.record_failure(false).await;
+                }
+            }
+            assert_eq!(breaker.get_state().await, *expected, "{outcomes:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn reset_returns_to_closed_and_accepts_requests() {
+        let breaker = CircuitBreaker::new(threshold_config(1, 3600));
+        breaker.record_failure(false).await;
+        assert!(!breaker.allow_request().await.allowed);
+        breaker.reset().await;
+        assert_eq!(breaker.get_state().await, CircuitState::Closed);
+        assert!(breaker.allow_request().await.allowed);
+        assert_eq!(breaker.get_stats().await.consecutive_failures, 0);
+    }
 }

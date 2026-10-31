@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+// (uses localStorage / the DOM; the rest of this folder runs under node, TEST-24)
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createStoredValue } from "@/lib/storage";

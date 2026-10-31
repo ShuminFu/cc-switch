@@ -296,3 +296,180 @@ pub fn remove_plugins_by_prefixes(prefixes: &[&str]) -> Result<(), AppError> {
 
     write_opencode_config(&config)
 }
+
+// TEST-20: opencode.json(c) CRUD on a thread-isolated home (no #[serial]).
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::isolated_home;
+
+    fn write_raw(text: &str) {
+        let path = get_opencode_config_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    fn read_raw() -> String {
+        std::fs::read_to_string(get_opencode_config_path()).unwrap()
+    }
+
+    #[test]
+    fn paths_resolve_under_the_test_home() {
+        let home = isolated_home();
+        assert_eq!(
+            get_opencode_config_path(),
+            home.path()
+                .join(".config")
+                .join("opencode")
+                .join("opencode.json")
+        );
+    }
+
+    #[test]
+    fn missing_config_reads_as_schema_stub() {
+        let _home = isolated_home();
+        let config = read_opencode_config().unwrap();
+        assert_eq!(config["$schema"], "https://opencode.ai/config.json");
+        assert!(get_providers().unwrap().is_empty());
+        assert!(get_mcp_servers().unwrap().is_empty());
+    }
+
+    #[test]
+    fn provider_crud_roundtrip() {
+        let _home = isolated_home();
+        set_provider(
+            "a",
+            json!({"npm": "@ai-sdk/anthropic", "options": {"apiKey": "k1"}}),
+        )
+        .unwrap();
+        set_provider("b", json!({"npm": "@ai-sdk/openai-compatible"})).unwrap();
+        let providers = get_providers().unwrap();
+        assert_eq!(providers.len(), 2);
+        assert_eq!(providers["a"]["options"]["apiKey"], "k1");
+
+        set_provider(
+            "a",
+            json!({"npm": "@ai-sdk/anthropic", "options": {"apiKey": "k2"}}),
+        )
+        .unwrap();
+        assert_eq!(get_providers().unwrap()["a"]["options"]["apiKey"], "k2");
+
+        remove_provider("a").unwrap();
+        let providers = get_providers().unwrap();
+        assert!(!providers.contains_key("a"));
+        assert!(providers.contains_key("b"), "other providers are kept");
+    }
+
+    #[test]
+    fn typed_providers_skip_malformed_entries() {
+        let _home = isolated_home();
+        let typed = OpenCodeProviderConfig::default();
+        set_typed_provider("good", &typed).unwrap();
+        set_provider("bad", json!({"npm": 42})).unwrap();
+        let parsed = get_typed_providers().unwrap();
+        assert!(parsed.contains_key("good"));
+        assert!(
+            !parsed.contains_key("bad"),
+            "a bad entry does not fail the read"
+        );
+    }
+
+    #[test]
+    fn mcp_server_crud_roundtrip() {
+        let _home = isolated_home();
+        set_mcp_server("fs", json!({"type": "local", "command": ["npx", "fs"]})).unwrap();
+        assert_eq!(get_mcp_servers().unwrap()["fs"]["type"], "local");
+        remove_mcp_server("fs").unwrap();
+        assert!(get_mcp_servers().unwrap().is_empty());
+        // Removing again is a no-op.
+        remove_mcp_server("fs").unwrap();
+    }
+
+    #[test]
+    fn unrelated_keys_and_comments_survive_provider_edits() {
+        let _home = isolated_home();
+        write_raw(
+            "{\n  // keep me\n  \"theme\": \"dark\",\n  \"provider\": {\n    \"a\": { \"npm\": \"x\" }\n  }\n}\n",
+        );
+        set_provider("b", json!({"npm": "y"})).unwrap();
+        let text = read_raw();
+        assert!(text.contains("// keep me"), "{text}");
+        let config = read_opencode_config().unwrap();
+        assert_eq!(config["theme"], "dark");
+        assert_eq!(config["provider"]["a"]["npm"], "x");
+        assert_eq!(config["provider"]["b"]["npm"], "y");
+    }
+
+    #[test]
+    fn invalid_config_is_an_error_not_a_panic() {
+        let _home = isolated_home();
+        write_raw("{ \"provider\": ");
+        assert!(read_opencode_config().is_err());
+        assert!(get_providers().is_err());
+        assert!(
+            set_provider("a", json!({})).is_err(),
+            "never overwrite unparsable files"
+        );
+        assert_eq!(read_raw(), "{ \"provider\": ");
+    }
+
+    #[test]
+    fn add_plugin_canonicalises_and_is_idempotent() {
+        let _home = isolated_home();
+        add_plugin("oh-my-opencode@1.2.3").unwrap();
+        add_plugin("oh-my-openagent@1.2.3").unwrap();
+        let config = read_opencode_config().unwrap();
+        assert_eq!(config["plugin"], json!(["oh-my-openagent@1.2.3"]));
+    }
+
+    #[test]
+    fn standard_and_slim_omo_plugins_are_mutually_exclusive() {
+        let _home = isolated_home();
+        write_raw("{\"plugin\": [\"other\", \"oh-my-opencode-slim@1\"]}");
+        add_plugin("oh-my-openagent").unwrap();
+        assert_eq!(
+            read_opencode_config().unwrap()["plugin"],
+            json!(["other", "oh-my-openagent"])
+        );
+        add_plugin("oh-my-opencode-slim@2").unwrap();
+        assert_eq!(
+            read_opencode_config().unwrap()["plugin"],
+            json!(["other", "oh-my-opencode-slim@2"])
+        );
+    }
+
+    #[test]
+    fn remove_plugins_by_prefix_drops_the_empty_array() {
+        let _home = isolated_home();
+        write_raw("{\"plugin\": [\"oh-my-openagent@3\", \"oh-my-openagentx\"]}");
+        remove_plugins_by_prefixes(&["oh-my-openagent"]).unwrap();
+        // `oh-my-openagentx` is a different plugin, not a version of the prefix.
+        assert_eq!(
+            read_opencode_config().unwrap()["plugin"],
+            json!(["oh-my-openagentx"])
+        );
+        remove_plugins_by_prefixes(&["oh-my-openagentx"]).unwrap();
+        assert!(read_opencode_config().unwrap().get("plugin").is_none());
+    }
+
+    #[test]
+    fn plugin_prefix_matching_rules() {
+        assert!(matches_plugin_prefix("oh-my-opencode", "oh-my-opencode"));
+        assert!(matches_plugin_prefix(
+            "oh-my-opencode@1.0",
+            "oh-my-opencode"
+        ));
+        assert!(!matches_plugin_prefix(
+            "oh-my-opencode-slim",
+            "oh-my-opencode"
+        ));
+        assert_eq!(
+            canonicalize_plugin_name("oh-my-opencode"),
+            "oh-my-openagent"
+        );
+        assert_eq!(
+            canonicalize_plugin_name("oh-my-opencode-slim@1"),
+            "oh-my-opencode-slim@1"
+        );
+    }
+}

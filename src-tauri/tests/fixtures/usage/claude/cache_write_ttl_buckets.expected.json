@@ -1,0 +1,10 @@
+{
+  "usage": {
+    "input_tokens": 3,
+    "output_tokens": 20,
+    "cache_read_tokens": 0,
+    "cache_creation_tokens": 900,
+    "model": "claude-sonnet-4-5",
+    "message_id": "msg_ttl"
+  }
+}

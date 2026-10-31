@@ -102,7 +102,7 @@ fn switch_provider_internal(
     ProviderService::switch(state, app_type, id)
 }
 
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub fn switch_provider_test_hook(
     state: &AppState,
     app_type: AppType,
@@ -154,7 +154,7 @@ fn import_default_config_internal(state: &AppState, app_type: AppType) -> Result
     Ok(imported)
 }
 
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub fn import_default_config_test_hook(
     state: &AppState,
     app_type: AppType,

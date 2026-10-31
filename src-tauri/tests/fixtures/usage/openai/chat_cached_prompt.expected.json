@@ -1,0 +1,10 @@
+{
+  "usage": {
+    "input_tokens": 2000,
+    "output_tokens": 100,
+    "cache_read_tokens": 1536,
+    "cache_creation_tokens": 0,
+    "model": "gpt-4.1",
+    "message_id": null
+  }
+}

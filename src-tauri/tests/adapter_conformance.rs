@@ -428,8 +428,15 @@ fn claude_mcp_projection_preserves_the_rest_of_claude_json() {
 
     // projecting the same state again writes nothing (CFG-41)
     let before = fs::read_to_string(&path).unwrap();
+    // TEST-10: backdate the file instead of sleeping, so any rewrite would
+    // visibly move the mtime forward.
+    let backdated = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .and_then(|f| f.set_modified(backdated))
+        .unwrap();
     let mtime = fs::metadata(&path).unwrap().modified().unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(20));
     mcp.project(&[("a", &a), ("b", &b)], &["gone"]).unwrap();
     assert_eq!(fs::read_to_string(&path).unwrap(), before);
     assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), mtime);
