@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct InitErrorPayload {
     pub path: String,
     pub error: String,
@@ -36,6 +36,65 @@ pub fn get_init_error() -> Option<InitErrorPayload> {
     cell().read().ok()?.clone()
 }
 
+#[cfg(test)]
+mod startup_warning_tests {
+    use super::{push_startup_warning, startup_warnings, StartupWarning};
+
+    #[test]
+    fn warnings_are_recorded_once_and_not_consumed() {
+        let warning = StartupWarning {
+            kind: "test_warning_kind".to_string(),
+            app_type: None,
+            path: Some("/x".to_string()),
+            message: "m".to_string(),
+        };
+        push_startup_warning(warning.clone());
+        push_startup_warning(warning.clone());
+        let count = |w: &[StartupWarning]| w.iter().filter(|x| **x == warning).count();
+        assert_eq!(count(&startup_warnings()), 1);
+        assert_eq!(count(&startup_warnings()), 1);
+    }
+}
+
+// ============================================================
+// 启动告警（非致命，前端以横幅/Toast 提示）
+// ============================================================
+
+/// A non-fatal problem found during startup that the UI should explain:
+/// `settings_corrupt` (settings.json could not be parsed and was moved aside),
+/// `config_dir_unavailable` (the data-directory override is missing),
+/// `proxy_restore_failed` (takeover restore failed after a retry, CMD-46).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupWarning {
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub message: String,
+}
+
+static STARTUP_WARNINGS: RwLock<Vec<StartupWarning>> = RwLock::new(Vec::new());
+
+/// Record a startup warning (duplicates are ignored).
+pub fn push_startup_warning(warning: StartupWarning) {
+    if let Ok(mut guard) = STARTUP_WARNINGS.write() {
+        if !guard.contains(&warning) {
+            guard.push(warning);
+        }
+    }
+}
+
+/// All startup warnings recorded so far (not consumed: the UI may ask again
+/// after a reload).
+pub fn startup_warnings() -> Vec<StartupWarning> {
+    STARTUP_WARNINGS
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
+}
+
 // ============================================================
 // 迁移结果状态
 // ============================================================
@@ -67,7 +126,7 @@ pub fn take_migration_success() -> bool {
 // Skills SSOT 迁移结果状态
 // ============================================================
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SkillsMigrationPayload {
     pub count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]

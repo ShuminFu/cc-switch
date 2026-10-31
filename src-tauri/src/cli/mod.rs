@@ -18,7 +18,7 @@ use std::time::Duration;
 use clap::Parser;
 use serde_json::{json, Value};
 
-use args::{Cli, Command, ProxyAction, ProxyStartArgs, UsageAction};
+use args::{Cli, Command, ProfileAction, ProxyAction, ProxyStartArgs, UsageAction};
 use lock::{LockHeld, LockOwner, WriterLock};
 use ops::Context;
 
@@ -171,6 +171,11 @@ fn dispatch(ctx: &Context, cli: &Cli, out: &mut dyn Write) -> Result<Output, Cli
         Command::Usage {
             action: UsageAction::Summary { days, app },
         } => ops::usage_summary(ctx, *days, app.clone()),
+        Command::Profile { action } => match action {
+            ProfileAction::List => ops::profile_list(ctx),
+            ProfileAction::Apply { app, profile } => ops::profile_apply(ctx, app.clone(), profile),
+        },
+        Command::Doctor => ops::doctor(ctx),
         Command::Export { file } => ops::export(ctx, file),
         Command::Import { file } => ops::import(ctx, file),
         Command::Policy => Ok(policy_output()),

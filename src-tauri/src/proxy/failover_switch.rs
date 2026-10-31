@@ -121,13 +121,8 @@ impl FailoverSwitchManager {
                     return Ok(false);
                 }
 
-                if let Ok(new_menu) = crate::tray::create_tray_menu(app, app_state.inner()) {
-                    if let Some(tray) = app.tray_by_id(crate::tray::TRAY_ID) {
-                        if let Err(e) = tray.set_menu(Some(new_menu)) {
-                            log::error!("[Failover] 更新托盘菜单失败: {e}");
-                        }
-                    }
-                }
+                // Debounced; skips `set_menu` when nothing visible changed (CMD-16).
+                crate::tray::request_tray_rebuild(app, false);
             }
 
             // 发射事件到前端
@@ -136,7 +131,7 @@ impl FailoverSwitchManager {
                 "providerId": provider_id,
                 "source": "failover"  // 标识来源是故障转移
             });
-            if let Err(e) = app.emit("provider-switched", event_data) {
+            if let Err(e) = app.emit(crate::events::PROVIDER_SWITCHED, event_data) {
                 log::error!("[Failover] 发射事件失败: {e}");
             }
             crate::services::notifications::notify_failover_switched(

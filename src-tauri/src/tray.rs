@@ -96,6 +96,15 @@ pub(crate) fn detect_system_tray_language() -> &'static str {
         .unwrap_or("en")
 }
 
+/// The one backend language source (CMD-17): `settings.language` when set,
+/// otherwise the system locale. Used by the tray and the startup dialogs.
+pub(crate) fn backend_language() -> String {
+    crate::settings::get_settings()
+        .language
+        .filter(|l| !l.trim().is_empty())
+        .unwrap_or_else(|| detect_system_tray_language().to_string())
+}
+
 impl TrayTexts {
     pub fn from_language(language: &str) -> Self {
         match language {
@@ -552,67 +561,60 @@ pub fn handle_provider_tray_event(app: &tauri::AppHandle, event_id: &str) -> boo
 /// 代理服务的状态读写都在 tokio 锁之后，因此这里是 async 函数，由托盘事件
 /// 通过 `tauri::async_runtime::spawn` 驱动，而不是在阻塞线程里
 /// 阻塞式 `block_on` 等待 tokio 锁（CMD-07）。
+/// Whether the tray "Auto" item may turn on the proxy/failover at all: the
+/// UI only offers the proxy once the user enabled the local proxy feature.
+fn tray_auto_allowed(settings: &crate::settings::AppSettings) -> bool {
+    settings.enable_local_proxy
+}
+
 async fn handle_auto_click(app: &tauri::AppHandle, app_type: &AppType) -> Result<(), AppError> {
     let Some(app_state) = app.try_state::<AppState>() else {
         return Ok(());
     };
     let app_type_str = app_type.as_str();
 
-    // 强一致语义：Auto 模式开启后立即切到队列 P1（P1→P2→...）
-    // 若队列为空，则尝试把“当前供应商”自动加入队列作为 P1，避免用户陷入无法开启的死锁。
-    let mut queue = app_state.db.get_failover_queue(app_type_str)?;
-    if queue.is_empty() {
-        let current_id = crate::settings::get_effective_current_provider(&app_state.db, app_type)?;
-        let Some(current_id) = current_id else {
-            return Err(AppError::Message(
-                "故障转移队列为空，且未设置当前供应商，无法启用 Auto 模式".to_string(),
-            ));
-        };
-        app_state
-            .db
-            .add_to_failover_queue(app_type_str, &current_id)?;
-        queue = app_state.db.get_failover_queue(app_type_str)?;
+    if !tray_auto_allowed(&crate::settings::get_settings()) {
+        return Err(AppError::Message(
+            "本地代理功能未启用，无法从托盘开启 Auto 模式".to_string(),
+        ));
     }
 
-    let p1_provider_id = queue
-        .first()
-        .map(|item| item.provider_id.clone())
-        .ok_or_else(|| AppError::Message("故障转移队列为空，无法启用 Auto 模式".to_string()))?;
-
-    // 真正启用 failover：启动代理服务 + 执行接管 + 开启 auto_failover
     let proxy_service = &app_state.proxy_service;
 
-    // 1) 确保代理服务运行（会自动设置 proxy_enabled = true）
-    if !proxy_service.is_running().await {
-        log::info!("[Tray] Auto 模式：启动代理服务");
-        if let Err(e) = proxy_service.start().await {
-            log::error!("[Tray] 启动代理服务失败: {e}");
-            return Err(AppError::Message(format!("启动代理服务失败: {e}")));
+    // 1) 托盘的便捷路径：该 app 尚未接管时先启动代理并接管 Live 配置
+    //    （set_takeover_for_app 会在代理未运行时自动启动）。
+    let took_over_here = !app_state
+        .db
+        .get_proxy_config_for_app(app_type_str)
+        .await?
+        .enabled;
+    if took_over_here || !proxy_service.is_running().await {
+        log::info!("[Tray] Auto 模式：对 {app_type_str} 执行接管");
+        if let Err(e) = proxy_service.set_takeover_for_app(app_type_str, true).await {
+            log::error!("[Tray] 执行接管失败: {e}");
+            return Err(AppError::Message(format!("执行接管失败: {e}")));
         }
     }
 
-    // 2) 执行 Live 配置接管（确保该 app 被代理接管）
-    log::info!("[Tray] Auto 模式：对 {app_type_str} 执行接管");
-    if let Err(e) = proxy_service.set_takeover_for_app(app_type_str, true).await {
-        log::error!("[Tray] 执行接管失败: {e}");
-        return Err(AppError::Message(format!("执行接管失败: {e}")));
-    }
-
-    // 3) 设置 auto_failover_enabled = true
-    app_state
-        .db
-        .set_proxy_flags_sync(app_type_str, true, true)?;
-
-    // 3.1) 立即切到队列 P1（热切换：不写 Live，仅更新 DB/settings/备份）
-    if let Err(e) = proxy_service
-        .switch_proxy_target(app_type_str, &p1_provider_id)
-        .await
-    {
-        log::error!("[Tray] Auto 模式切换到队列 P1 失败: {e}");
-        return Err(AppError::Message(format!(
-            "Auto 模式切换到队列 P1 失败: {e}"
-        )));
-    }
+    // 2) 与 UI 命令共用：切到队列 P1 成功后才持久化 auto_failover_enabled，
+    //    失败时移除自动加入的队列项（CMD-44）。
+    let p1_provider_id =
+        match crate::commands::enable_auto_failover(app_state.inner(), app_type).await {
+            Ok(id) => id,
+            Err(e) => {
+                log::error!("[Tray] Auto 模式开启失败: {e}");
+                // 回滚本次点击做的接管，恢复点击前的状态
+                if took_over_here {
+                    if let Err(undo) = proxy_service
+                        .set_takeover_for_app(app_type_str, false)
+                        .await
+                    {
+                        log::error!("[Tray] 回滚 {app_type_str} 接管失败: {undo}");
+                    }
+                }
+                return Err(AppError::Message(format!("Auto 模式开启失败: {e}")));
+            }
+        };
 
     // 4) 更新托盘菜单
     request_tray_rebuild(app, true);
@@ -624,11 +626,11 @@ async fn handle_auto_click(app: &tauri::AppHandle, app_type: &AppType) -> Result
         "autoFailoverEnabled": true,
         "providerId": p1_provider_id
     });
-    if let Err(e) = app.emit("proxy-flags-changed", event_data.clone()) {
+    if let Err(e) = app.emit(crate::events::PROXY_FLAGS_CHANGED, event_data.clone()) {
         log::error!("发射 proxy-flags-changed 事件失败: {e}");
     }
     // 发射 provider-switched 事件（保持向后兼容，Auto 切换也算一种切换）
-    if let Err(e) = app.emit("provider-switched", event_data) {
+    if let Err(e) = app.emit(crate::events::PROVIDER_SWITCHED, event_data) {
         log::error!("发射 provider-switched 事件失败: {e}");
     }
     Ok(())
@@ -663,11 +665,11 @@ fn handle_provider_click(
             "autoFailoverEnabled": false,
             "providerId": provider_id
         });
-        if let Err(e) = app.emit("proxy-flags-changed", event_data.clone()) {
+        if let Err(e) = app.emit(crate::events::PROXY_FLAGS_CHANGED, event_data.clone()) {
             log::error!("发射 proxy-flags-changed 事件失败: {e}");
         }
         // 发射 provider-switched 事件（保持向后兼容）
-        if let Err(e) = app.emit("provider-switched", event_data) {
+        if let Err(e) = app.emit(crate::events::PROVIDER_SWITCHED, event_data) {
             log::error!("发射 provider-switched 事件失败: {e}");
         }
     }
@@ -1151,30 +1153,13 @@ fn commit_tray_model(model: Option<TrayModel>, handles: SectionHandles) {
     *LAST_TRAY_MODEL.lock().unwrap_or_else(|p| p.into_inner()) = model;
 }
 
-/// 创建动态托盘菜单
-///
-/// 调用方负责把返回的菜单 `set_menu` 到托盘上。整个过程不会阻塞等待任何
-/// tokio 锁；代理状态锁被占用时会额外安排一次去抖补刷。
-pub fn create_tray_menu(
-    app: &tauri::AppHandle,
-    app_state: &AppState,
-) -> Result<Menu<tauri::Wry>, AppError> {
-    let _guard = TRAY_REBUILD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let (model, stale) = collect_tray_model(app_state)?;
-    let (menu, handles) = build_tray_menu(app, &model)?;
-    commit_tray_model(Some(model), handles);
-    if stale {
-        request_tray_rebuild(app, false);
-    }
-    Ok(menu)
-}
+// 完整菜单只由 `rebuild_tray_menu_now` 构建（经 `request_tray_rebuild` 去抖），
+// 不再有各处直接 `create_tray_menu` + `set_menu` 的副本（CMD-16）。
 
 /// 启动早期使用的骨架菜单：只含不依赖数据库的固定项，供应商/项目分区由
 /// 后台初始化完成后的重建补齐。
 pub fn create_startup_tray_menu(app: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, AppError> {
-    let language: String = crate::settings::get_settings()
-        .language
-        .unwrap_or_else(|| detect_system_tray_language().to_string());
+    let language = backend_language();
     let model = TrayModel {
         texts: TrayTexts::from_language(&language),
         sections: Vec::new(),
@@ -1420,27 +1405,7 @@ pub fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
 
     match event_id {
         "show_main" => {
-            if let Some(window) = app.get_webview_window("main") {
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = window.set_skip_taskbar(false);
-                }
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-                #[cfg(target_os = "linux")]
-                {
-                    crate::linux_fix::nudge_main_window(window.clone());
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    apply_tray_policy(app, true);
-                }
-            } else if crate::lightweight::is_lightweight_mode() {
-                if let Err(e) = crate::lightweight::exit_lightweight_mode(app) {
-                    log::error!("退出轻量模式重建窗口失败: {e}");
-                }
-            }
+            crate::main_window::show_or_recreate_main_window(app);
         }
         "open_website" => {
             if let Err(e) = app.opener().open_url("https://ccswitch.io", None::<String>) {
@@ -1488,12 +1453,16 @@ pub fn schedule_tray_refresh(app: &tauri::AppHandle) {
         return;
     }
     let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        // 50ms 合窗：让同一轮 React Query / 托盘批量刷新触发的多个写入
-        // 共享一次标题更新。
-        std::thread::sleep(std::time::Duration::from_millis(50));
+    // 50ms 合窗：让同一轮 React Query / 托盘批量刷新触发的多个写入共享一次
+    // 标题更新。用 tokio 计时器等待，不占用阻塞线程池（CMD-28）。
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         TRAY_REBUILD_SCHEDULED.store(false, Ordering::Release);
-        update_tray_usage_labels(&app);
+        if let Err(e) =
+            tauri::async_runtime::spawn_blocking(move || update_tray_usage_labels(&app)).await
+        {
+            log::error!("托盘用量标题更新任务失败: {e}");
+        }
     });
 }
 

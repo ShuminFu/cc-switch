@@ -62,12 +62,34 @@ pub enum Command {
         #[command(subcommand)]
         action: UsageAction,
     },
+    /// Projects (profiles): list them, or apply one to an app
+    Profile {
+        #[command(subcommand)]
+        action: ProfileAction,
+    },
+    /// Check the data directory, database and live config files (read-only)
+    Doctor,
     /// Export the database to a SQL backup file
     Export { file: PathBuf },
     /// Import a SQL backup file (same as Settings → Import in the GUI)
     Import { file: PathBuf },
     /// Show the managed (team) policy that applies to this machine
     Policy,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileAction {
+    /// List projects and which one is current per app
+    #[command(visible_alias = "ls")]
+    List,
+    /// Apply a project's saved configuration to one app, exactly like the GUI
+    Apply {
+        /// App id whose configuration group is applied (e.g. claude, codex)
+        #[arg(value_parser = parse_app)]
+        app: AppType,
+        /// Project id or exact name
+        profile: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -208,6 +230,33 @@ mod tests {
         ));
         assert!(parse(&["export"]).is_err());
         assert!(parse(&[]).is_err());
+    }
+
+    #[test]
+    fn profile_and_doctor_subcommands() {
+        assert!(matches!(
+            parse(&["profile", "ls"]).unwrap().command,
+            Command::Profile {
+                action: ProfileAction::List
+            }
+        ));
+        match parse(&["profile", "apply", "codex", "Work"])
+            .unwrap()
+            .command
+        {
+            Command::Profile {
+                action: ProfileAction::Apply { app, profile },
+            } => {
+                assert_eq!(app, AppType::Codex);
+                assert_eq!(profile, "Work");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(parse(&["profile", "apply", "codex"]).is_err());
+        assert!(matches!(
+            parse(&["doctor", "--json"]).unwrap().command,
+            Command::Doctor
+        ));
     }
 
     use std::path::Path;

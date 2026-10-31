@@ -18,7 +18,7 @@ function walk(dir: string, ext: RegExp, out: string[] = []): string[] {
   return out;
 }
 
-/** Event names the Rust side emits: `.emit("x", ..)` and `*_EVENT` consts. */
+/** Event names the Rust side emits: `.emit("x", ..)`, `*_EVENT` consts and events.rs. */
 function rustEmittedNames(): Set<string> {
   const names = new Set<string>();
   for (const file of walk(join(ROOT, "src-tauri/src"), /\.rs$/)) {
@@ -32,6 +32,12 @@ function rustEmittedNames(): Set<string> {
       /const [A-Z_]*EVENT[A-Z_]*: &str = "([^"]+)"/g,
     )) {
       names.add(m[1]);
+    }
+    // src-tauri/src/events.rs: the central event-name constants.
+    if (file.endsWith("/events.rs")) {
+      for (const m of src.matchAll(/pub const [A-Z_]+: &str = "([^"]+)"/g)) {
+        names.add(m[1]);
+      }
     }
   }
   return names;

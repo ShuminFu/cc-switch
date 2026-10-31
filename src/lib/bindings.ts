@@ -577,29 +577,6 @@ async validateMcpCommand(cmd: string) : Promise<Result<boolean, AppErrorPayload>
 }
 },
 /**
- * 在 config.json 中新增或更新一个 MCP 服务器定义
- * [已废弃] 该命令仍然使用旧的分应用API，会转换为统一结构
- */
-async upsertMcpServerInConfig(app: string, id: string, spec: JsonValue, syncOtherSide: boolean | null) : Promise<Result<boolean, AppErrorPayload>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("upsert_mcp_server_in_config", { app, id, spec, syncOtherSide }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * 在 config.json 中删除一个 MCP 服务器定义
- */
-async deleteMcpServerInConfig(app: string, id: string) : Promise<Result<boolean, AppErrorPayload>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("delete_mcp_server_in_config", { app, id }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * 删除 MCP 服务器
  */
 async deleteMcpServer(id: string) : Promise<Result<boolean, AppErrorPayload>> {
@@ -680,6 +657,69 @@ async isPortableMode() : Promise<Result<boolean, string>> {
 async getMigrationResult() : Promise<Result<boolean, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_migration_result") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Non-fatal startup problems the UI should explain (corrupt settings moved
+ * aside, missing data-directory override, failed proxy takeover restore).
+ */
+async getStartupWarnings() : Promise<Result<StartupWarning[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_startup_warnings") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 获取应用启动阶段的初始化错误（若有）。
+ * 用于前端在早期主动拉取，避免事件订阅竞态导致的提示缺失。
+ */
+async getInitError() : Promise<Result<InitErrorPayload | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_init_error") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 获取 Skills 自动导入（SSOT）迁移结果（若有）。
+ * 只返回一次 Some({count})，之后返回 None，用于前端显示一次性 Toast 通知。
+ */
+async getSkillsMigrationResult() : Promise<Result<SkillsMigrationPayload | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_skills_migration_result") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Drop a pending link the user dismissed.
+ */
+async discardPendingDeeplink(nonce: string) : Promise<boolean> {
+    return await TAURI_INVOKE("discard_pending_deeplink", { nonce });
+},
+/**
+ * Build an unsigned `ccswitch://v2/import` link for a configured provider,
+ * MCP server or prompt ("share as link"). Secrets are only included when
+ * `includeSecrets` is true.
+ */
+async buildDeeplinkShareLink(resource: string, app: string, id: string, includeSecrets: boolean | null) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("build_deeplink_share_link", { resource, app, id, includeSecrets }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async unbindProjectDirectory(path: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("unbind_project_directory", { path }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1251,6 +1291,23 @@ async restartApp() : Promise<Result<boolean, string>> {
 }
 },
 /**
+ * Update only the given settings fields (PATCH semantics).
+ * 
+ * The frontend's `save_settings` sends the whole settings object, so a
+ * settings page holding a stale copy can roll back fields changed meanwhile.
+ * This command reads-merges-writes under the settings lock and touches only
+ * the keys in `patch`; backend-owned fields (current-provider pointers,
+ * migrations, sync secrets) are still protected by `merge_settings_for_save`.
+ */
+async patchSettings(patch: JsonValue) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("patch_settings", { patch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * 下载并安装应用更新，然后由后端直接重启应用。
  * 
  * macOS 更新会原地替换 `.app` bundle。如果先返回前端、再让旧 WebView 调
@@ -1282,6 +1339,12 @@ async checkAppUpdateAvailable() : Promise<Result<string | null, string>> {
 },
 /**
  * 获取 app_config_dir 覆盖配置 (从 Store)
+ * 
+ * Read-only: it no longer refreshes the process-wide override cache. The data
+ * directory is resolved once at startup; re-resolving it here flipped backups
+ * and skills to another directory mid-session while the open database stayed
+ * in the old one, and an unmounted override silently reverted to the default
+ * (CMD-43).
  */
 async getAppConfigDirOverride() : Promise<Result<string | null, string>> {
     try {
@@ -1293,6 +1356,9 @@ async getAppConfigDirOverride() : Promise<Result<string | null, string>> {
 },
 /**
  * 设置 app_config_dir 覆盖配置 (到 Store)
+ * 
+ * The new directory takes effect after a restart (the frontend offers it);
+ * the running process keeps using the directory its database was opened in.
  */
 async setAppConfigDirOverride(path: string | null) : Promise<Result<boolean, string>> {
     try {
@@ -1607,6 +1673,21 @@ proxyType: string;
  * 端口
  */
 port: number }
+export type InitErrorPayload = { path: string; error: string; 
+/**
+ * 错误类别。`Some("db_version_too_new")` 表示数据库版本过新（应用过旧），
+ * 前端据此展示「升级应用」恢复界面而非直接退出。
+ */
+kind?: string | null; 
+/**
+ * 磁盘上数据库的 user_version（数据库版本过新时填充）
+ */
+db_version?: number | null; 
+/**
+ * 当前应用支持的 SCHEMA_VERSION（数据库版本过新时填充）。
+ * 当升级到最新版后 db_version 仍 > supported_version，说明可能由第三方客户端创建。
+ */
+supported_version?: number | null }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 export type ManagedAuthAccount = { id: string; provider: string; login: string; avatar_url: string | null; authenticated_at: number; is_default: boolean; github_domain: string }
 export type ManagedAuthDeviceCodeResponse = { provider: string; device_code: string; user_code: string; verification_uri: string; expires_in: number; interval: number }
@@ -1629,6 +1710,14 @@ latencyMs: number;
  * 错误信息
  */
 error: string | null }
+export type SkillsMigrationPayload = { count: number; error?: string | null }
+/**
+ * A non-fatal problem found during startup that the UI should explain:
+ * `settings_corrupt` (settings.json could not be parsed and was moved aside),
+ * `config_dir_unavailable` (the data-directory override is missing),
+ * `proxy_restore_failed` (takeover restore failed after a retry, CMD-46).
+ */
+export type StartupWarning = { kind: string; appType?: string | null; path?: string | null; message: string }
 /**
  * 出站代理状态信息
  */

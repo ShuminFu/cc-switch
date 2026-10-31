@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use tauri::State;
 
 use crate::commands::sync_support::{
-    attach_warning, post_sync_warning_from_result, run_post_import_sync,
+    attach_warning, post_sync_warning_from_result, run_post_import_sync_blocking,
 };
 use crate::error::AppError;
 use crate::services::s3_sync as s3_sync_service;
@@ -124,11 +124,11 @@ pub async fn s3_sync_upload(
 #[tauri::command]
 #[specta::specta]
 pub async fn s3_sync_download(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     force: Option<bool>,
 ) -> Result<Value, AppError> {
     let db = state.db.clone();
-    let db_for_sync = db.clone();
     let mut settings = require_enabled_s3_settings()?;
     let _auto_sync_suppression = crate::services::s3_auto_sync::AutoSyncSuppressionGuard::new();
 
@@ -143,11 +143,7 @@ pub async fn s3_sync_download(
     })?;
 
     // Post-download sync is best-effort: snapshot restore has already succeeded.
-    let warning = post_sync_warning_from_result(
-        tauri::async_runtime::spawn_blocking(move || run_post_import_sync(db_for_sync))
-            .await
-            .map_err(|e| e.to_string()),
-    );
+    let warning = post_sync_warning_from_result(run_post_import_sync_blocking(app).await);
     if let Some(msg) = warning.as_ref() {
         log::warn!("[S3] post-download sync warning: {msg}");
     }

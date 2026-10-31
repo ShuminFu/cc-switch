@@ -25,6 +25,14 @@ export const failoverApi = {
   // ========== 熔断器 API ==========
 
   // 获取供应商健康状态
+  /** Health of several providers in one call (same entries as getProviderHealth). */
+  async getProvidersHealth(
+    appType: string,
+    providerIds: string[],
+  ): Promise<ProviderHealth[]> {
+    return invoke("get_providers_health", { appType, providerIds });
+  },
+
   async getProviderHealth(
     providerId: string,
     appType: string,

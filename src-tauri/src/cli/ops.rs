@@ -281,6 +281,251 @@ pub fn switch(ctx: &Context, app: AppType, provider: &str) -> Result<Output, Cli
     })
 }
 
+// ─── profiles (projects) ────────────────────────────────────
+
+/// Resolve a project argument: exact id first, then a unique
+/// case-insensitive name match.
+pub fn resolve_profile_id(
+    profiles: &[crate::database::Profile],
+    query: &str,
+) -> Result<String, String> {
+    if let Some(p) = profiles.iter().find(|p| p.id == query) {
+        return Ok(p.id.clone());
+    }
+    let wanted = query.trim().to_lowercase();
+    let matches: Vec<_> = profiles
+        .iter()
+        .filter(|p| p.name.trim().to_lowercase() == wanted)
+        .collect();
+    match matches.as_slice() {
+        [one] => Ok(one.id.clone()),
+        [] => Err(format!("No project '{query}'.")),
+        many => Err(format!(
+            "'{query}' matches several projects by name ({}); use the id instead.",
+            many.iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+pub fn profile_list(ctx: &Context) -> Result<Output, CliError> {
+    use crate::services::profile::{ProfileScope, ProfileService};
+    let state = AppState::new(open_db(ctx)?);
+    let profiles = ProfileService::list(&state).map_err(app_err)?;
+    let mut current = serde_json::Map::new();
+    for scope in ProfileScope::ALL {
+        if let Some(id) = state
+            .db
+            .get_current_profile_id(scope.as_str())
+            .map_err(app_err)?
+        {
+            current.insert(scope.as_str().to_string(), json!(id));
+        }
+    }
+    let mut text = String::new();
+    if profiles.is_empty() {
+        text.push_str("No projects.\n");
+    }
+    for p in &profiles {
+        let active: Vec<&str> = current
+            .iter()
+            .filter(|(_, id)| id.as_str() == Some(p.id.as_str()))
+            .map(|(scope, _)| scope.as_str())
+            .collect();
+        let suffix = if active.is_empty() {
+            String::new()
+        } else {
+            format!("  (current: {})", active.join(", "))
+        };
+        text.push_str(&format!("  {}  {}{suffix}\n", p.id, p.name));
+    }
+    Ok(Output {
+        text,
+        json: json!({
+            "profiles": profiles.iter().map(|p| json!({ "id": p.id, "name": p.name })).collect::<Vec<_>>(),
+            "current": current,
+        }),
+    })
+}
+
+pub fn profile_apply(ctx: &Context, app: AppType, profile: &str) -> Result<Output, CliError> {
+    use crate::services::profile::{ProfileScope, ProfileService};
+    let _lock = acquire_writer(ctx, LockOwner::Cli)?;
+    let scope = ProfileScope::for_app(&app).ok_or_else(|| {
+        CliError::Failed(format!(
+            "{} has no project configuration group.",
+            app.as_str()
+        ))
+    })?;
+    let state = AppState::new(open_db(ctx)?);
+    let profiles = ProfileService::list(&state).map_err(app_err)?;
+    let id = resolve_profile_id(&profiles, profile).map_err(CliError::Failed)?;
+    let name = profiles
+        .iter()
+        .find(|p| p.id == id)
+        .map(|p| p.name.clone())
+        .unwrap_or_default();
+    // `should_stop_proxy` is moot here: the writer lock guarantees no proxy
+    // runs in another CC Switch process, and none runs in this one.
+    let (warnings, _should_stop_proxy) =
+        ProfileService::apply(&state, &id, scope).map_err(app_err)?;
+    let mut text = format!("Applied project {id} ({name}) to {}.\n", scope.as_str());
+    for w in &warnings {
+        text.push_str(&format!("warning: {w}\n"));
+    }
+    Ok(Output {
+        text,
+        json: json!({
+            "scope": scope.as_str(),
+            "profile": { "id": id, "name": name },
+            "warnings": warnings,
+        }),
+    })
+}
+
+// ─── doctor ─────────────────────────────────────────────────
+
+/// One `ccs doctor` finding.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DoctorCheck {
+    pub name: String,
+    /// `ok`, `warn` or `error`
+    pub status: &'static str,
+    pub detail: String,
+}
+
+fn check(name: impl Into<String>, status: &'static str, detail: impl Into<String>) -> DoctorCheck {
+    DoctorCheck {
+        name: name.into(),
+        status,
+        detail: detail.into(),
+    }
+}
+
+/// Run the startup checks headlessly (CMD-33): data directory, database,
+/// writer lock, takeover residue and dangling current-provider pointers.
+/// Read-only: nothing is repaired.
+pub fn doctor(ctx: &Context) -> Result<Output, CliError> {
+    let mut checks = Vec::new();
+    let dir = &ctx.config_dir;
+    if dir.is_dir() {
+        let probe = dir.join(format!(".ccs-doctor-{}", std::process::id()));
+        match std::fs::write(&probe, b"ok") {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&probe);
+                checks.push(check("data_dir", "ok", dir.display().to_string()));
+            }
+            Err(e) => checks.push(check(
+                "data_dir",
+                "error",
+                format!("{} is not writable: {e}", dir.display()),
+            )),
+        }
+    } else {
+        checks.push(check(
+            "data_dir",
+            "error",
+            format!("{} does not exist", dir.display()),
+        ));
+    }
+
+    let db_path = ctx.db_path();
+    let db = if !db_path.exists() {
+        let detail = if dir.join("config.json").exists() {
+            "no database yet; a legacy config.json is waiting for the desktop app to migrate it"
+        } else {
+            "no database yet (first run of the desktop app creates it)"
+        };
+        checks.push(check("database", "warn", detail));
+        None
+    } else {
+        match open_db(ctx) {
+            Ok(db) => {
+                checks.push(check(
+                    "database",
+                    "ok",
+                    format!("{} (schema v{SCHEMA_VERSION})", db_path.display()),
+                ));
+                Some(db)
+            }
+            Err(e) => {
+                checks.push(check("database", "error", e.message()));
+                None
+            }
+        }
+    };
+
+    match lock::current_holder(dir) {
+        Some(held) => checks.push(check("writer_lock", "ok", held.message())),
+        None => checks.push(check(
+            "writer_lock",
+            "ok",
+            "no other CC Switch process holds the lock",
+        )),
+    }
+
+    if let Some(db) = db {
+        let state = AppState::new(db);
+        let residue = state.proxy_service.detect_takeover_in_live_configs();
+        let running = lock::current_holder(dir).is_some();
+        checks.push(if residue && !running {
+            check(
+                "takeover_residue",
+                "warn",
+                "live config files still point at the local proxy but no CC Switch process is running; start the app (or `ccs proxy start`) to restore them",
+            )
+        } else {
+            check("takeover_residue", "ok", "none")
+        });
+
+        for app in AppType::all().filter(|a| !a.is_additive_mode()) {
+            let current = match ProviderService::current(&state, app.clone()) {
+                Ok(id) => id,
+                Err(e) => {
+                    checks.push(check(
+                        format!("current_provider.{}", app.as_str()),
+                        "error",
+                        e.to_string(),
+                    ));
+                    continue;
+                }
+            };
+            if current.is_empty() {
+                continue;
+            }
+            let exists = state
+                .db
+                .get_provider_by_id(&current, app.as_str())
+                .map_err(app_err)?
+                .is_some();
+            if !exists {
+                checks.push(check(
+                    format!("current_provider.{}", app.as_str()),
+                    "warn",
+                    format!("current provider '{current}' no longer exists"),
+                ));
+            }
+        }
+    }
+
+    let ok = checks.iter().all(|c| c.status != "error");
+    let mut text = String::new();
+    for c in &checks {
+        let mark = match c.status {
+            "ok" => "ok  ",
+            "warn" => "warn",
+            _ => "FAIL",
+        };
+        text.push_str(&format!("[{mark}] {:<28} {}\n", c.name, c.detail));
+    }
+    Ok(Output {
+        text,
+        json: json!({ "ok": ok, "checks": checks }),
+    })
+}
+
 // ─── usage ──────────────────────────────────────────────────
 
 pub fn usage_summary(ctx: &Context, days: u32, app: Option<AppType>) -> Result<Output, CliError> {
@@ -529,6 +774,58 @@ mod tests {
 
     fn provider(id: &str, name: &str) -> Provider {
         Provider::with_id(id.into(), name.into(), json!({}), None)
+    }
+
+    fn profile(id: &str, name: &str) -> crate::database::Profile {
+        crate::database::Profile {
+            id: id.into(),
+            name: name.into(),
+            payload: "{}".into(),
+            sort_order: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn resolves_profiles_by_id_then_unique_name() {
+        let profiles = vec![
+            profile("p1", "Work"),
+            profile("p2", "Home"),
+            profile("p3", "home"),
+        ];
+        assert_eq!(resolve_profile_id(&profiles, "p2").unwrap(), "p2");
+        assert_eq!(resolve_profile_id(&profiles, "work").unwrap(), "p1");
+        assert!(resolve_profile_id(&profiles, "Home")
+            .unwrap_err()
+            .contains("several"));
+        assert!(resolve_profile_id(&profiles, "nope").is_err());
+    }
+
+    #[test]
+    fn doctor_reports_a_missing_database_without_creating_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = Context {
+            config_dir: dir.path().to_path_buf(),
+        };
+        let out = doctor(&ctx).unwrap();
+        let checks = out.json["checks"].as_array().unwrap();
+        let status = |name: &str| {
+            checks
+                .iter()
+                .find(|c| c["name"] == name)
+                .map(|c| c["status"].as_str().unwrap().to_string())
+        };
+        assert_eq!(status("data_dir").as_deref(), Some("ok"));
+        assert_eq!(status("database").as_deref(), Some("warn"));
+        assert_eq!(out.json["ok"], true);
+        assert!(!dir.path().join("cc-switch.db").exists());
+
+        let missing = Context {
+            config_dir: dir.path().join("missing"),
+        };
+        let out = doctor(&missing).unwrap();
+        assert_eq!(out.json["ok"], false);
     }
 
     #[test]

@@ -53,6 +53,14 @@ export const proxyApi = {
   // ========== 接管状态 API ==========
 
   // 获取各应用接管状态
+  /** Proxy status and takeover flags in one round trip. */
+  async getProxyOverview(): Promise<{
+    status: ProxyStatus;
+    takeover: ProxyTakeoverStatus;
+  }> {
+    return invoke("get_proxy_overview");
+  },
+
   async getProxyTakeoverStatus(): Promise<ProxyTakeoverStatus> {
     return invoke("get_proxy_takeover_status");
   },

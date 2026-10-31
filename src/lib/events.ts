@@ -68,6 +68,8 @@ export interface AppEvents {
   "deeplink-error": DeeplinkErrorPayload;
   /** A navigation/switch action link is waiting in the backend mailbox. */
   "deeplink-action": unknown;
+  /** Startup takeover restore failed after a retry (CMD-46). */
+  "proxy-restore-failed": { appType: string; error: string };
   "update-download-progress": UpdateDownloadProgressPayload;
   "startup-progress": unknown;
   "startup-ready": unknown;
@@ -89,6 +91,7 @@ export const APP_EVENT_NAMES = [
   "deeplink-import",
   "deeplink-error",
   "deeplink-action",
+  "proxy-restore-failed",
   "update-download-progress",
   "startup-progress",
   "startup-ready",

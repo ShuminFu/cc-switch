@@ -5,16 +5,7 @@ use tauri::Manager;
 static LIGHTWEIGHT_MODE: AtomicBool = AtomicBool::new(false);
 
 pub fn enter_lightweight_mode(app: &tauri::AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.set_skip_taskbar(true);
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        crate::tray::apply_tray_policy(app, false);
-    }
+    crate::main_window::hide_from_taskbar(app, crate::main_window::MAIN_WINDOW_LABEL);
 
     if let Some(window) = app.get_webview_window("main") {
         crate::save_window_state_before_exit(app);
@@ -33,22 +24,7 @@ pub fn enter_lightweight_mode(app: &tauri::AppHandle) -> Result<(), String> {
 pub fn exit_lightweight_mode(app: &tauri::AppHandle) -> Result<(), String> {
     use tauri::WebviewWindowBuilder;
 
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-        #[cfg(target_os = "linux")]
-        {
-            crate::linux_fix::nudge_main_window(window.clone());
-        }
-        #[cfg(target_os = "windows")]
-        {
-            let _ = window.set_skip_taskbar(false);
-        }
-        #[cfg(target_os = "macos")]
-        {
-            crate::tray::apply_tray_policy(app, true);
-        }
+    if crate::main_window::show_main_window(app) {
         LIGHTWEIGHT_MODE.store(false, Ordering::Release);
         crate::tray::refresh_tray_menu(app);
         log::info!("退出轻量模式");
@@ -63,31 +39,15 @@ pub fn exit_lightweight_mode(app: &tauri::AppHandle) -> Result<(), String> {
         .find(|w| w.label == "main")
         .ok_or("主窗口配置未找到")?;
 
-    WebviewWindowBuilder::from_config(app, window_config)
+    let window = WebviewWindowBuilder::from_config(app, window_config)
         .map_err(|e| format!("加载主窗口配置失败: {e}"))?
         .build()
         .map_err(|e| format!("创建主窗口失败: {e}"))?;
 
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-        #[cfg(target_os = "linux")]
-        {
-            crate::linux_fix::nudge_main_window(window.clone());
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.set_skip_taskbar(false);
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        crate::tray::apply_tray_policy(app, true);
-    }
+    // The rebuilt webview needs the same setup as the startup one: Linux
+    // hardware-acceleration guard and the decoration setting (CMD-37).
+    crate::main_window::apply_window_setup(&window, &crate::settings::get_settings());
+    crate::main_window::show_main_window(app);
 
     LIGHTWEIGHT_MODE.store(false, Ordering::Release);
     crate::tray::refresh_tray_menu(app);

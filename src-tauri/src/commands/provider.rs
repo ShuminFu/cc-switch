@@ -444,7 +444,7 @@ pub async fn queryProviderUsage(
             "providerId": &providerId,
             "data": snapshot,
         });
-        if let Err(e) = app_handle.emit("usage-cache-updated", payload) {
+        if let Err(e) = app_handle.emit(crate::events::USAGE_CACHE_UPDATED, payload) {
             log::error!("emit usage-cache-updated (script) 失败: {e}");
         }
         state
@@ -591,7 +591,7 @@ pub struct UniversalProviderSyncedEvent {
 
 fn emit_universal_provider_synced(app: &AppHandle, action: &str, id: &str) {
     let _ = app.emit(
-        "universal-provider-synced",
+        crate::events::UNIVERSAL_PROVIDER_SYNCED,
         UniversalProviderSyncedEvent {
             action: action.to_string(),
             id: id.to_string(),

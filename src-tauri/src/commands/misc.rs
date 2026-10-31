@@ -75,8 +75,17 @@ pub async fn is_portable_mode() -> Result<bool, String> {
 /// 获取应用启动阶段的初始化错误（若有）。
 /// 用于前端在早期主动拉取，避免事件订阅竞态导致的提示缺失。
 #[tauri::command]
+#[specta::specta]
 pub async fn get_init_error() -> Result<Option<InitErrorPayload>, String> {
     Ok(crate::init_status::get_init_error())
+}
+
+/// Non-fatal startup problems the UI should explain (corrupt settings moved
+/// aside, missing data-directory override, failed proxy takeover restore).
+#[tauri::command]
+#[specta::specta]
+pub async fn get_startup_warnings() -> Result<Vec<crate::init_status::StartupWarning>, String> {
+    Ok(crate::init_status::startup_warnings())
 }
 
 /// 获取 JSON→SQLite 迁移结果（若有）。
@@ -90,6 +99,7 @@ pub async fn get_migration_result() -> Result<bool, String> {
 /// 获取 Skills 自动导入（SSOT）迁移结果（若有）。
 /// 只返回一次 Some({count})，之后返回 None，用于前端显示一次性 Toast 通知。
 #[tauri::command]
+#[specta::specta]
 pub async fn get_skills_migration_result() -> Result<Option<SkillsMigrationPayload>, String> {
     Ok(crate::init_status::take_skills_migration_result())
 }
