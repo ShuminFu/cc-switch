@@ -164,6 +164,141 @@ fn sync_to_app_removes_disabled_and_orphaned_ssot_symlinks() {
     );
 }
 
+fn codex_only_skill(directory: &str, content_hash: Option<String>) -> InstalledSkill {
+    InstalledSkill {
+        id: format!("local:{directory}"),
+        name: directory.to_string(),
+        description: None,
+        directory: directory.to_string(),
+        repo_owner: None,
+        repo_name: None,
+        repo_branch: None,
+        readme_url: None,
+        apps: SkillApps {
+            codex: true,
+            ..Default::default()
+        },
+        installed_at: 0,
+        content_hash,
+        updated_at: 0,
+    }
+}
+
+#[test]
+fn sync_to_app_keeps_user_directory_that_shares_a_managed_name() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+
+    let ssot_skill = home.join(".cc-switch").join("skills").join("foo");
+    write_skill(&ssot_skill, "Managed foo");
+    let hash = SkillService::compute_dir_hash(&ssot_skill).expect("hash ssot");
+
+    let claude_skills = home.join(".claude").join("skills");
+    let user_copy = claude_skills.join("foo");
+    write_skill(&user_copy, "My own foo");
+    fs::write(user_copy.join("notes.md"), "hand edited").expect("write user file");
+
+    let state = create_test_state().expect("create test state");
+    state
+        .db
+        .save_skill(&codex_only_skill("foo", Some(hash)))
+        .expect("save skill");
+
+    SkillService::sync_to_app(&state.db, &AppType::Claude).expect("reconcile claude");
+
+    assert!(
+        user_copy.join("notes.md").exists(),
+        "a user-owned directory with a managed name must survive sync_to_app"
+    );
+    let unmanaged = SkillService::scan_unmanaged(&state.db).expect("scan unmanaged");
+    let entry = unmanaged
+        .iter()
+        .find(|s| s.directory == "foo")
+        .expect("conflicting directory is listed");
+    assert!(entry.conflict, "listed as a conflict");
+    assert!(entry.found_in.iter().any(|f| f == "claude"));
+}
+
+#[test]
+fn sync_to_app_still_removes_symlink_and_identical_copy_of_disabled_skill() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+
+    let ssot = home.join(".cc-switch").join("skills");
+    write_skill(&ssot.join("linked"), "Linked");
+    write_skill(&ssot.join("copied"), "Copied");
+    let copied_hash = SkillService::compute_dir_hash(&ssot.join("copied")).expect("hash");
+
+    let claude_skills = home.join(".claude").join("skills");
+    fs::create_dir_all(&claude_skills).expect("create claude skills dir");
+    symlink_dir(&ssot.join("linked"), &claude_skills.join("linked"));
+    write_skill(&claude_skills.join("copied"), "Copied");
+
+    let state = create_test_state().expect("create test state");
+    state
+        .db
+        .save_skill(&codex_only_skill("linked", None))
+        .expect("save linked");
+    state
+        .db
+        .save_skill(&codex_only_skill("copied", Some(copied_hash)))
+        .expect("save copied");
+
+    SkillService::sync_to_app(&state.db, &AppType::Claude).expect("reconcile claude");
+
+    assert!(!claude_skills.join("linked").exists(), "symlink removed");
+    assert!(
+        !claude_skills.join("copied").exists(),
+        "hash-identical copy removed"
+    );
+}
+
+#[test]
+fn install_from_zip_backs_up_ssot_directory_without_db_row() {
+    use std::io::Write;
+
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+
+    let ssot_foo = home.join(".cc-switch").join("skills").join("foo");
+    write_skill(&ssot_foo, "Old foo");
+    fs::write(ssot_foo.join("notes.txt"), "hand placed").expect("write notes");
+
+    let zip_path = home.join("foo.zip");
+    {
+        let file = fs::File::create(&zip_path).expect("create zip");
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("foo/SKILL.md", options)
+            .expect("start entry");
+        zip.write_all(b"---\nname: New foo\ndescription: from zip\n---\n")
+            .expect("write entry");
+        zip.finish().expect("finish zip");
+    }
+
+    let state = create_test_state().expect("create test state");
+    let installed = SkillService::install_from_zip(&state.db, &zip_path, &AppType::Claude)
+        .expect("install from zip");
+    assert_eq!(installed.len(), 1);
+
+    let skill_md = fs::read_to_string(ssot_foo.join("SKILL.md")).expect("read SKILL.md");
+    assert!(skill_md.contains("New foo"), "zip content installed");
+    assert!(!ssot_foo.join("notes.txt").exists());
+
+    let backups = SkillService::list_backups().expect("list backups");
+    let backup = backups
+        .iter()
+        .find(|b| b.skill.directory == "foo")
+        .expect("orphan SSOT directory was backed up");
+    assert!(
+        std::path::Path::new(&backup.backup_path)
+            .join("skill")
+            .join("notes.txt")
+            .exists(),
+        "backup keeps the original files"
+    );
+}
+
 #[test]
 fn uninstall_skill_creates_backup_before_removing_ssot() {
     let _env = TestEnv::new();
