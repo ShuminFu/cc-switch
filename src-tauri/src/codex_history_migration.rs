@@ -104,6 +104,13 @@ pub struct CodexHistoryProviderBucketMigrationOutcome {
     pub migrated_jsonl_files: usize,
     pub migrated_state_rows: usize,
     pub skipped_reason: Option<String>,
+    /// Session files left for a later run because Codex may still be writing
+    /// them (CFG-43).
+    #[allow(dead_code)] // for the startup log / Settings migrations panel
+    pub deferred_jsonl_files: usize,
+    /// Session files that could not be migrated; the rest still were (CFG-44).
+    #[allow(dead_code)] // for the startup log / Settings migrations panel
+    pub failed_jsonl_files: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -142,12 +149,35 @@ pub fn maybe_migrate_codex_third_party_history_provider_bucket(
 
     let backup_root = migration_backup_root(MIGRATION_NAME);
     let codex_dir = get_codex_config_dir();
-    let migrated_jsonl_files =
-        migrate_codex_jsonl_files(&codex_dir, &source_provider_ids, &backup_root)?;
+    let report = migrate_codex_jsonl_files_report(
+        &codex_dir,
+        &source_provider_ids,
+        &backup_root,
+        SESSION_QUIET_WINDOW,
+    );
+    report.log(MIGRATION_NAME);
+    let migrated_jsonl_files = report.migrated;
     let migrated_state_rows =
         migrate_codex_state_dbs(&codex_dir, &source_provider_ids, &backup_root)?;
+    if let Some(parent) = backup_root.parent() {
+        prune_migration_backup_generations(
+            parent,
+            crate::settings::effective_backup_retain_count(),
+        );
+    }
 
     let source_provider_ids_vec: Vec<String> = source_provider_ids.iter().cloned().collect();
+    if !report.deferred.is_empty() {
+        // retried on the next startup; the migration is idempotent
+        return Ok(CodexHistoryProviderBucketMigrationOutcome {
+            source_provider_ids: source_provider_ids_vec,
+            migrated_jsonl_files,
+            migrated_state_rows,
+            skipped_reason: Some("sessions_in_use".to_string()),
+            deferred_jsonl_files: report.deferred.len(),
+            failed_jsonl_files: report.failed.len(),
+        });
+    }
     crate::settings::mark_codex_third_party_history_provider_bucket_migrated(
         CodexThirdPartyHistoryProviderBucketMigration {
             completed_at: Utc::now().to_rfc3339(),
@@ -164,6 +194,8 @@ pub fn maybe_migrate_codex_third_party_history_provider_bucket(
         migrated_jsonl_files,
         migrated_state_rows,
         skipped_reason: None,
+        deferred_jsonl_files: 0,
+        failed_jsonl_files: report.failed.len(),
     })
 }
 
@@ -236,8 +268,14 @@ pub fn maybe_migrate_codex_official_history_to_unified_bucket(
     let source_provider_ids: BTreeSet<String> =
         std::iter::once(OFFICIAL_OPENAI_CODEX_MODEL_PROVIDER_ID.to_string()).collect();
     let backup_root = migration_backup_root(OFFICIAL_UNIFY_MIGRATION_NAME);
-    let migrated_jsonl_files =
-        migrate_codex_jsonl_files(&codex_dir, &source_provider_ids, &backup_root)?;
+    let report = migrate_codex_jsonl_files_report(
+        &codex_dir,
+        &source_provider_ids,
+        &backup_root,
+        SESSION_QUIET_WINDOW,
+    );
+    report.log(OFFICIAL_UNIFY_MIGRATION_NAME);
+    let migrated_jsonl_files = report.migrated;
     let migrated_state_rows =
         migrate_codex_state_dbs(&codex_dir, &source_provider_ids, &backup_root)?;
     // 备份代际记录来源目录，restore 据此只取当前目录的账本。
@@ -248,7 +286,16 @@ pub fn maybe_migrate_codex_official_history_to_unified_bucket(
         migrated_jsonl_files,
         migrated_state_rows,
         skipped_reason: None,
+        deferred_jsonl_files: report.deferred.len(),
+        failed_jsonl_files: report.failed.len(),
     };
+    // 仍在写入的会话文件留待下次启动重试：不写完成标记（CFG-43）。
+    if !report.deferred.is_empty() {
+        return Ok(CodexHistoryProviderBucketMigrationOutcome {
+            skipped_reason: Some("sessions_in_use".to_string()),
+            ..outcome
+        });
+    }
 
     // 条件写入在 settings 写锁内原子完成："迁移期间开关被关掉"时不写完成标记，
     // 避免下一次开启被标记挡住而漏迁"关闭期间"新产生的 openai 桶会话。
@@ -393,10 +440,21 @@ fn restore_codex_official_history_inner(
     collect_jsonl_files(&codex_dir.join("archived_sessions"), &mut files, 0, 4);
     let mut restored_jsonl_files = 0;
     for file_path in files {
-        if rewrite_codex_session_file_lines(&file_path, codex_dir, restore_backup_root, |line| {
-            rewrite_codex_session_meta_line_for_restore(line, &official_session_ids)
-        })? {
-            restored_jsonl_files += 1;
+        match rewrite_codex_session_file_lines(
+            &file_path,
+            codex_dir,
+            restore_backup_root,
+            Duration::ZERO,
+            |line| rewrite_codex_session_meta_line_for_restore(line, &official_session_ids),
+        )? {
+            SessionRewrite::Rewritten => restored_jsonl_files += 1,
+            SessionRewrite::Unchanged => {}
+            SessionRewrite::Deferred => {
+                return Err(AppError::Message(format!(
+                    "Codex session file changed during migration: {}",
+                    file_path.display()
+                )));
+            }
         }
     }
 
@@ -958,28 +1016,122 @@ fn rewrite_legacy_provider_profile_refs(doc: &mut DocumentMut, source_provider_i
     changed
 }
 
+/// Session files modified more recently than this may still be open in a
+/// running Codex: replacing them by rename would detach Codex's writer from
+/// the file, so they are deferred to a later startup (CFG-43).
+const SESSION_QUIET_WINDOW: Duration = Duration::from_secs(15 * 60);
+
+/// Per-file result of a JSONL migration pass (CFG-43, CFG-44).
+#[derive(Debug, Default)]
+struct JsonlMigrationReport {
+    migrated: usize,
+    /// Files that need a rewrite but were recently modified (or changed while
+    /// being read); the completion marker must not be written while any
+    /// remain, so the next startup retries them.
+    deferred: Vec<PathBuf>,
+    /// Files that could not be migrated (unreadable, invalid UTF-8, write
+    /// failure). They never block the other files.
+    failed: Vec<(PathBuf, String)>,
+}
+
+impl JsonlMigrationReport {
+    fn log(&self, migration: &str) {
+        for path in &self.deferred {
+            log::info!(
+                "{migration}: deferred recently active Codex session {}",
+                path.display()
+            );
+        }
+        for (path, err) in &self.failed {
+            log::warn!(
+                "{migration}: skipped Codex session {}: {err}",
+                path.display()
+            );
+        }
+    }
+}
+
+/// Result of rewriting one session file.
+#[derive(Debug, PartialEq, Eq)]
+enum SessionRewrite {
+    Unchanged,
+    Rewritten,
+    Deferred,
+}
+
+#[cfg(test)]
 fn migrate_codex_jsonl_files(
     codex_dir: &Path,
     source_provider_ids: &BTreeSet<String>,
     backup_root: &Path,
 ) -> Result<usize, AppError> {
+    let report = migrate_codex_jsonl_files_report(
+        codex_dir,
+        source_provider_ids,
+        backup_root,
+        Duration::ZERO,
+    );
+    if let Some((path, err)) = report.failed.first() {
+        return Err(AppError::Message(format!("{}: {err}", path.display())));
+    }
+    Ok(report.migrated)
+}
+
+fn migrate_codex_jsonl_files_report(
+    codex_dir: &Path,
+    source_provider_ids: &BTreeSet<String>,
+    backup_root: &Path,
+    quiet_window: Duration,
+) -> JsonlMigrationReport {
     let mut files = Vec::new();
     collect_jsonl_files(&codex_dir.join("sessions"), &mut files, 0, 8);
     collect_jsonl_files(&codex_dir.join("archived_sessions"), &mut files, 0, 4);
 
     let source_provider_ids: HashSet<String> = source_provider_ids.iter().cloned().collect();
-    let mut migrated = 0;
+    let mut report = JsonlMigrationReport::default();
     for file_path in files {
-        if rewrite_codex_session_file_for_provider_bucket(
+        match rewrite_codex_session_file_lines(
             &file_path,
             codex_dir,
-            &source_provider_ids,
             backup_root,
-        )? {
-            migrated += 1;
+            quiet_window,
+            |line| rewrite_codex_session_meta_line(line, &source_provider_ids),
+        ) {
+            Ok(SessionRewrite::Rewritten) => report.migrated += 1,
+            Ok(SessionRewrite::Unchanged) => {}
+            Ok(SessionRewrite::Deferred) => report.deferred.push(file_path),
+            Err(err) => report.failed.push((file_path, err.to_string())),
         }
     }
-    Ok(migrated)
+    report
+}
+
+/// Keep only the newest `retain` timestamped generations under a migration
+/// backup directory (CFG-44). Only for migrations whose backups are not a
+/// restore ledger.
+fn prune_migration_backup_generations(parent: &Path, retain: usize) {
+    let Ok(entries) = fs::read_dir(parent) else {
+        return;
+    };
+    let mut generations: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    if generations.len() <= retain {
+        return;
+    }
+    // generation names are `%Y%m%d_%H%M%S`, so lexical order is chronological
+    generations.sort();
+    let remove = generations.len() - retain;
+    for old in generations.into_iter().take(remove) {
+        if let Err(err) = fs::remove_dir_all(&old) {
+            log::warn!(
+                "Failed to prune Codex migration backup {}: {err}",
+                old.display()
+            );
+        }
+    }
 }
 
 fn collect_jsonl_files(dir: &Path, files: &mut Vec<PathBuf>, depth: u8, max_depth: u8) {
@@ -1008,23 +1160,31 @@ fn collect_jsonl_files(dir: &Path, files: &mut Vec<PathBuf>, depth: u8, max_dept
     }
 }
 
+#[cfg(test)]
 fn rewrite_codex_session_file_for_provider_bucket(
     path: &Path,
     codex_dir: &Path,
     source_provider_ids: &HashSet<String>,
     backup_root: &Path,
 ) -> Result<bool, AppError> {
-    rewrite_codex_session_file_lines(path, codex_dir, backup_root, |line| {
+    rewrite_codex_session_file_lines(path, codex_dir, backup_root, Duration::ZERO, |line| {
         rewrite_codex_session_meta_line(line, source_provider_ids)
     })
+    .map(|r| r == SessionRewrite::Rewritten)
 }
 
+/// Rewrite the lines of one session file.
+///
+/// A file that needs a rewrite but was modified within `quiet_window`, or
+/// that changes while it is being read and backed up, is left alone and
+/// reported as [`SessionRewrite::Deferred`] (CFG-43).
 fn rewrite_codex_session_file_lines(
     path: &Path,
     codex_dir: &Path,
     backup_root: &Path,
+    quiet_window: Duration,
     rewrite_line: impl Fn(&str) -> Option<String>,
-) -> Result<bool, AppError> {
+) -> Result<SessionRewrite, AppError> {
     let metadata_before = fs::metadata(path).map_err(|e| AppError::io(path, e))?;
     let modified_before = metadata_before.modified().ok();
     let len_before = metadata_before.len();
@@ -1047,29 +1207,38 @@ fn rewrite_codex_session_file_lines(
     }
 
     if !changed {
-        return Ok(false);
+        return Ok(SessionRewrite::Unchanged);
     }
 
-    ensure_codex_session_file_unchanged(path, modified_before, len_before)?;
+    if !quiet_window.is_zero() {
+        let recently_active = modified_before
+            .and_then(|mtime| SystemTime::now().duration_since(mtime).ok())
+            .map(|age| age < quiet_window)
+            // mtime in the future or unavailable: treat as active
+            .unwrap_or(true);
+        if recently_active {
+            return Ok(SessionRewrite::Deferred);
+        }
+    }
+
+    if !codex_session_file_unchanged(path, modified_before, len_before)? {
+        return Ok(SessionRewrite::Deferred);
+    }
     backup_codex_jsonl_file(path, codex_dir, backup_root)?;
-    ensure_codex_session_file_unchanged(path, modified_before, len_before)?;
+    if !codex_session_file_unchanged(path, modified_before, len_before)? {
+        return Ok(SessionRewrite::Deferred);
+    }
     atomic_write(path, rewritten.as_bytes())?;
-    Ok(true)
+    Ok(SessionRewrite::Rewritten)
 }
 
-fn ensure_codex_session_file_unchanged(
+fn codex_session_file_unchanged(
     path: &Path,
     modified_before: Option<SystemTime>,
     len_before: u64,
-) -> Result<(), AppError> {
+) -> Result<bool, AppError> {
     let metadata_after = fs::metadata(path).map_err(|e| AppError::io(path, e))?;
-    if metadata_after.modified().ok() != modified_before || metadata_after.len() != len_before {
-        return Err(AppError::Message(format!(
-            "Codex session file changed during migration: {}",
-            path.display()
-        )));
-    }
-    Ok(())
+    Ok(metadata_after.modified().ok() == modified_before && metadata_after.len() == len_before)
 }
 
 fn rewrite_codex_session_meta_line(
@@ -1943,6 +2112,70 @@ base_url = "https://proxy.example/v1"
 
         let text = fs::read_to_string(session_dir.join("session.jsonl")).expect("read session");
         assert!(text.contains("\"model_provider\":\"custom\""));
+    }
+
+    fn age_file(path: &Path, age: Duration) {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .expect("open for mtime");
+        file.set_modified(SystemTime::now() - age)
+            .expect("set mtime");
+    }
+
+    #[test]
+    fn recently_active_session_is_deferred_and_others_migrate() {
+        let dir = tempdir().expect("tempdir");
+        let codex_dir = dir.path().join(".codex");
+        let backup_root = dir.path().join("backup");
+        let session_dir = codex_dir.join("sessions/2026/05/20");
+        fs::create_dir_all(&session_dir).unwrap();
+        let line = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"s\",\"model_provider\":\"rightcode\"}}\n";
+        let live = session_dir.join("live.jsonl");
+        let old = session_dir.join("old.jsonl");
+        let broken = session_dir.join("broken.jsonl");
+        fs::write(&live, line).unwrap();
+        fs::write(&old, line).unwrap();
+        fs::write(
+            &broken,
+            b"{\"type\":\"session_meta\",\"model_provider\":\"\xFF\"}\n",
+        )
+        .unwrap();
+        age_file(&old, Duration::from_secs(3600));
+        age_file(&broken, Duration::from_secs(3600));
+
+        // keep a writer open on the live session, as a running Codex would
+        let _writer = fs::OpenOptions::new().append(true).open(&live).unwrap();
+        let ids = BTreeSet::from(["rightcode".to_string()]);
+        let report =
+            migrate_codex_jsonl_files_report(&codex_dir, &ids, &backup_root, SESSION_QUIET_WINDOW);
+        assert_eq!(report.migrated, 1);
+        assert_eq!(report.deferred, vec![live.clone()]);
+        assert_eq!(report.failed.len(), 1);
+        assert_eq!(report.failed[0].0, broken);
+        assert!(fs::read_to_string(&live).unwrap().contains("rightcode"));
+        assert!(fs::read_to_string(&old).unwrap().contains("\"custom\""));
+
+        // once the session is quiet a later run migrates it
+        drop(_writer);
+        age_file(&live, Duration::from_secs(3600));
+        let report =
+            migrate_codex_jsonl_files_report(&codex_dir, &ids, &backup_root, SESSION_QUIET_WINDOW);
+        assert_eq!(report.migrated, 1);
+        assert!(report.deferred.is_empty());
+        assert!(fs::read_to_string(&live).unwrap().contains("\"custom\""));
+    }
+
+    #[test]
+    fn prune_migration_backup_generations_keeps_newest() {
+        let dir = tempdir().expect("tempdir");
+        for name in ["20260101_000000", "20260102_000000", "20260103_000000"] {
+            fs::create_dir_all(dir.path().join(name).join("jsonl")).unwrap();
+        }
+        prune_migration_backup_generations(dir.path(), 2);
+        assert!(!dir.path().join("20260101_000000").exists());
+        assert!(dir.path().join("20260102_000000").exists());
+        assert!(dir.path().join("20260103_000000").exists());
     }
 
     #[test]
