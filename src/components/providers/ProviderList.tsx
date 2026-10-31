@@ -41,6 +41,10 @@ import { useShortcut } from "@/lib/shortcuts";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
 import {
+  ImportCandidatesDialog,
+  supportsImportPicker,
+} from "@/components/providers/ImportCandidatesDialog";
+import {
   useAutoFailoverEnabled,
   useFailoverQueue,
   useProvidersHealth,
@@ -246,6 +250,8 @@ export function ProviderList({
   );
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [isImportPickerOpen, setIsImportPickerOpen] = useState(false);
+  const canPickImport = supportsImportPicker(appId);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { data: claudeDesktopStatus } = useQuery({
@@ -504,13 +510,28 @@ export function ProviderList({
     );
   }
 
+  const importPicker = canPickImport && isImportPickerOpen && (
+    <ImportCandidatesDialog
+      open={isImportPickerOpen}
+      appId={appId}
+      existingIds={Object.keys(providers)}
+      onOpenChange={setIsImportPickerOpen}
+    />
+  );
+
   if (sortedProviders.length === 0) {
     return (
-      <ProviderEmptyState
-        appId={appId}
-        onCreate={onCreate}
-        onImport={() => importMutation.mutate()}
-      />
+      <>
+        <ProviderEmptyState
+          appId={appId}
+          onCreate={onCreate}
+          onImport={() => importMutation.mutate()}
+          onPickImport={
+            canPickImport ? () => setIsImportPickerOpen(true) : undefined
+          }
+        />
+        {importPicker}
+      </>
     );
   }
 
@@ -754,6 +775,22 @@ export function ProviderList({
       ) : (
         renderProviderList()
       )}
+
+      {canPickImport && (
+        <div className="flex justify-center">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-muted-foreground"
+            onClick={() => setIsImportPickerOpen(true)}
+          >
+            {t("provider.importPicker.open", {
+              defaultValue: "Choose providers from the live config…",
+            })}
+          </Button>
+        </div>
+      )}
+      {importPicker}
     </div>
   );
 }

@@ -7,12 +7,15 @@ interface ProviderEmptyStateProps {
   appId: AppId;
   onCreate?: () => void;
   onImport?: () => void;
+  /** Opens the "choose providers to import" picker (CFG-23). */
+  onPickImport?: () => void;
 }
 
 export function ProviderEmptyState({
   appId,
   onCreate,
   onImport,
+  onPickImport,
 }: ProviderEmptyStateProps) {
   const { t } = useTranslation();
   const showSnippetHint =
@@ -41,6 +44,13 @@ export function ProviderEmptyState({
                   defaultValue: "Import existing providers from Claude Code",
                 })
               : t("provider.importCurrent")}
+          </Button>
+        )}
+        {onPickImport && (
+          <Button variant="outline" onClick={onPickImport}>
+            {t("provider.importPicker.open", {
+              defaultValue: "Choose providers from the live config…",
+            })}
           </Button>
         )}
         {onCreate && (
