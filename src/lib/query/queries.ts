@@ -21,29 +21,17 @@ import type {
 import { usageKeys } from "@/lib/query/usage";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { queryKeys } from "./keys";
+import { providerSortLocale, sortProviders } from "@/utils/providerSort";
+import i18n from "i18next";
 
-const sortProviders = (
+const sortProviderMap = (
   providers: Record<string, Provider>,
-): Record<string, Provider> => {
-  const sortedEntries = Object.values(providers)
-    .sort((a, b) => {
-      const indexA = a.sortIndex ?? Number.MAX_SAFE_INTEGER;
-      const indexB = b.sortIndex ?? Number.MAX_SAFE_INTEGER;
-      if (indexA !== indexB) {
-        return indexA - indexB;
-      }
-
-      const timeA = a.createdAt ?? 0;
-      const timeB = b.createdAt ?? 0;
-      if (timeA === timeB) {
-        return a.name.localeCompare(b.name, "zh-CN");
-      }
-      return timeA - timeB;
-    })
-    .map((provider) => [provider.id, provider] as const);
-
-  return Object.fromEntries(sortedEntries);
-};
+): Record<string, Provider> =>
+  Object.fromEntries(
+    sortProviders(providers, providerSortLocale(i18n.language)).map(
+      (provider) => [provider.id, provider] as const,
+    ),
+  );
 
 export interface ProvidersQueryData {
   providers: Record<string, Provider>;
@@ -83,7 +71,7 @@ export const useProvidersQuery = (
       }
 
       return {
-        providers: sortProviders(providers),
+        providers: sortProviderMap(providers),
         currentProviderId,
       };
     },

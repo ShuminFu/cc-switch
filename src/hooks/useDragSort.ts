@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { Provider } from "@/types";
 import { providersApi, type AppId } from "@/lib/api";
+import { providerSortLocale, sortProviders } from "@/utils/providerSort";
 
 interface ProvidersCacheData {
   providers: Record<string, Provider>;
@@ -23,29 +24,10 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
   const queryClient = useQueryClient();
   const { t, i18n } = useTranslation();
 
-  const sortedProviders = useMemo(() => {
-    const locale =
-      i18n.language === "zh"
-        ? "zh-CN"
-        : i18n.language === "zh-TW"
-          ? "zh-TW"
-          : "en-US";
-    return Object.values(providers).sort((a, b) => {
-      if (a.sortIndex !== undefined && b.sortIndex !== undefined) {
-        return a.sortIndex - b.sortIndex;
-      }
-      if (a.sortIndex !== undefined) return -1;
-      if (b.sortIndex !== undefined) return 1;
-
-      const timeA = a.createdAt ?? 0;
-      const timeB = b.createdAt ?? 0;
-      if (timeA && timeB && timeA !== timeB) {
-        return timeA - timeB;
-      }
-
-      return a.name.localeCompare(b.name, locale);
-    });
-  }, [providers, i18n.language]);
+  const sortedProviders = useMemo(
+    () => sortProviders(providers, providerSortLocale(i18n.language)),
+    [providers, i18n.language],
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
