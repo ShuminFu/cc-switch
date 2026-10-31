@@ -78,9 +78,26 @@ export default tseslint.config(
     },
   },
   {
-    files: ["tests/**/*.{ts,tsx}", "**/*.test.{ts,tsx}"],
+    files: ["tests/**/*.{ts,tsx}", "**/*.test.{ts,tsx}", "e2e/**/*.{ts,tsx}"],
     languageOptions: {
       globals: { ...globals.browser, ...globals.node, ...globals.vitest },
+    },
+    rules: {
+      // TEST-21: a committed `it.only` silently skips the rest of the suite
+      // in CI, so focused tests are an error; disabled tests are also an error (fix or delete them).
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression > MemberExpression.callee[object.name=/^(it|test|describe|suite)$/][property.name='only']",
+          message: "Focused test (.only) committed; remove it.",
+        },
+        {
+          selector:
+            "CallExpression > MemberExpression.callee[object.name=/^(it|test|describe|suite)$/][property.name=/^(skip|todo)$/]",
+          message: "Disabled test (.skip); fix or delete it.",
+        },
+      ],
     },
   },
   {
@@ -88,6 +105,14 @@ export default tseslint.config(
     extends: [js.configs.recommended],
     languageOptions: {
       globals: { ...globals.node },
+    },
+  },
+  {
+    // Playwright journeys: node code with `page.evaluate` callbacks that run
+    // in the browser.
+    files: ["e2e/**/*.{js,mjs}"],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
     },
   },
   {

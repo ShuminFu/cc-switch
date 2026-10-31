@@ -24,6 +24,7 @@ import {
   upsertMcpServer,
   deleteMcpServer,
 } from "./state";
+import { tauriError } from "./tauriError";
 
 const TAURI_ENDPOINT = "http://tauri.local";
 
@@ -52,6 +53,12 @@ const secretsVaultStatus = (enabled: boolean) => ({
 });
 
 export const handlers = [
+  // App startup commands (found by the e2e harness, TEST-17).
+  http.post(`${TAURI_ENDPOINT}/get_init_error`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/get_auto_failover_enabled`, () =>
+    success(false),
+  ),
+  http.post(`${TAURI_ENDPOINT}/set_window_theme`, () => success(null)),
   http.post(`${TAURI_ENDPOINT}/get_migration_result`, () => success(false)),
   http.post(`${TAURI_ENDPOINT}/get_skills_migration_result`, () =>
     success(null),
@@ -102,7 +109,7 @@ export const handlers = [
     const { id, app } = await withJson<{ id: string; app: AppId }>(request);
     const providers = listProviders(app);
     if (!providers[id]) {
-      return HttpResponse.json(false, { status: 404 });
+      return tauriError(`Provider not found: ${id}`);
     }
     setCurrentProviderId(app, id);
     return success(true);

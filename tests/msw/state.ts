@@ -7,6 +7,7 @@ import type {
   Settings,
 } from "@/types";
 import { deepClone } from "@/utils/deepClone";
+import { FIXED_NOW, makeProvider, providerMap } from "../factories";
 
 type ProvidersByApp = Record<AppId, Record<string, Provider>>;
 type CurrentProviderState = Record<AppId, string>;
@@ -16,59 +17,46 @@ type LiveProviderIdsByApp = Record<
   string[]
 >;
 
+// TEST-25: built from the shared factories (tests/factories) so every test
+// sees the same realistic shapes. Official providers keep an empty config.
 const createDefaultProviders = (): ProvidersByApp => ({
-  claude: {
-    "claude-1": {
-      id: "claude-1",
-      name: "Claude Default",
-      settingsConfig: {},
-      category: "official",
-      sortIndex: 0,
-      createdAt: Date.now(),
-    },
-    "claude-2": {
-      id: "claude-2",
-      name: "Claude Custom",
-      settingsConfig: {},
-      category: "custom",
-      sortIndex: 1,
-      createdAt: Date.now() + 1,
-    },
-  },
-  "claude-desktop": {},
-  codex: {
-    "codex-1": {
-      id: "codex-1",
-      name: "Codex Default",
-      settingsConfig: {},
-      category: "official",
-      sortIndex: 0,
-      createdAt: Date.now(),
-    },
-    "codex-2": {
-      id: "codex-2",
-      name: "Codex Secondary",
-      settingsConfig: {},
-      category: "custom",
-      sortIndex: 1,
-      createdAt: Date.now() + 1,
-    },
-  },
-  gemini: {
-    "gemini-1": {
-      id: "gemini-1",
-      name: "Gemini Default",
-      settingsConfig: {
-        env: {
-          GEMINI_API_KEY: "test-key",
-          GOOGLE_GEMINI_BASE_URL: "https://generativelanguage.googleapis.com",
-        },
+  claude: providerMap([
+    makeProvider(
+      { id: "claude-1", name: "Claude Default", category: "official" },
+      { app: "claude", emptyConfig: true },
+    ),
+    makeProvider(
+      {
+        id: "claude-2",
+        name: "Claude Custom",
+        sortIndex: 1,
+        createdAt: FIXED_NOW + 1,
       },
-      category: "official",
-      sortIndex: 0,
-      createdAt: Date.now(),
-    },
-  },
+      { app: "claude", emptyConfig: true },
+    ),
+  ]),
+  "claude-desktop": {},
+  codex: providerMap([
+    makeProvider(
+      { id: "codex-1", name: "Codex Default", category: "official" },
+      { app: "codex", emptyConfig: true },
+    ),
+    makeProvider(
+      {
+        id: "codex-2",
+        name: "Codex Secondary",
+        sortIndex: 1,
+        createdAt: FIXED_NOW + 1,
+      },
+      { app: "codex", emptyConfig: true },
+    ),
+  ]),
+  gemini: providerMap([
+    makeProvider(
+      { id: "gemini-1", name: "Gemini Default", category: "official" },
+      { app: "gemini" },
+    ),
+  ]),
   grokbuild: {},
   opencode: {},
   openclaw: {},
