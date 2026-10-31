@@ -156,13 +156,22 @@ pub struct TrayAppSection {
 pub const AUTO_SUFFIX: &str = "auto";
 pub const TRAY_ID: &str = "cc-switch";
 
-pub const TRAY_SECTIONS: [TrayAppSection; 4] = [
+pub const TRAY_SECTIONS: [TrayAppSection; 5] = [
     TrayAppSection {
         app_type: AppType::Claude,
         prefix: "claude_",
         empty_id: "claude_empty",
         header_label: "Claude",
         log_name: "Claude",
+    },
+    // PRODUCT-15: Claude Desktop is an exclusive (one current provider) app like
+    // Claude Code, so it switches through the same ProviderService::switch path.
+    TrayAppSection {
+        app_type: AppType::ClaudeDesktop,
+        prefix: "claudedesktop_",
+        empty_id: "claudedesktop_empty",
+        header_label: "Claude Desktop",
+        log_name: "Claude Desktop",
     },
     TrayAppSection {
         app_type: AppType::Codex,
@@ -1744,6 +1753,29 @@ mod tests {
         assert_eq!(map_locale_to_tray_language("zh_CN"), "zh");
         assert_eq!(map_locale_to_tray_language("ja_JP"), "ja");
         assert_eq!(map_locale_to_tray_language("de_DE"), "en");
+    }
+
+    #[test]
+    fn tray_sections_include_claude_desktop_with_a_non_overlapping_prefix() {
+        let section = TRAY_SECTIONS
+            .iter()
+            .find(|section| section.app_type == AppType::ClaudeDesktop)
+            .expect("Claude Desktop tray section should exist");
+        assert_eq!(section.prefix, "claudedesktop_");
+        // No section prefix may be a prefix of another, or events would be
+        // routed to the wrong app.
+        for a in TRAY_SECTIONS.iter() {
+            for b in TRAY_SECTIONS.iter() {
+                if a.app_type != b.app_type {
+                    assert!(
+                        !b.prefix.starts_with(a.prefix),
+                        "{} shadows {}",
+                        a.prefix,
+                        b.prefix
+                    );
+                }
+            }
+        }
     }
 
     #[test]
