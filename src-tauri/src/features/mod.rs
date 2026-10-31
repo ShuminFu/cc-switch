@@ -12,6 +12,7 @@ pub mod deeplink_nav;
 pub mod file_dialog;
 pub mod log_retention;
 pub mod policy;
+pub mod prompt_share;
 pub mod redact;
 pub mod session_cost;
 pub mod session_export;

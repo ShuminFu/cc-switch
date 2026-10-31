@@ -1002,6 +1002,7 @@ pub fn run() {
             features::session_cost::get_usage_by_project,
             features::db_recovery::list_recovery_backups,
             features::db_recovery::restore_backup_for_recovery,
+            features::prompt_share::copy_prompt_to_apps,
             commands::merge_deeplink_config,
             commands::import_from_deeplink,
             commands::import_from_deeplink_unified,
