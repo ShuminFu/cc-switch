@@ -46,7 +46,8 @@
     "copyFailed": "複製失敗",
     "unsavedChangesTitle": "捨棄未儲存的變更？",
     "unsavedChangesMessage": "你的編輯尚未儲存，將會遺失。",
-    "discard": "捨棄"
+    "discard": "捨棄",
+    "undo": "復原"
   },
   "firstRunNotice": {
     "title": "歡迎使用 CC Switch",
@@ -184,7 +185,13 @@
     "loadFailed": "載入供應商失敗",
     "tabProviderFor": "{{app}} 供應商",
     "configStatusLoading": "正在檢查應用程式設定…",
-    "copyName": "{{name}} 副本"
+    "copyName": "{{name}} 副本",
+    "copyShareLink": "複製分享連結（不含 API 金鑰）",
+    "shareLinkCopied": "分享連結已複製（未包含 API 金鑰）",
+    "shareLinkCopyFailed": "複製分享連結失敗：{{error}}",
+    "searchShortcut": "搜尋供應商",
+    "searchCloseShortcut": "關閉供應商搜尋",
+    "duplicateName": "{{name}} 副本"
   },
   "claudeCode": {
     "needsRouting": "需要路由",
@@ -283,7 +290,9 @@
     "officialBlockedByProxy": "本地路由模式下不能切換至官方供應商，使用路由存取官方 API 可能導致帳號被封鎖",
     "proxyOfficialWarning": "目前供應商 {{name}} 是官方供應商，建議切換至第三方供應商後再使用本地路由",
     "proxyReasonClaudeDesktop": "使用 Claude Desktop 本地路由模式",
-    "openclawModelsRegisterFailed": "供應商已新增，但其模型無法註冊到 OpenClaw：{{error}}"
+    "openclawModelsRegisterFailed": "供應商已新增，但其模型無法註冊到 OpenClaw：{{error}}",
+    "undoDeleteFailed": "無法還原供應商：{{error}}",
+    "removeFromConfigFailed": "從設定中移除失敗：{{error}}"
   },
   "confirm": {
     "deleteProvider": "刪除供應商",
@@ -488,6 +497,8 @@
       "deleteFailed": "刪除失敗",
       "deleteConfirmTitle": "確認刪除備份",
       "deleteConfirmMessage": "此備份將被永久刪除，此操作無法復原。",
+      "openFolderFailed": "無法開啟備份資料夾",
+      "showInFolder": "在資料夾中顯示",
       "kind": {
         "manual": "手動",
         "manualHint": "透過「立即備份」建立，不會被自動輪替清除",
@@ -729,7 +740,9 @@
       "confirmTitle": "遷移技能儲存位置",
       "confirmMessage": "將移動 {{count}} 個技能至新位置，是否繼續？",
       "migrationSuccess": "已成功遷移 {{count}} 個技能",
-      "migrationPartial": "遷移了 {{migrated}} 個技能，{{errors}} 個失敗，請查看日誌"
+      "migrationPartial": "遷移了 {{migrated}} 個技能，{{errors}} 個失敗，請查看日誌",
+      "migrationMoreErrors": "…以及另外 {{count}} 項",
+      "migrationErrorsTitle": "以下技能仍保留在原位置，需要手動移動："
     },
     "skillSync": {
       "title": "Skills 同步方式",
@@ -890,9 +903,25 @@
       "pricingSaveFailed": "儲存計費設定失敗：{{error}}",
       "pricingLoadFailed": "載入計費設定失敗：{{error}}",
       "defaultCostMultiplierRequired": "預設倍率不能為空",
-      "defaultCostMultiplierInvalid": "預設倍率格式不正確"
+      "defaultCostMultiplierInvalid": "預設倍率格式不正確",
+      "urlLabel": "代理伺服器 URL",
+      "hidePassword": "隱藏密碼",
+      "showPassword": "顯示密碼",
+      "appFieldError": "{{app}}：{{message}}",
+      "pricingSaveFailedBadge": "（未儲存）"
     },
     "saveFailedGeneric": "儲存失敗，請重試",
+    "installScriptSourcesHint": "部分指令會下載並執行以下安裝指令碼，執行前請先檢查：",
+    "configLoadFailed": "無法載入目前設定，已停用編輯。{{detail}}",
+    "revertImport": "復原匯入",
+    "importConfirmTitle": "取代所有目前資料？",
+    "importConfirmMessage": "匯入 {{file}} 將取代所有供應商、MCP 伺服器、提示詞與設定，並重寫生效中的 CLI 設定檔。匯入前會先建立安全備份，以便復原匯入。",
+    "revertImportConfirmTitle": "復原此次匯入？",
+    "revertImportConfirmMessage": "還原匯入前建立的備份 {{backupId}}？匯入後所做的變更將遺失。",
+    "revertImportSuccess": "已復原匯入",
+    "revertImportFailed": "復原匯入失敗：{{message}}",
+    "unsavedChanges": "有未儲存的變更",
+    "discardChanges": "捨棄",
     "cloudSync": {
       "conflict": {
         "localChanged": "自上次同步以來，本機資料已有變更。現在下載將以雲端資料取代這些本機變更。如需保留，請取消並先上傳。",
@@ -971,7 +1000,14 @@
     "contextWindowInvalid": "上下文視窗必須是正整數",
     "profile": "用戶端模型檔位",
     "rawConfig": "config.toml",
-    "invalidToml": "config.toml 格式錯誤：{{error}}"
+    "invalidToml": "config.toml 格式錯誤：{{error}}",
+    "validation": {
+      "configEmpty": "config.toml 不能為空",
+      "missingDefaultModel": "缺少 [models] 預設模型表",
+      "missingField": "缺少 {{field}}",
+      "missingKey": "缺少 api_key 或 env_key",
+      "contextWindow": "context_window 必須是正整數"
+    }
   },
   "sessionManager": {
     "title": "工作階段管理",
@@ -1057,7 +1093,10 @@
     "searchTranscripts": "搜尋訊息內容",
     "searchIndexing": "正在索引對話內容…結果會陸續增加",
     "scanErrors": "部分工作階段無法讀取",
-    "messagesLoadFailed": "載入此工作階段失敗"
+    "messagesLoadFailed": "載入此工作階段失敗",
+    "showMore": "顯示更多（剩餘 {{count}} 筆）",
+    "undoDelete": "復原",
+    "restoreFailed": "無法還原工作階段"
   },
   "console": {
     "providerSwitchReceived": "收到供應商切換事件：",
@@ -1262,7 +1301,8 @@
       "fieldExtractedConfig": "擷取的設定",
       "fieldMustBeObject": "{{field}}必須是 JSON 物件",
       "fieldJsonSyntaxError": "{{field}} JSON 格式錯誤，請檢查語法",
-      "commonConfigParseFailed": "設定 JSON 解析失敗，無法套用通用設定"
+      "commonConfigParseFailed": "設定 JSON 解析失敗，無法套用通用設定",
+      "fieldUnsafeKey": "{{field}} 不能包含 __proto__、constructor 或 prototype 鍵"
     },
     "codexAuthInvalid": "auth.json 不是有效的 JSON，請修正後再儲存。",
     "codexAuthNotObject": "auth.json 必須是 JSON 物件。",
@@ -1273,7 +1313,8 @@
     "removeModel": "刪除模型",
     "providerKeyStatusUnavailable": "無法檢查此供應商識別碼是否已被使用。請重新載入後重試。",
     "moveModelUp": "上移模型",
-    "moveModelDown": "下移模型"
+    "moveModelDown": "下移模型",
+    "chooseModel": "選擇模型"
   },
   "copilot": {
     "authSection": "GitHub Copilot 驗證",
@@ -1448,7 +1489,9 @@
     "reasoningGroupTitle": "思考能力",
     "reasoningSectionHint": "預設供應商已自動設定；自訂供應商會按名稱/位址自動推斷。僅當自動識別不準時才需手動覆寫。",
     "advancedSectionHint": "包含上游格式、模型映射、思考能力與自訂 User-Agent。使用 Chat Completions 協定的供應商需開啟路由接管才能使用。",
-    "noCommonConfigToApply": "通用設定片段為空或沒有可寫入的內容"
+    "noCommonConfigToApply": "通用設定片段為空或沒有可寫入的內容",
+    "fixSmartQuotes": "取代用作字串分隔符號的智慧引號",
+    "tomlInvalid": "TOML 格式無效"
   },
   "geminiConfig": {
     "envFile": "環境變數 (.env)",
@@ -1713,6 +1756,16 @@
     "cacheReadCostPerMillion": "快取讀取成本 (每百萬 tokens, USD)",
     "cacheCreationCostPerMillion": "快取寫入成本 (每百萬 tokens, USD)",
     "unpriced": "未定價",
+    "modelIdDuplicate": "{{id}} 的定價已存在。",
+    "modelIdNormalizedHint": "將儲存為 {{id}}",
+    "statusErrors": "錯誤（≥400）",
+    "rangeTooLong": "時間範圍最多為 {{days}} 天。",
+    "customRangeMaxHint": "支援日期與時間，最多 {{days}} 天",
+    "exportSuccess": "已將 {{count}} 筆請求匯出至 {{path}}",
+    "exportFailed": "匯出失敗：{{message}}",
+    "export": "匯出",
+    "exportCsv": "請求日誌（CSV）",
+    "exportJson": "請求日誌（JSON）",
     "budget": {
       "daily": "每日上限（USD）",
       "dailyTooltip": "每日：{{usage}} / {{limit}}",
@@ -1730,7 +1783,11 @@
       "thisMonth": "本月",
       "title": "預算上限",
       "today": "今日",
-      "todayLabel": "今日"
+      "todayLabel": "今日",
+      "exceededToast": "{{provider}} 已達到{{period}}預算上限",
+      "exceededBadge": "已超出",
+      "periodDaily": "每日",
+      "periodMonthly": "每月"
     }
   },
   "usageScript": {
@@ -2047,6 +2104,8 @@
     "disableFailed": "停用失敗",
     "importSuccess": "匯入成功",
     "importFailed": "匯入失敗",
+    "liveFileDiffers": "目前生效的提示詞檔案已在 CC Switch 之外被修改，與已啟用的提示詞不一致。重新啟用或編輯該提示詞將覆寫這些修改。",
+    "importLiveChanges": "匯入外部修改",
     "confirm": {
       "deleteTitle": "確認刪除",
       "deleteMessage": "確定要刪除提示詞 \"{{name}}\" 嗎？"
@@ -2618,7 +2677,11 @@
     "signedByUnverified": "由自稱「{{publisher}}」的金鑰簽章",
     "signatureKeyId": "金鑰 ID {{keyId}}",
     "publisherMismatch": "此名稱屬於你已知的發布者，但該連結使用了不同的金鑰簽章，可能是冒充。",
-    "publisherNew": "簽章有效，但 CC Switch 之前未見過此金鑰。"
+    "publisherNew": "簽章有效，但 CC Switch 之前未見過此金鑰。",
+    "usageScriptSendsKeyTo": "啟用後，此指令碼可能會將您的 API 金鑰傳送至：{{hosts}}",
+    "usageScriptContacts": "啟用後，此指令碼將連線至：{{hosts}}",
+    "usageScriptNoHosts": "此指令碼在執行時建構請求 URL，請檢查原始碼以確認其傳送資料的目標。",
+    "usageScriptPrivateHosts": "它還會連線至本機或私人網路位址：{{hosts}}"
   },
   "iconPicker": {
     "search": "搜尋圖示",
@@ -2815,7 +2878,13 @@
       "removeFailed": "移除失敗",
       "reorderSuccess": "佇列順序已更新",
       "reorderFailed": "更新順序失敗",
-      "toggleFailed": "狀態更新失敗"
+      "toggleFailed": "狀態更新失敗",
+      "circuitReset": "熔斷器已重設",
+      "lastFailure": "最近失敗 {{time}}：{{error}}",
+      "moveUp": "上移",
+      "moveDown": "下移",
+      "test": "測試連線",
+      "resetCircuit": "重設熔斷器"
     },
     "autoFailover": {
       "info": "當故障轉移佇列中設定了多個供應商時，系統會在請求失敗時按優先順序依次嘗試。當某個供應商連續失敗達到閾值時，斷路器會打開並在一段時間內跳過該供應商。",
@@ -2880,7 +2949,8 @@
     "timeout": "逾時時間（秒）",
     "maxRetries": "最大重試次數",
     "degradedThreshold": "緩慢閾值（毫秒）",
-    "error": "{{providerName}} 檢查出錯：{{error}}"
+    "error": "{{providerName}} 檢查出錯：{{error}}",
+    "rangeError": "請輸入 {{min}} 到 {{max}} 之間的整數。"
   },
   "proxyConfig": {
     "proxyEnabled": "路由總開關",
@@ -3244,5 +3314,54 @@
     "selectProfile": "要綁定的專案",
     "projectLevel": "寫入專案檔案",
     "bindFolder": "綁定資料夾…"
+  },
+  "palette": {
+    "openSettings": "開啟設定",
+    "goBack": "返回上一頁",
+    "shortcut": "開啟命令面板",
+    "title": "命令面板",
+    "placeholder": "切換供應商、應用程式或頁面...",
+    "empty": "無符合結果",
+    "apps": "切換應用程式",
+    "pages": "開啟頁面",
+    "shortcuts": "鍵盤快速鍵"
+  },
+  "deeplinkAction": {
+    "failed": "無法處理深層連結：{{error}}",
+    "providerNotFound": "{{app}} 中沒有名為「{{provider}}」的供應商",
+    "profileNotFound": "沒有名為「{{name}}」的專案",
+    "switchTitle": "切換供應商？",
+    "switchMessage": "某個連結要求將 {{app}} 切換至「{{provider}}」。",
+    "switchConfirm": "切換",
+    "profileTitle": "套用專案？",
+    "profileMessage": "某個連結要求套用專案「{{name}}」。",
+    "profileConfirm": "套用"
+  },
+  "logRetention": {
+    "pruned": "已刪除 {{count}} 筆請求日誌，用量彙總已保留",
+    "title": "請求日誌保留期限",
+    "description": "每次請求的中繼資料（模型、Token、狀態、工作階段 ID、錯誤）會保留這麼久，之後併入每日用量彙總。請求與回應內容從不儲存。",
+    "days": "{{count}} 天",
+    "deleteNow": "立即刪除請求日誌",
+    "dbSize": "資料庫大小：{{size}}",
+    "confirmTitle": "刪除請求日誌？",
+    "confirmMessage": "所有請求日誌的 Token 與成本計入每日彙總後，這些日誌將被刪除。用量圖表會保留彙總資料，但請求詳細資訊將不再可用。"
+  },
+  "policy": {
+    "signatureInvalid": "由於無法驗證簽章，已忽略一個受管理的原則檔案。",
+    "invalid": "由於無法讀取，已忽略一個受管理的原則檔案。",
+    "defaultName": "您的組織",
+    "allowedEndpoints": "允許的端點：",
+    "deniedEndpoints": "禁止的端點：",
+    "disabledFeatures": "已停用的功能：",
+    "managedBy": "由原則管理：{{name}}",
+    "signed": "已簽署"
+  },
+  "sessionExport": {
+    "saved": "工作階段已匯出至 {{path}}",
+    "failed": "匯出失敗：{{error}}",
+    "export": "匯出",
+    "markdown": "Markdown (.md)",
+    "json": "JSON (.json)"
   }
 }

@@ -81,8 +81,8 @@ function BudgetChip({
         provider: provider.name,
         period:
           worst?.period === "daily"
-            ? t("usage.budget.daily", { defaultValue: "daily" })
-            : t("usage.budget.monthly", { defaultValue: "monthly" }),
+            ? t("usage.budget.periodDaily", { defaultValue: "daily" })
+            : t("usage.budget.periodMonthly", { defaultValue: "monthly" }),
       }),
       { closeButton: true },
     );

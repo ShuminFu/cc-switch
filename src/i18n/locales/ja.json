@@ -46,7 +46,8 @@
     "copyFailed": "コピーに失敗しました",
     "unsavedChangesTitle": "未保存の変更を破棄しますか？",
     "unsavedChangesMessage": "編集内容は保存されておらず、失われます。",
-    "discard": "破棄"
+    "discard": "破棄",
+    "undo": "元に戻す"
   },
   "firstRunNotice": {
     "title": "CC Switch へようこそ",
@@ -184,7 +185,13 @@
     "loadFailed": "プロバイダーの読み込みに失敗しました",
     "tabProviderFor": "{{app}} プロバイダー",
     "configStatusLoading": "アプリの設定を確認中…",
-    "copyName": "{{name}} のコピー"
+    "copyName": "{{name}} のコピー",
+    "copyShareLink": "共有リンクをコピー（API キーを含まない）",
+    "shareLinkCopied": "共有リンクをコピーしました（API キーは含まれていません）",
+    "shareLinkCopyFailed": "共有リンクのコピーに失敗しました: {{error}}",
+    "searchShortcut": "プロバイダーを検索",
+    "searchCloseShortcut": "プロバイダー検索を閉じる",
+    "duplicateName": "{{name}} のコピー"
   },
   "claudeCode": {
     "needsRouting": "ルーティングが必要",
@@ -283,7 +290,9 @@
     "officialBlockedByProxy": "ローカルルーティングモード中は公式プロバイダーに切り替えできません。ルーティング経由で公式 API にアクセスするとアカウントが停止される可能性があります。",
     "proxyOfficialWarning": "現在のプロバイダー {{name}} は公式です。ローカルルーティングを使用する前にサードパーティプロバイダーに切り替えてください。",
     "proxyReasonClaudeDesktop": "Claude Desktop ローカルルーティングモードを使用しており",
-    "openclawModelsRegisterFailed": "プロバイダーを追加しましたが、モデルを OpenClaw に登録できませんでした: {{error}}"
+    "openclawModelsRegisterFailed": "プロバイダーを追加しましたが、モデルを OpenClaw に登録できませんでした: {{error}}",
+    "undoDeleteFailed": "プロバイダーを復元できませんでした: {{error}}",
+    "removeFromConfigFailed": "設定からの削除に失敗しました: {{error}}"
   },
   "confirm": {
     "deleteProvider": "プロバイダーを削除",
@@ -488,6 +497,8 @@
       "deleteFailed": "削除に失敗しました",
       "deleteConfirmTitle": "バックアップの削除を確認",
       "deleteConfirmMessage": "このバックアップは完全に削除されます。この操作は取り消せません。",
+      "openFolderFailed": "バックアップフォルダーを開けませんでした",
+      "showInFolder": "フォルダーで表示",
       "kind": {
         "manual": "手動",
         "manualHint": "「今すぐバックアップ」で作成。自動ローテーションで削除されません",
@@ -729,7 +740,9 @@
       "confirmTitle": "スキル保存場所の移行",
       "confirmMessage": "{{count}} 個のスキルを新しい場所に移動します。続行しますか？",
       "migrationSuccess": "{{count}} 個のスキルを移行しました",
-      "migrationPartial": "{{migrated}} 個のスキルを移行、{{errors}} 個のエラー。詳細はログを確認してください。"
+      "migrationPartial": "{{migrated}} 個のスキルを移行、{{errors}} 個のエラー。詳細はログを確認してください。",
+      "migrationMoreErrors": "…ほか {{count}} 件",
+      "migrationErrorsTitle": "次のスキルは以前の場所に残っているため、手動で移動する必要があります:"
     },
     "skillSync": {
       "title": "スキル同期方式",
@@ -890,9 +903,25 @@
       "pricingSaveFailed": "課金設定の保存に失敗しました: {{error}}",
       "pricingLoadFailed": "課金設定の読み込みに失敗しました: {{error}}",
       "defaultCostMultiplierRequired": "デフォルト倍率は必須です",
-      "defaultCostMultiplierInvalid": "デフォルト倍率の形式が正しくありません"
+      "defaultCostMultiplierInvalid": "デフォルト倍率の形式が正しくありません",
+      "urlLabel": "プロキシ URL",
+      "hidePassword": "パスワードを隠す",
+      "showPassword": "パスワードを表示",
+      "appFieldError": "{{app}}: {{message}}",
+      "pricingSaveFailedBadge": "（未保存）"
     },
     "saveFailedGeneric": "保存に失敗しました。もう一度お試しください",
+    "installScriptSourcesHint": "一部のコマンドは次のインストールスクリプトをダウンロードして実行します。実行前に確認してください:",
+    "configLoadFailed": "現在の設定を読み込めなかったため、編集は無効になっています。{{detail}}",
+    "revertImport": "インポートを元に戻す",
+    "importConfirmTitle": "現在のデータをすべて置き換えますか？",
+    "importConfirmMessage": "{{file}} をインポートすると、すべてのプロバイダー、MCP サーバー、プロンプト、設定が置き換えられ、適用中の CLI 設定ファイルが書き換えられます。インポートを元に戻せるよう、事前に安全バックアップが作成されます。",
+    "revertImportConfirmTitle": "インポートを元に戻しますか？",
+    "revertImportConfirmMessage": "インポート直前に作成されたバックアップ {{backupId}} を復元しますか？インポート後の変更は失われます。",
+    "revertImportSuccess": "インポートを元に戻しました",
+    "revertImportFailed": "インポートを元に戻せませんでした: {{message}}",
+    "unsavedChanges": "未保存の変更があります",
+    "discardChanges": "破棄",
     "cloudSync": {
       "conflict": {
         "localChanged": "前回の同期以降、ローカルデータが変更されています。今ダウンロードすると、これらのローカルの変更はクラウドのデータで置き換えられます。残す場合は、キャンセルして先にアップロードしてください。",
@@ -971,7 +1000,14 @@
     "contextWindowInvalid": "コンテキストウィンドウは正の整数で指定してください",
     "profile": "クライアントモデルプロファイル",
     "rawConfig": "config.toml",
-    "invalidToml": "config.toml の形式が不正です: {{error}}"
+    "invalidToml": "config.toml の形式が不正です: {{error}}",
+    "validation": {
+      "configEmpty": "config.toml は空にできません",
+      "missingDefaultModel": "[models] のデフォルトモデルテーブルがありません",
+      "missingField": "{{field}} がありません",
+      "missingKey": "api_key または env_key がありません",
+      "contextWindow": "context_window は正の整数で指定してください"
+    }
   },
   "sessionManager": {
     "title": "セッション管理",
@@ -1057,7 +1093,10 @@
     "searchTranscripts": "メッセージ内容を検索",
     "searchIndexing": "会話内容をインデックス中…結果は順次増えます",
     "scanErrors": "一部のセッションを読み込めませんでした",
-    "messagesLoadFailed": "このセッションの読み込みに失敗しました"
+    "messagesLoadFailed": "このセッションの読み込みに失敗しました",
+    "showMore": "さらに表示（残り {{count}} 件）",
+    "undoDelete": "元に戻す",
+    "restoreFailed": "セッションを復元できませんでした"
   },
   "console": {
     "providerSwitchReceived": "プロバイダー切り替えイベントを受信:",
@@ -1262,7 +1301,8 @@
       "fieldExtractedConfig": "抽出した設定",
       "fieldMustBeObject": "{{field}}は JSON オブジェクトである必要があります",
       "fieldJsonSyntaxError": "{{field}}の JSON 形式が不正です。構文を確認してください",
-      "commonConfigParseFailed": "設定 JSON を解析できないため、共通設定を適用できませんでした"
+      "commonConfigParseFailed": "設定 JSON を解析できないため、共通設定を適用できませんでした",
+      "fieldUnsafeKey": "{{field}} に __proto__、constructor、prototype キーを含めることはできません"
     },
     "codexAuthInvalid": "auth.json が有効な JSON ではありません。修正してから保存してください。",
     "codexAuthNotObject": "auth.json は JSON オブジェクトである必要があります。",
@@ -1273,7 +1313,8 @@
     "removeModel": "モデルを削除",
     "providerKeyStatusUnavailable": "このプロバイダーキーが使用中かどうかを確認できませんでした。再読み込みしてもう一度お試しください。",
     "moveModelUp": "モデルを上へ移動",
-    "moveModelDown": "モデルを下へ移動"
+    "moveModelDown": "モデルを下へ移動",
+    "chooseModel": "モデルを選択"
   },
   "copilot": {
     "authSection": "GitHub Copilot 認証",
@@ -1448,7 +1489,9 @@
     "reasoningGroupTitle": "思考能力",
     "reasoningSectionHint": "プリセットの供給元は自動的に設定され、カスタム供給元は名前/URL から自動推論されます。自動識別が正しくない場合のみ手動で上書きしてください。",
     "advancedSectionHint": "上流フォーマット、モデルマッピング、思考能力、カスタム User-Agent の設定を含みます。Chat Completions プロトコルを使用するプロバイダーはルーティング引き継ぎの有効化が必要です。",
-    "noCommonConfigToApply": "共通設定スニペットが空か、書き込める内容がありません"
+    "noCommonConfigToApply": "共通設定スニペットが空か、書き込める内容がありません",
+    "fixSmartQuotes": "文字列の区切りに使われているスマート引用符を置換",
+    "tomlInvalid": "TOML が無効です"
   },
   "geminiConfig": {
     "envFile": "環境変数 (.env)",
@@ -1713,6 +1756,16 @@
     "cacheReadCostPerMillion": "キャッシュ読み取りコスト（100万トークンあたり、USD）",
     "cacheCreationCostPerMillion": "キャッシュ書き込みコスト（100万トークンあたり、USD）",
     "unpriced": "価格未設定",
+    "modelIdDuplicate": "{{id}} の料金設定は既に存在します。",
+    "modelIdNormalizedHint": "{{id}} として保存されます",
+    "statusErrors": "エラー（≥400）",
+    "rangeTooLong": "期間は最大 {{days}} 日までです。",
+    "customRangeMaxHint": "日付と時刻に対応、最大 {{days}} 日",
+    "exportSuccess": "{{count}} 件のリクエストを {{path}} にエクスポートしました",
+    "exportFailed": "エクスポートに失敗しました: {{message}}",
+    "export": "エクスポート",
+    "exportCsv": "リクエストログ（CSV）",
+    "exportJson": "リクエストログ（JSON）",
     "budget": {
       "daily": "日次上限（USD）",
       "dailyTooltip": "日次: {{usage}} / {{limit}}",
@@ -1730,7 +1783,11 @@
       "thisMonth": "今月",
       "title": "予算上限",
       "today": "今日",
-      "todayLabel": "今日"
+      "todayLabel": "今日",
+      "exceededToast": "{{provider}} が{{period}}予算の上限に達しました",
+      "exceededBadge": "超過",
+      "periodDaily": "日次",
+      "periodMonthly": "月次"
     }
   },
   "usageScript": {
@@ -2047,6 +2104,8 @@
     "disableFailed": "無効化に失敗しました",
     "importSuccess": "インポートしました",
     "importFailed": "インポートに失敗しました",
+    "liveFileDiffers": "現在のプロンプトファイルが CC Switch の外部で編集され、有効なプロンプトと異なっています。プロンプトを再度有効にするか編集すると、それらの変更は上書きされます。",
+    "importLiveChanges": "外部の変更をインポート",
     "confirm": {
       "deleteTitle": "削除の確認",
       "deleteMessage": "プロンプト「{{name}}」を削除してもよろしいですか？"
@@ -2618,7 +2677,11 @@
     "signedByUnverified": "「{{publisher}}」を名乗る鍵による署名",
     "signatureKeyId": "鍵 ID {{keyId}}",
     "publisherMismatch": "この名前は既知の発行者のものですが、リンクは別の鍵で署名されています。なりすましの可能性があります。",
-    "publisherNew": "署名は有効ですが、CC Switch はこの鍵を初めて確認しました。"
+    "publisherNew": "署名は有効ですが、CC Switch はこの鍵を初めて確認しました。",
+    "usageScriptSendsKeyTo": "有効にすると、このスクリプトは API キーを次の宛先に送信する可能性があります: {{hosts}}",
+    "usageScriptContacts": "有効にすると、このスクリプトは次の宛先に接続します: {{hosts}}",
+    "usageScriptNoHosts": "このスクリプトは実行時にリクエスト URL を組み立てます。データの送信先はソースを確認してください。",
+    "usageScriptPrivateHosts": "ローカルまたはプライベートネットワークのアドレスにもアクセスします: {{hosts}}"
   },
   "iconPicker": {
     "search": "アイコンを検索",
@@ -2815,7 +2878,13 @@
       "removeFailed": "削除に失敗しました",
       "reorderSuccess": "キュー順序を更新しました",
       "reorderFailed": "順序の更新に失敗しました",
-      "toggleFailed": "状態の更新に失敗しました"
+      "toggleFailed": "状態の更新に失敗しました",
+      "circuitReset": "サーキットブレーカーをリセットしました",
+      "lastFailure": "最終失敗 {{time}}: {{error}}",
+      "moveUp": "上へ移動",
+      "moveDown": "下へ移動",
+      "test": "接続テスト",
+      "resetCircuit": "サーキットブレーカーをリセット"
     },
     "autoFailover": {
       "info": "フェイルオーバーキューに複数のプロバイダーが設定されている場合、リクエストが失敗すると優先度順に試行します。プロバイダーが連続失敗のしきい値に達すると、サーキットブレーカーが開き、一時的にスキップされます。",
@@ -2880,7 +2949,8 @@
     "timeout": "タイムアウト（秒）",
     "maxRetries": "最大リトライ回数",
     "degradedThreshold": "低速判定しきい値（ミリ秒）",
-    "error": "{{providerName}} のチェックでエラーが発生しました: {{error}}"
+    "error": "{{providerName}} のチェックでエラーが発生しました: {{error}}",
+    "rangeError": "{{min}} から {{max}} までの整数を入力してください。"
   },
   "proxyConfig": {
     "proxyEnabled": "ルーティング総スイッチ",
@@ -3244,5 +3314,54 @@
     "selectProfile": "バインドするプロジェクト",
     "projectLevel": "プロジェクトファイルに書き込む",
     "bindFolder": "フォルダーをバインド…"
+  },
+  "palette": {
+    "openSettings": "設定を開く",
+    "goBack": "前のページに戻る",
+    "shortcut": "コマンドパレットを開く",
+    "title": "コマンドパレット",
+    "placeholder": "プロバイダー、アプリ、ページを切り替え...",
+    "empty": "一致する項目がありません",
+    "apps": "アプリを切り替え",
+    "pages": "ページを開く",
+    "shortcuts": "キーボードショートカット"
+  },
+  "deeplinkAction": {
+    "failed": "ディープリンクを処理できませんでした: {{error}}",
+    "providerNotFound": "{{app}} にプロバイダー「{{provider}}」がありません",
+    "profileNotFound": "「{{name}}」という名前のプロジェクトがありません",
+    "switchTitle": "プロバイダーを切り替えますか？",
+    "switchMessage": "リンクが {{app}} を「{{provider}}」に切り替えるよう要求しています。",
+    "switchConfirm": "切り替え",
+    "profileTitle": "プロジェクトを適用しますか？",
+    "profileMessage": "リンクがプロジェクト「{{name}}」を適用するよう要求しています。",
+    "profileConfirm": "適用"
+  },
+  "logRetention": {
+    "pruned": "{{count}} 件のリクエストログを削除しました（使用量の集計は保持されます）",
+    "title": "リクエストログの保持期間",
+    "description": "リクエストごとのメタデータ（モデル、トークン、ステータス、セッション ID、エラー）はこの期間保持され、その後日次の使用量集計にまとめられます。リクエストとレスポンスの本文は保存されません。",
+    "days": "{{count}} 日",
+    "deleteNow": "リクエストログを今すぐ削除",
+    "dbSize": "データベースサイズ: {{size}}",
+    "confirmTitle": "リクエストログを削除しますか？",
+    "confirmMessage": "すべてのリクエストログは、トークンとコストを日次集計に加算した後に削除されます。使用量グラフの集計は残りますが、リクエストの詳細は失われます。"
+  },
+  "policy": {
+    "signatureInvalid": "署名を検証できなかったため、管理ポリシーファイルを無視しました。",
+    "invalid": "読み込めなかったため、管理ポリシーファイルを無視しました。",
+    "defaultName": "組織",
+    "allowedEndpoints": "許可されたエンドポイント:",
+    "deniedEndpoints": "拒否されたエンドポイント:",
+    "disabledFeatures": "無効化された機能:",
+    "managedBy": "ポリシーによる管理: {{name}}",
+    "signed": "署名済み"
+  },
+  "sessionExport": {
+    "saved": "セッションを {{path}} にエクスポートしました",
+    "failed": "エクスポートに失敗しました: {{error}}",
+    "export": "エクスポート",
+    "markdown": "Markdown (.md)",
+    "json": "JSON (.json)"
   }
 }

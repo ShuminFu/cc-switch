@@ -46,7 +46,8 @@
     "copyFailed": "Copy failed",
     "unsavedChangesTitle": "Discard unsaved changes?",
     "unsavedChangesMessage": "Your edits have not been saved and will be lost.",
-    "discard": "Discard"
+    "discard": "Discard",
+    "undo": "Undo"
   },
   "firstRunNotice": {
     "title": "Welcome to CC Switch",
@@ -184,7 +185,13 @@
     "loadFailed": "Failed to load providers",
     "tabProviderFor": "{{app}} Provider",
     "configStatusLoading": "Checking the app config…",
-    "copyName": "{{name}} copy"
+    "copyName": "{{name}} copy",
+    "copyShareLink": "Copy share link (without API key)",
+    "shareLinkCopied": "Share link copied (API key not included)",
+    "shareLinkCopyFailed": "Failed to copy the share link: {{error}}",
+    "searchShortcut": "Search providers",
+    "searchCloseShortcut": "Close provider search",
+    "duplicateName": "{{name}} copy"
   },
   "claudeCode": {
     "needsRouting": "Needs Routing",
@@ -283,7 +290,9 @@
     "officialBlockedByProxy": "Cannot switch to official provider while local routing is active. Using routing with official APIs may cause account bans.",
     "proxyOfficialWarning": "Current provider {{name}} is official. Consider switching to a third-party provider before using local routing.",
     "proxyReasonClaudeDesktop": "uses Claude Desktop local routing mode",
-    "openclawModelsRegisterFailed": "Provider added, but its models could not be registered in OpenClaw: {{error}}"
+    "openclawModelsRegisterFailed": "Provider added, but its models could not be registered in OpenClaw: {{error}}",
+    "undoDeleteFailed": "Could not restore the provider: {{error}}",
+    "removeFromConfigFailed": "Failed to remove from config: {{error}}"
   },
   "confirm": {
     "deleteProvider": "Delete Provider",
@@ -495,7 +504,9 @@
         "premigrationHint": "Taken automatically before a database upgrade or rebuild",
         "safety": "Safety",
         "safetyHint": "Taken automatically before an import, restore or sync download replaced the database"
-      }
+      },
+      "openFolderFailed": "Could not open the backup folder",
+      "showInFolder": "Show in folder"
     },
     "webdavSync": {
       "title": "WebDAV Cloud Sync",
@@ -729,7 +740,9 @@
       "confirmTitle": "Migrate Skill Storage",
       "confirmMessage": "{{count}} skill(s) will be moved to the new location. Continue?",
       "migrationSuccess": "Successfully migrated {{count}} skill(s)",
-      "migrationPartial": "Migrated {{migrated}} skill(s), {{errors}} error(s). Check logs for details."
+      "migrationPartial": "Migrated {{migrated}} skill(s), {{errors}} error(s). Check logs for details.",
+      "migrationMoreErrors": "…and {{count}} more",
+      "migrationErrorsTitle": "These skills stayed in the previous location and need to be moved manually:"
     },
     "skillSync": {
       "title": "Skill Sync Method",
@@ -890,7 +903,12 @@
       "pricingSaveFailed": "Failed to save pricing defaults: {{error}}",
       "pricingLoadFailed": "Failed to load pricing defaults: {{error}}",
       "defaultCostMultiplierRequired": "Default multiplier is required",
-      "defaultCostMultiplierInvalid": "Invalid multiplier format"
+      "defaultCostMultiplierInvalid": "Invalid multiplier format",
+      "urlLabel": "Proxy URL",
+      "hidePassword": "Hide password",
+      "showPassword": "Show password",
+      "appFieldError": "{{app}}: {{message}}",
+      "pricingSaveFailedBadge": "(not saved)"
     },
     "saveFailedGeneric": "Save failed, please try again",
     "cloudSync": {
@@ -951,7 +969,18 @@
       "pendingIn": "{{count}} key(s) are still stored in the database.",
       "pendingOut": "Some keys are still in the keychain.",
       "retry": "Retry"
-    }
+    },
+    "installScriptSourcesHint": "Some commands download and run these install scripts. Review them before running:",
+    "configLoadFailed": "Could not load the current settings; editing is disabled. {{detail}}",
+    "revertImport": "Revert import",
+    "importConfirmTitle": "Replace all current data?",
+    "importConfirmMessage": "Importing {{file}} replaces all providers, MCP servers, prompts and settings, and rewrites the live CLI config files. A safety backup is taken first so the import can be reverted.",
+    "revertImportConfirmTitle": "Revert the import?",
+    "revertImportConfirmMessage": "Restore the backup {{backupId}} taken right before the import? Changes made since the import are lost.",
+    "revertImportSuccess": "Import reverted",
+    "revertImportFailed": "Failed to revert the import: {{message}}",
+    "unsavedChanges": "Unsaved changes",
+    "discardChanges": "Discard"
   },
   "apps": {
     "claude": "Claude",
@@ -971,7 +1000,14 @@
     "contextWindowInvalid": "Context window must be a positive integer",
     "profile": "Client model profile",
     "rawConfig": "config.toml",
-    "invalidToml": "Invalid config.toml: {{error}}"
+    "invalidToml": "Invalid config.toml: {{error}}",
+    "validation": {
+      "configEmpty": "config.toml must not be empty",
+      "missingDefaultModel": "Missing [models] default model table",
+      "missingField": "Missing {{field}}",
+      "missingKey": "Missing api_key or env_key",
+      "contextWindow": "context_window must be a positive integer"
+    }
   },
   "sessionManager": {
     "title": "Session Manager",
@@ -1057,7 +1093,10 @@
     "searchTranscripts": "Search message contents",
     "searchIndexing": "Indexing transcripts… results will grow",
     "scanErrors": "Some sessions could not be read",
-    "messagesLoadFailed": "Failed to load this session"
+    "messagesLoadFailed": "Failed to load this session",
+    "showMore": "Show more ({{count}} remaining)",
+    "undoDelete": "Undo",
+    "restoreFailed": "Could not restore the session"
   },
   "console": {
     "providerSwitchReceived": "Received provider switch event:",
@@ -1262,7 +1301,8 @@
       "fieldExtractedConfig": "Extracted config",
       "fieldMustBeObject": "{{field}} must be a JSON object",
       "fieldJsonSyntaxError": "{{field}}: JSON format error, please check the syntax",
-      "commonConfigParseFailed": "Config JSON could not be parsed, so the common config was not applied"
+      "commonConfigParseFailed": "Config JSON could not be parsed, so the common config was not applied",
+      "fieldUnsafeKey": "{{field}} must not contain __proto__, constructor or prototype keys"
     },
     "codexAuthInvalid": "auth.json is not valid JSON. Fix it before saving.",
     "codexAuthNotObject": "auth.json must be a JSON object.",
@@ -1273,7 +1313,8 @@
     "removeModel": "Remove model",
     "providerKeyStatusUnavailable": "Could not check whether this provider key is already in use. Reload and try again.",
     "moveModelUp": "Move model up",
-    "moveModelDown": "Move model down"
+    "moveModelDown": "Move model down",
+    "chooseModel": "Choose a model"
   },
   "copilot": {
     "authSection": "GitHub Copilot Authentication",
@@ -1448,7 +1489,9 @@
     "reasoningGroupTitle": "Reasoning Capability",
     "reasoningSectionHint": "Preset providers are configured automatically; custom providers are inferred from name/URL. Override manually only when auto-detection is wrong.",
     "advancedSectionHint": "Includes upstream format, model mapping, reasoning overrides and custom User-Agent. Providers using the Chat Completions protocol require routing takeover to be enabled.",
-    "noCommonConfigToApply": "The common config snippet is empty or has nothing to write"
+    "noCommonConfigToApply": "The common config snippet is empty or has nothing to write",
+    "fixSmartQuotes": "Replace smart quotes used as string delimiters",
+    "tomlInvalid": "Invalid TOML"
   },
   "geminiConfig": {
     "envFile": "Environment Variables (.env)",
@@ -1730,8 +1773,22 @@
       "thisMonth": "this month",
       "title": "Budget limits",
       "today": "today",
-      "todayLabel": "Today"
-    }
+      "todayLabel": "Today",
+      "exceededToast": "{{provider}} reached its {{period}} budget",
+      "exceededBadge": "Exceeded",
+      "periodDaily": "daily",
+      "periodMonthly": "monthly"
+    },
+    "modelIdDuplicate": "Pricing for {{id}} already exists.",
+    "modelIdNormalizedHint": "Will be saved as {{id}}",
+    "statusErrors": "Errors (≥400)",
+    "rangeTooLong": "The range can be at most {{days}} days.",
+    "customRangeMaxHint": "Dates and times supported, up to {{days}} days",
+    "exportSuccess": "Exported {{count}} requests to {{path}}",
+    "exportFailed": "Export failed: {{message}}",
+    "export": "Export",
+    "exportCsv": "Request logs as CSV",
+    "exportJson": "Request logs as JSON"
   },
   "usageScript": {
     "title": "Configure Usage Query",
@@ -2050,7 +2107,9 @@
     "confirm": {
       "deleteTitle": "Confirm Delete",
       "deleteMessage": "Are you sure you want to delete prompt \"{{name}}\"?"
-    }
+    },
+    "liveFileDiffers": "The live prompt file was edited outside CC Switch and differs from the enabled prompt. Re-enabling or editing the prompt overwrites those changes.",
+    "importLiveChanges": "Import live changes"
   },
   "profiles": {
     "switcherTooltip": {
@@ -2618,7 +2677,11 @@
     "signedByUnverified": "Signed by a key claiming to be “{{publisher}}”",
     "signatureKeyId": "Key ID {{keyId}}",
     "publisherMismatch": "This name belongs to a publisher you already know, but the link is signed with a different key. It may be an impersonation.",
-    "publisherNew": "The signature is valid, but CC Switch has not seen this key before."
+    "publisherNew": "The signature is valid, but CC Switch has not seen this key before.",
+    "usageScriptSendsKeyTo": "If enabled, this script can send your API key to: {{hosts}}",
+    "usageScriptContacts": "If enabled, this script contacts: {{hosts}}",
+    "usageScriptNoHosts": "This script builds its request URL at runtime; review the source to see where it sends data.",
+    "usageScriptPrivateHosts": "It also targets local or private-network addresses: {{hosts}}"
   },
   "iconPicker": {
     "search": "Search Icons",
@@ -2815,7 +2878,13 @@
       "removeFailed": "Failed to remove",
       "reorderSuccess": "Queue order updated",
       "reorderFailed": "Failed to update order",
-      "toggleFailed": "Failed to update status"
+      "toggleFailed": "Failed to update status",
+      "circuitReset": "Circuit breaker reset",
+      "lastFailure": "Last failure {{time}}: {{error}}",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "test": "Test connectivity",
+      "resetCircuit": "Reset circuit breaker"
     },
     "autoFailover": {
       "info": "When the failover queue has multiple providers, the system will try them in priority order when requests fail. When a provider reaches the consecutive failure threshold, the circuit breaker will open and skip it temporarily.",
@@ -2880,7 +2949,8 @@
     "timeout": "Timeout (seconds)",
     "maxRetries": "Max Retries",
     "degradedThreshold": "Slow-response threshold (ms)",
-    "error": "{{providerName}} check error: {{error}}"
+    "error": "{{providerName}} check error: {{error}}",
+    "rangeError": "Enter a whole number between {{min}} and {{max}}."
   },
   "proxyConfig": {
     "proxyEnabled": "Routing Master Switch",
@@ -3244,5 +3314,54 @@
     "selectProfile": "Project to bind",
     "projectLevel": "Write project files",
     "bindFolder": "Bind folder…"
+  },
+  "palette": {
+    "openSettings": "Open settings",
+    "goBack": "Back to the previous page",
+    "shortcut": "Open the command palette",
+    "title": "Command palette",
+    "placeholder": "Switch provider, app or page...",
+    "empty": "No matches",
+    "apps": "Switch app",
+    "pages": "Open page",
+    "shortcuts": "Keyboard shortcuts"
+  },
+  "deeplinkAction": {
+    "failed": "Deep link could not be handled: {{error}}",
+    "providerNotFound": "No provider '{{provider}}' for {{app}}",
+    "profileNotFound": "No project named '{{name}}'",
+    "switchTitle": "Switch provider?",
+    "switchMessage": "A link asks to switch {{app}} to “{{provider}}”.",
+    "switchConfirm": "Switch",
+    "profileTitle": "Apply project?",
+    "profileMessage": "A link asks to apply the project “{{name}}”.",
+    "profileConfirm": "Apply"
+  },
+  "logRetention": {
+    "pruned": "Deleted {{count}} request log rows; usage totals were kept",
+    "title": "Request log retention",
+    "description": "Per-request metadata (model, tokens, status, session id, errors) is kept for this long, then folded into daily usage totals. Request and response bodies are never stored.",
+    "days": "{{count}} days",
+    "deleteNow": "Delete request logs now",
+    "dbSize": "Database size: {{size}}",
+    "confirmTitle": "Delete request logs?",
+    "confirmMessage": "All per-request log rows are deleted after their tokens and costs are added to the daily totals. Usage charts keep their totals but request details are gone."
+  },
+  "policy": {
+    "signatureInvalid": "A managed policy file was ignored because its signature could not be verified.",
+    "invalid": "A managed policy file was ignored because it could not be read.",
+    "defaultName": "your organization",
+    "allowedEndpoints": "Allowed endpoints:",
+    "deniedEndpoints": "Denied endpoints:",
+    "disabledFeatures": "Disabled features:",
+    "managedBy": "Managed by policy: {{name}}",
+    "signed": "signed"
+  },
+  "sessionExport": {
+    "saved": "Session exported to {{path}}",
+    "failed": "Export failed: {{error}}",
+    "export": "Export",
+    "markdown": "Markdown (.md)",
+    "json": "JSON (.json)"
   }
 }
