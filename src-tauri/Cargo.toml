@@ -55,7 +55,7 @@ tauri-plugin-notification = "2"
 specta = { version = "=2.0.0-rc.22", features = ["derive", "function", "serde_json", "indexmap"] }
 specta-typescript = "=0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["typescript"] }
-dirs = "5.0"
+dirs = "6.0"
 toml = "0.8"
 toml_edit = "0.22"
 # TLS: rustls + ring only (no native-tls/OpenSSL, no aws-lc-rs). lib.rs installs
@@ -65,15 +65,14 @@ toml_edit = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "charset", "http2", "system-proxy", "json", "stream", "socks"] }
 arboard = "3.6"
 flate2 = "1"
-brotli = "7"
+brotli = "8"
 zstd = "0.13"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "signal"] }
 futures = "0.3"
 async-stream = "0.3"
 bytes = "1.5"
-axum = "0.7"
-tower = "0.4"
-tower-http = { version = "0.5", features = ["cors"] }
+axum = "0.8"
+tower = "0.5"
 hyper = { version = "1.0", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio", "http1", "client-legacy"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "tls12", "logging", "ring", "webpki-tokio"] }
@@ -83,27 +82,26 @@ http-body-util = "0.1"
 httparse = "1"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-webpki-roots = "0.26"
+webpki-roots = "1"
 rustls-native-certs = "0.8"
 regex = "1.10"
-rquickjs = { version = "0.8", features = ["array-buffer", "classes"] }
+rquickjs = { version = "0.14", features = ["array-buffer", "classes"] }
 thiserror = "2.0"
 anyhow = "1.0"
-zip = "2.2"
+zip = "4.6"
 # CI-15: serde_yaml 0.9 is archived; serde_norway is its maintained, API-compatible fork.
 serde_yaml = { package = "serde_norway", version = "0.9" }
 tempfile = "3"
 url = "2.5"
 auto-launch = "0.5"
 base64 = "0.22"
-rusqlite = { version = "0.31", features = ["bundled", "backup", "hooks"] }
+rusqlite = { version = "0.41", features = ["bundled", "backup", "hooks", "fallible_uint"] }
 indexmap = { version = "2", features = ["serde"] }
 rust_decimal = "1.33"
 uuid = { version = "1.11", features = ["v4"] }
 sha2 = "0.10"
 minisign-verify = "0.2.5"
 hmac = "0.12"
-json5 = "0.4"
 json-five = "0.3.1"
 sys-locale = "0.3"
 # Secrets at rest and in sync (SEC-06, SVC-04, CMD-04): passphrase KDF, AEAD
@@ -129,7 +127,7 @@ keyring = { version = "3.6", default-features = false, features = ["windows-nati
 windows-sys = { version = "0.61", features = ["Win32_Globalization", "Win32_UI_Shell"] }
 
 [target.'cfg(all(target_os = "windows", target_arch = "aarch64"))'.dependencies]
-rquickjs = { version = "0.8", features = ["bindgen"] }
+rquickjs = { version = "0.14", features = ["bindgen"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"

@@ -208,8 +208,8 @@ pub(crate) fn schema_has_input_modalities(conn: &Connection) -> Result<bool, App
     .map_err(|e| AppError::Database(e.to_string()))
 }
 
-fn register_db_change_hook(conn: &Connection, config_generation: Arc<AtomicU64>) {
-    conn.update_hook(Some(
+fn register_db_change_hook(conn: &mut Connection, config_generation: Arc<AtomicU64>) {
+    let registered = conn.update_hook(Some(
         move |action: Action, database: &str, table: &str, _row_id: i64| match action {
             // DB-43: writes to attached scratch schemas (the sync export
             // snapshot) are not changes to the app's data.
@@ -224,6 +224,9 @@ fn register_db_change_hook(conn: &Connection, config_generation: Arc<AtomicU64>)
             _ => {}
         },
     ));
+    if let Err(e) = registered {
+        log::error!("[DB] failed to register the change hook: {e}");
+    }
 }
 
 impl Database {
@@ -368,10 +371,10 @@ impl Database {
         Self::from_connection_with_hook(conn, true)
     }
 
-    fn from_connection_with_hook(conn: Connection, change_hook: bool) -> Self {
+    fn from_connection_with_hook(mut conn: Connection, change_hook: bool) -> Self {
         let request_cache = request_cache::RequestCache::new();
         if change_hook {
-            register_db_change_hook(&conn, request_cache.generation_handle());
+            register_db_change_hook(&mut conn, request_cache.generation_handle());
         }
         let conn = Arc::new(Mutex::new(conn));
         Self {

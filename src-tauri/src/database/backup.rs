@@ -616,10 +616,10 @@ impl Database {
             source: e,
         })?;
         let temp_path = temp_file.path().to_path_buf();
-        let temp_conn =
+        let mut temp_conn =
             Connection::open(&temp_path).map_err(|e| AppError::Database(e.to_string()))?;
 
-        Self::execute_import_script(&temp_conn, sql_content)?;
+        Self::execute_import_script(&mut temp_conn, sql_content)?;
 
         // Drop anything the dump may have smuggled in (triggers/views) BEFORE
         // re-creating the schema, so the app's own triggers (e.g. the
@@ -741,13 +741,8 @@ impl Database {
 
             let mut snapshot = Connection::open_in_memory().map_err(db_err)?;
             {
-                let backup = Backup::new_with_names(
-                    &conn,
-                    rusqlite::DatabaseName::Attached(SNAP),
-                    &mut snapshot,
-                    rusqlite::DatabaseName::Main,
-                )
-                .map_err(db_err)?;
+                let backup = Backup::new_with_names(&conn, SNAP, &mut snapshot, rusqlite::MAIN_DB)
+                    .map_err(db_err)?;
                 backup.step(-1).map_err(db_err)?;
             }
             snapshot
@@ -911,14 +906,16 @@ impl Database {
 
     /// Run an imported SQL script under [`import_authorizer`], so that only the
     /// statement shapes CC Switch exports can execute.
-    fn execute_import_script(conn: &Connection, sql: &str) -> Result<(), AppError> {
+    fn execute_import_script(conn: &mut Connection, sql: &str) -> Result<(), AppError> {
         let denied = Arc::new(Mutex::new(None::<String>));
         let denied_hook = Arc::clone(&denied);
         conn.authorizer(Some(move |ctx: AuthContext<'_>| {
             import_authorizer(ctx, &denied_hook)
-        }));
+        }))
+        .map_err(|e| AppError::Database(e.to_string()))?;
         let result = conn.execute_batch(sql);
-        conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         match result {
             Ok(()) => Ok(()),

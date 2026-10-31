@@ -239,7 +239,7 @@ fn scan_block_comments(source: &str) -> Vec<String> {
 }
 
 pub(crate) fn rt_to_value(value: &JSONValue) -> Result<Value, AppError> {
-    json5::from_str(&value.to_string())
+    json_five::from_str(&value.to_string())
         .map_err(|e| AppError::Config(format!("Failed to read JSON5 value: {e}")))
 }
 
@@ -334,7 +334,9 @@ fn key_name(key: &JSONValue) -> Option<String> {
         JSONValue::DoubleQuotedString(raw) => {
             serde_json::from_str::<String>(&format!("\"{raw}\"")).ok()
         }
-        JSONValue::SingleQuotedString(raw) => json5::from_str::<String>(&format!("'{raw}'")).ok(),
+        JSONValue::SingleQuotedString(raw) => {
+            json_five::from_str::<String>(&format!("'{raw}'")).ok()
+        }
         _ => None,
     }
 }
@@ -616,6 +618,44 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// CI-15: the serde side of JSON5 parsing moved from the `json5` crate to
+    /// `json_five::from_str`; pin the JSON5 syntax real configs use.
+    #[test]
+    fn json_five_serde_parses_json5_syntax_like_the_json5_crate() {
+        let source = r#"// leading comment
+        {
+          /* block */ unquoted: 'single',
+          "double": "a\"b",
+          hex: 0x1F,
+          neg: -3,
+          plus: +4,
+          frac: .5,
+          big: 18446744073709551615,
+          list: [1, 2,],
+          nested: { ok: true, none: null, },
+        }"#;
+        let value: Value = json_five::from_str(source).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "unquoted": "single",
+                "double": "a\"b",
+                "hex": 31,
+                "neg": -3,
+                "plus": 4,
+                "frac": 0.5,
+                "big": 18446744073709551615u64,
+                "list": [1, 2],
+                "nested": { "ok": true, "none": null },
+            })
+        );
+        assert!(json_five::from_str::<Value>("{ invalid json5").is_err());
+        assert_eq!(
+            json_five::from_str::<String>("'it\\'s'").unwrap(),
+            "it's".to_string()
+        );
+    }
+
     fn patch(source: &str, f: impl FnOnce(&mut Value)) -> String {
         let mut doc = Json5Doc::parse(source).unwrap();
         let mut value = doc.to_value().unwrap();
@@ -623,7 +663,7 @@ mod tests {
         doc.apply(&value).unwrap();
         let out = doc.render();
         // always re-parses to the requested value
-        let reparsed: Value = json5::from_str(&out).unwrap();
+        let reparsed: Value = json_five::from_str(&out).unwrap();
         assert_eq!(reparsed, value, "rendered:\n{out}");
         out
     }
@@ -747,7 +787,7 @@ mod tests {
             .unwrap();
         let out = doc.render();
         assert!(out.contains("// c"));
-        let v: Value = json5::from_str(&out).unwrap();
+        let v: Value = json_five::from_str(&out).unwrap();
         assert_eq!(v["mcp"]["srv"]["type"], json!("local"));
     }
 

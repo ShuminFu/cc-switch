@@ -502,10 +502,10 @@ impl ProxyServer {
             // `:streamGenerateContent` / `:countTokens` 之外，Gemini SDK / CLI 还会发
             // GET `/models`、GET `/models/<id>` 等只读端点。如果只挂 POST，这些 GET
             // 请求会在路由层 404，绕过本地代理的统计、整流和故障转移。
-            .route("/v1beta/*path", any(handlers::handle_gemini))
-            .route("/gemini/v1beta/*path", any(handlers::handle_gemini))
+            .route("/v1beta/{*path}", any(handlers::handle_gemini))
+            .route("/gemini/v1beta/{*path}", any(handlers::handle_gemini))
             // Gemini 的 GA 版本也叫 /v1，给原 SDK 留一条出口
-            .route("/gemini/v1/*path", any(handlers::handle_gemini))
+            .route("/gemini/v1/{*path}", any(handlers::handle_gemini))
             // 请求体大小限制（SEC-14）；access guard 还会对原始 body 施加同样的上限
             .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
             // 访问控制：Origin/Host 校验 + 非本机请求的访问令牌（在读取 body 之前执行）
@@ -731,6 +731,47 @@ mod tests {
         assert!(started.elapsed() < STOP_TIMEOUT + Duration::from_secs(1));
         assert!(wait_until_port_is_free(info.port).await, "port still bound");
         assert!(!server.get_status().await.running);
+    }
+
+    /// axum 0.8 changed wildcard syntax from `/*path` to `/{*path}` and panics
+    /// on the old form when the router is built; this pins that every Gemini
+    /// route still reaches `handle_gemini` instead of the 404 fallback.
+    #[tokio::test]
+    async fn gemini_wildcard_routes_match_nested_paths() {
+        const TOKEN: &str = "ccsp-test-token-0123456789abcdef";
+        let server = test_server();
+        let status_of = |path: &'static str| {
+            let mut router = server.build_router(AccessGuard::new(TOKEN.to_string()));
+            async move {
+                let req = axum::extract::Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header(access_guard::ACCESS_TOKEN_HEADER, TOKEN)
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from("{}"))
+                    .unwrap();
+                let resp =
+                    <Router as tower::Service<axum::extract::Request>>::call(&mut router, req)
+                        .await
+                        .unwrap_or_else(|never| match never {});
+                resp.status()
+            }
+        };
+        for path in [
+            "/v1beta/models/gemini-2.5-pro:generateContent",
+            "/gemini/v1beta/models/gemini-2.5-pro:streamGenerateContent",
+            "/gemini/v1/models/gemini-2.5-pro:countTokens",
+        ] {
+            assert_ne!(
+                status_of(path).await,
+                axum::http::StatusCode::NOT_FOUND,
+                "{path} must reach the Gemini handler"
+            );
+        }
+        assert_eq!(
+            status_of("/v1beta-unknown/x").await,
+            axum::http::StatusCode::NOT_FOUND
+        );
     }
 
     #[tokio::test]
