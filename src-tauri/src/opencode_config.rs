@@ -83,11 +83,6 @@ fn get_opencode_data_dir() -> PathBuf {
         .join("opencode")
 }
 
-#[allow(dead_code)]
-pub fn get_opencode_env_path() -> PathBuf {
-    get_opencode_dir().join(".env")
-}
-
 pub fn read_opencode_config() -> Result<Value, AppError> {
     let path = get_opencode_config_path();
 

@@ -215,7 +215,7 @@ pub fn render_env_file(existing: Option<&str>, map: &HashMap<String, String>) ->
 /// - 配置文件错误诊断
 ///
 /// 已有完整的测试覆盖，可直接使用。
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn parse_env_file_strict(content: &str) -> Result<HashMap<String, String>, AppError> {
     let mut map = HashMap::new();
 
