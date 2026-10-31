@@ -436,22 +436,15 @@ impl Database {
         let result = {
             let conn = lock_conn!(self.conn);
             conn.query_row(
-                "SELECT listen_address, listen_port, max_retries,
-                        enable_logging,
-                        streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout
+                "SELECT listen_address, listen_port, enable_logging
                  FROM proxy_config WHERE app_type = 'claude'",
                 [],
                 |row| {
                     Ok(ProxyConfig {
                         listen_address: row.get(0)?,
                         listen_port: row.get::<_, i32>(1)? as u16,
-                        max_retries: row.get::<_, i32>(2)? as u8,
-                        request_timeout: 600, // 废弃字段，返回默认值
-                        enable_logging: row.get::<_, i32>(3)? != 0,
+                        enable_logging: row.get::<_, i32>(2)? != 0,
                         live_takeover_active: false, // 废弃字段
-                        streaming_first_byte_timeout: row.get::<_, i32>(4).unwrap_or(60) as u64,
-                        streaming_idle_timeout: row.get::<_, i32>(5).unwrap_or(120) as u64,
-                        non_streaming_timeout: row.get::<_, i32>(6).unwrap_or(600) as u64,
                     })
                 },
             )
@@ -471,11 +464,10 @@ impl Database {
 
     /// 更新代理配置（兼容旧接口）。
     ///
-    /// DB-37: only the truly global mirror columns (`listen_address`,
-    /// `listen_port`, `enable_logging`) are written to every app row. The
-    /// legacy config is read from the claude row, so its retries/timeouts are
-    /// written back to the claude row only; per-app failover tuning of the
-    /// other apps (set via `update_proxy_config_for_app`) is never clobbered.
+    /// DB-37 / PROXY-29: only the truly global mirror columns
+    /// (`listen_address`, `listen_port`, `enable_logging`) are written to every
+    /// app row. Retries and timeouts are per-app (`update_proxy_config_for_app`)
+    /// and are never touched by a global save.
     pub async fn update_proxy_config(&self, config: ProxyConfig) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         let tx = conn
@@ -492,21 +484,6 @@ impl Database {
                 config.listen_address,
                 config.listen_port as i32,
                 if config.enable_logging { 1 } else { 0 },
-            ],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-        tx.execute(
-            "UPDATE proxy_config SET
-                max_retries = ?1,
-                streaming_first_byte_timeout = ?2,
-                streaming_idle_timeout = ?3,
-                non_streaming_timeout = ?4
-             WHERE app_type = 'claude'",
-            rusqlite::params![
-                config.max_retries as i32,
-                config.streaming_first_byte_timeout as i32,
-                config.streaming_idle_timeout as i32,
-                config.non_streaming_timeout as i32,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
@@ -1023,18 +1000,20 @@ mod tests {
         codex.streaming_idle_timeout = 300;
         db.update_proxy_config_for_app(codex).await?;
 
+        let claude_before = db.get_proxy_config_for_app("claude").await?;
         let mut global = db.get_proxy_config().await?;
         global.listen_port = 16_123;
-        global.max_retries = 2;
-        global.streaming_idle_timeout = 77;
         db.update_proxy_config(global).await?;
 
         let codex = db.get_proxy_config_for_app("codex").await?;
         assert_eq!(codex.max_retries, 9);
         assert_eq!(codex.streaming_idle_timeout, 300);
         let claude = db.get_proxy_config_for_app("claude").await?;
-        assert_eq!(claude.max_retries, 2);
-        assert_eq!(claude.streaming_idle_timeout, 77);
+        assert_eq!(claude.max_retries, claude_before.max_retries);
+        assert_eq!(
+            claude.streaming_idle_timeout,
+            claude_before.streaming_idle_timeout
+        );
         assert_eq!(db.get_proxy_config().await?.listen_port, 16_123);
         Ok(())
     }

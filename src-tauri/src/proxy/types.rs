@@ -1,42 +1,23 @@
 use serde::{Deserialize, Serialize};
 
-/// 代理服务器配置
+/// 代理服务器配置（全局：监听地址/端口与日志开关）。
+///
+/// PROXY-29: retries and timeouts are per app (`AppProxyConfig`, one
+/// `proxy_config` row per app); this struct used to carry vestigial copies
+/// (`max_retries`, `request_timeout`, `streaming_*_timeout`,
+/// `non_streaming_timeout`) that the forwarder never read. Older frontends
+/// that still send them are accepted: serde ignores unknown fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyConfig {
     /// 监听地址
     pub listen_address: String,
     /// 监听端口
     pub listen_port: u16,
-    /// 最大重试次数
-    pub max_retries: u8,
-    /// 请求超时时间（秒）- 已废弃，保留兼容
-    pub request_timeout: u64,
     /// 是否启用日志
     pub enable_logging: bool,
     /// 是否正在接管 Live 配置
     #[serde(default)]
     pub live_takeover_active: bool,
-    /// 流式首字超时（秒）- 等待首个数据块的最大时间，范围 1-120 秒，默认 60 秒
-    #[serde(default = "default_streaming_first_byte_timeout")]
-    pub streaming_first_byte_timeout: u64,
-    /// 流式静默超时（秒）- 两个数据块之间的最大间隔，范围 60-600 秒，填 0 禁用（防止中途卡住）
-    #[serde(default = "default_streaming_idle_timeout")]
-    pub streaming_idle_timeout: u64,
-    /// 非流式总超时（秒）- 非流式请求的总超时时间，范围 60-1200 秒，默认 600 秒（10 分钟）
-    #[serde(default = "default_non_streaming_timeout")]
-    pub non_streaming_timeout: u64,
-}
-
-fn default_streaming_first_byte_timeout() -> u64 {
-    60
-}
-
-fn default_streaming_idle_timeout() -> u64 {
-    120
-}
-
-fn default_non_streaming_timeout() -> u64 {
-    600
 }
 
 impl Default for ProxyConfig {
@@ -44,13 +25,8 @@ impl Default for ProxyConfig {
         Self {
             listen_address: "127.0.0.1".to_string(),
             listen_port: 15721, // 使用较少占用的高位端口
-            max_retries: 3,
-            request_timeout: 600,
             enable_logging: true,
             live_takeover_active: false,
-            streaming_first_byte_timeout: 60,
-            streaming_idle_timeout: 120,
-            non_streaming_timeout: 600,
         }
     }
 }
@@ -579,5 +555,39 @@ mod tests {
         let parsed: LogConfig = serde_json::from_str(&json).unwrap();
         assert!(parsed.enabled);
         assert_eq!(parsed.level, "debug");
+    }
+}
+
+#[cfg(test)]
+mod proxy_config_tests {
+    use super::ProxyConfig;
+
+    /// PROXY-29: a payload from an older frontend that still carries the
+    /// removed retry/timeout fields deserializes, and they are not echoed back.
+    #[test]
+    fn legacy_payload_with_removed_fields_still_deserializes() {
+        let cfg: ProxyConfig = serde_json::from_value(serde_json::json!({
+            "listen_address": "0.0.0.0",
+            "listen_port": 16000,
+            "max_retries": 9,
+            "request_timeout": 600,
+            "enable_logging": false,
+            "streaming_first_byte_timeout": 60,
+            "streaming_idle_timeout": 120,
+            "non_streaming_timeout": 600
+        }))
+        .expect("legacy payload");
+        assert_eq!(cfg.listen_port, 16000);
+        assert!(!cfg.enable_logging);
+        let out = serde_json::to_value(&cfg).unwrap();
+        for removed in [
+            "max_retries",
+            "request_timeout",
+            "streaming_first_byte_timeout",
+            "streaming_idle_timeout",
+            "non_streaming_timeout",
+        ] {
+            assert!(out.get(removed).is_none(), "{removed} must be gone");
+        }
     }
 }
