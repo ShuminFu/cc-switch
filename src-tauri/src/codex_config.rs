@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::config::{atomic_write, delete_file, get_home_dir, read_json_file, write_json_file};
+use crate::config::{delete_file, get_home_dir, read_json_file, write_json_file};
 use crate::error::AppError;
 use crate::model_capabilities::{image_input_capability_from_modalities, ImageInputCapability};
 use serde_json::{json, Value};
@@ -181,7 +181,58 @@ pub fn get_codex_model_catalog_path() -> PathBuf {
     get_codex_config_dir().join(CC_SWITCH_CODEX_MODEL_CATALOG_FILENAME)
 }
 
-/// 原子写 Codex 的 `auth.json` 与 `config.toml`，在第二步失败时回滚第一步
+/// Journal of the previous `auth.json` / `config.toml` bytes, kept while a
+/// two-file Codex write is in progress (CFG-27). If cc-switch dies between
+/// the two renames, the next Codex read/write finds the journal and restores
+/// both files, so auth and config never stay from different providers.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct CodexLiveJournal {
+    auth_path: PathBuf,
+    config_path: PathBuf,
+    auth: Option<String>,
+    config: Option<String>,
+}
+
+fn codex_live_journal_path() -> PathBuf {
+    crate::config::get_app_config_dir()
+        .join("journal")
+        .join("codex-live.json")
+}
+
+fn restore_journaled_file(path: &Path, content: &Option<String>) -> Result<(), AppError> {
+    match content {
+        Some(text) => crate::config::atomic_write_secret(path, text.as_bytes()),
+        None => {
+            if path.exists() {
+                delete_file(path)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Restore Codex live files from an interrupted two-file write. Returns
+/// whether a journal was found.
+pub fn recover_codex_live_journal() -> Result<bool, AppError> {
+    let journal_path = codex_live_journal_path();
+    let Ok(raw) = fs::read_to_string(&journal_path) else {
+        return Ok(false);
+    };
+    match serde_json::from_str::<CodexLiveJournal>(&raw) {
+        Ok(journal) => {
+            log::warn!("Restoring Codex auth.json/config.toml from an interrupted switch");
+            restore_journaled_file(&journal.auth_path, &journal.auth)?;
+            restore_journaled_file(&journal.config_path, &journal.config)?;
+        }
+        Err(e) => log::warn!("Discarding unreadable Codex live journal: {e}"),
+    }
+    let _ = fs::remove_file(&journal_path);
+    Ok(true)
+}
+
+/// Write Codex `auth.json` and `config.toml` as one unit: the previous bytes
+/// of both are journaled first, a failure of the second write restores both,
+/// and a crash in between is repaired by [`recover_codex_live_journal`].
 pub fn write_codex_live_atomic(
     auth: &Value,
     config_text_opt: Option<&str>,
@@ -192,18 +243,7 @@ pub fn write_codex_live_atomic(
     if let Some(parent) = auth_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
-
-    // 读取旧内容用于回滚
-    let old_auth = if auth_path.exists() {
-        Some(fs::read(&auth_path).map_err(|e| AppError::io(&auth_path, e))?)
-    } else {
-        None
-    };
-    let _old_config = if config_path.exists() {
-        Some(fs::read(&config_path).map_err(|e| AppError::io(&config_path, e))?)
-    } else {
-        None
-    };
+    recover_codex_live_journal()?;
 
     // 准备写入内容
     let cfg_text = match config_text_opt {
@@ -214,20 +254,42 @@ pub fn write_codex_live_atomic(
         toml::from_str::<toml::Table>(&cfg_text).map_err(|e| AppError::toml(&config_path, e))?;
     }
 
-    // 第一步：写 auth.json
-    crate::config::write_json_file_secret(&auth_path, auth)?;
-
-    // 第二步：写 config.toml（失败则回滚 auth.json）
-    if let Err(e) = crate::config::write_text_file_secret(&config_path, &cfg_text) {
-        // 回滚 auth.json
-        if let Some(bytes) = old_auth {
-            let _ = atomic_write(&auth_path, &bytes);
-        } else {
-            let _ = delete_file(&auth_path);
+    let read_old = |path: &Path| -> Result<Option<String>, AppError> {
+        match fs::read(path) {
+            Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(AppError::io(path, e)),
         }
+    };
+    let journal = CodexLiveJournal {
+        auth_path: auth_path.clone(),
+        config_path: config_path.clone(),
+        auth: read_old(&auth_path)?,
+        config: read_old(&config_path)?,
+    };
+    let journal_path = codex_live_journal_path();
+    // the journal holds credentials: owner-only
+    crate::config::atomic_write_secret(
+        &journal_path,
+        serde_json::to_string(&journal)
+            .map_err(|e| AppError::JsonSerialize { source: e })?
+            .as_bytes(),
+    )?;
+
+    let result = crate::config::write_json_file_secret(&auth_path, auth)
+        .and_then(|()| crate::config::write_text_file_secret(&config_path, &cfg_text));
+    if let Err(e) = result {
+        if let Err(restore_err) = restore_journaled_file(&auth_path, &journal.auth)
+            .and_then(|()| restore_journaled_file(&config_path, &journal.config))
+        {
+            log::error!("Failed to roll back Codex live files: {restore_err}");
+            // keep the journal so the next start retries the restore
+            return Err(e);
+        }
+        let _ = fs::remove_file(&journal_path);
         return Err(e);
     }
-
+    let _ = fs::remove_file(&journal_path);
     Ok(())
 }
 
@@ -621,9 +683,11 @@ fn load_codex_model_template_from_cache() -> Result<Option<Value>, AppError> {
 /// Fixed candidates for locating the `codex` CLI when it is not on the process
 /// PATH (common in GUI apps launched outside a terminal).
 const CODEX_CLI_FIXED_CANDIDATES: &[&str] = &[
-    "codex",                                // PATH (all platforms)
-    "/opt/homebrew/bin/codex",              // macOS Apple Silicon Homebrew
-    "/usr/local/bin/codex",                 // macOS Intel Homebrew / Linux
+    "codex", // PATH (all platforms)
+    #[cfg(windows)]
+    "codex.cmd", // npm shim on PATH: `Command` only appends `.exe` itself
+    "/opt/homebrew/bin/codex", // macOS Apple Silicon Homebrew
+    "/usr/local/bin/codex", // macOS Intel Homebrew / Linux
     "/home/linuxbrew/.linuxbrew/bin/codex", // Linux Homebrew
 ];
 
@@ -778,14 +842,109 @@ fn codex_cli_candidates() -> Vec<PathBuf> {
     candidates
 }
 
-fn load_codex_model_template_from_bundled() -> Result<Option<Value>, AppError> {
+/// How long one `codex debug models --bundled` probe may run (CFG-15).
+const CODEX_CLI_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Number of CLI probes started; tests assert the switch path never probes.
+static CODEX_CLI_PROBES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Cached template extracted from the `codex` CLI, so a provider switch never
+/// has to spawn Node (CFG-15).
+fn codex_cli_template_cache_path() -> PathBuf {
+    crate::config::get_app_config_dir()
+        .join("cache")
+        .join("codex-model-template.json")
+}
+
+fn load_codex_model_template_from_cli_cache() -> Option<Value> {
+    let path = codex_cli_template_cache_path();
+    let text = fs::read_to_string(&path).ok()?;
+    match serde_json::from_str::<Value>(&text) {
+        Ok(template) if template.get("slug").is_some() => Some(template),
+        Ok(_) => None,
+        Err(e) => {
+            log::debug!(
+                "Ignoring unreadable Codex template cache {}: {e}",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+/// Run `command` capturing its output, killing it after `timeout`.
+/// Returns `Ok(None)` on timeout.
+fn run_with_timeout(
+    mut command: Command,
+    timeout: std::time::Duration,
+) -> std::io::Result<Option<std::process::Output>> {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    // drain the pipes on helper threads so a large catalog cannot block the child
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    let out_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(pipe) = stdout.as_mut() {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let err_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(pipe) = stderr.as_mut() {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            // a grandchild (e.g. a Node shim's child) may still hold the
+            // pipes open: leave the reader threads to finish on their own
+            return Ok(None);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    };
+    let stdout = out_reader.join().unwrap_or_default();
+    let stderr = err_reader.join().unwrap_or_default();
+    Ok(Some(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    }))
+}
+
+fn probe_codex_cli_template(timeout: std::time::Duration) -> Option<Value> {
+    CODEX_CLI_PROBES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     for candidate in codex_cli_candidates() {
-        let candidate_label = candidate.to_string_lossy();
-        let output = match Command::new(&candidate)
-            .args(["debug", "models", "--bundled"])
-            .output()
-        {
-            Ok(output) => output,
+        let candidate_label = candidate.to_string_lossy().into_owned();
+        let mut command = Command::new(&candidate);
+        command.args(["debug", "models", "--bundled"]);
+        let output = match run_with_timeout(command, timeout) {
+            Ok(Some(output)) => output,
+            Ok(None) => {
+                log::warn!("`{candidate_label} debug models --bundled` timed out");
+                continue;
+            }
             Err(err) => {
                 log::debug!("failed to run `{candidate_label} debug models --bundled`: {err}");
                 continue;
@@ -808,11 +967,40 @@ fn load_codex_model_template_from_bundled() -> Result<Option<Value>, AppError> {
             }
         };
         if let Some(template) = find_codex_model_template(&catalog) {
-            return Ok(Some(template));
+            return Some(template);
         }
     }
+    None
+}
 
-    Ok(None)
+/// Probe the `codex` CLI (5 s timeout, hidden window) and refresh the cached
+/// template. Runs off the switch path; safe to call from a background task.
+pub fn refresh_codex_cli_template_cache() -> Result<bool, AppError> {
+    let Some(template) = probe_codex_cli_template(CODEX_CLI_PROBE_TIMEOUT) else {
+        return Ok(false);
+    };
+    let path = codex_cli_template_cache_path();
+    write_json_file(&path, &template)?;
+    Ok(true)
+}
+
+/// Start one background CLI probe per process when no cached template
+/// exists, so later switches can use the CLI's template.
+fn schedule_codex_cli_template_refresh() {
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if cfg!(test) || STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("codex-template-probe".into())
+        .spawn(|| {
+            if let Err(e) = refresh_codex_cli_template_cache() {
+                log::debug!("Codex CLI template refresh failed: {e}");
+            }
+        });
+    if let Err(e) = spawned {
+        log::debug!("Could not start Codex CLI template probe: {e}");
+    }
 }
 
 fn load_codex_model_template_static() -> Option<Value> {
@@ -843,10 +1031,13 @@ fn load_codex_model_catalog_template() -> Result<Value, AppError> {
     if let Some(template) = load_codex_model_template_from_cache()? {
         return Ok(template);
     }
-    // ② codex CLI (PATH + platform-specific common paths)
-    if let Some(template) = load_codex_model_template_from_bundled()? {
+    // ② template previously extracted from the codex CLI. The CLI itself is
+    //    never run on the switch path (CFG-15); a missing cache triggers one
+    //    background probe for later switches.
+    if let Some(template) = load_codex_model_template_from_cli_cache() {
         return Ok(template);
     }
+    schedule_codex_cli_template_refresh();
     // ③ Static fallback bundled at compile time
     if let Some(template) = load_codex_model_template_static() {
         return Ok(template);
@@ -1358,7 +1549,7 @@ fn codex_unified_official_provider_table() -> toml_edit::Table {
     codex_official_provider_table(None, true)
 }
 
-fn remove_codex_proxy_placeholders_from_providers(providers: &mut toml_edit::Table) {
+fn remove_codex_proxy_placeholders_from_providers(providers: &mut dyn toml_edit::TableLike) {
     for (_, item) in providers.iter_mut() {
         if let Some(table) = item.as_table_mut() {
             let should_remove = table
@@ -1399,31 +1590,32 @@ pub fn apply_codex_official_proxy_route(
     doc.as_table_mut().remove("experimental_bearer_token");
     doc["model_provider"] = toml_edit::value(CC_SWITCH_CODEX_OFFICIAL_PROXY_PROVIDER_ID);
 
-    let mut providers = match doc.as_table_mut().remove("model_providers") {
-        Some(item) => item.into_table().map_err(|_| {
-            AppError::Message(
-                "Invalid Codex config.toml: model_providers must be a table".to_string(),
-            )
-        })?,
-        None => {
-            let mut table = toml_edit::Table::new();
-            table.set_implicit(true);
-            table
-        }
-    };
-
-    // Clean only CC Switch's placeholder from every stale provider table. Real
-    // user bearer tokens are preserved, as are all unrelated provider fields.
-    remove_codex_proxy_placeholders_from_providers(&mut providers);
-
     // The local proxy currently exposes HTTP/SSE, not Codex websocket routes.
     let table = codex_official_provider_table(Some(proxy_base_url), false);
 
-    providers.insert(
-        CC_SWITCH_CODEX_OFFICIAL_PROXY_PROVIDER_ID,
-        toml_edit::Item::Table(table),
-    );
-    doc["model_providers"] = toml_edit::Item::Table(providers);
+    // Edit `model_providers` in place, keeping its position and its inline or
+    // standard form, so removing the route restores the original text (CFG-33).
+    if !doc.contains_key("model_providers") {
+        let mut providers = toml_edit::Table::new();
+        providers.set_implicit(true);
+        doc.insert("model_providers", toml_edit::Item::Table(providers));
+    }
+    let item = doc.get_mut("model_providers").expect("inserted above");
+    let is_inline = item.is_inline_table();
+    let providers = item.as_table_like_mut().ok_or_else(|| {
+        AppError::Message("Invalid Codex config.toml: model_providers must be a table".to_string())
+    })?;
+
+    // Clean only CC Switch's placeholder from every stale provider table. Real
+    // user bearer tokens are preserved, as are all unrelated provider fields.
+    remove_codex_proxy_placeholders_from_providers(providers);
+
+    let route = if is_inline {
+        toml_edit::value(table.into_inline_table())
+    } else {
+        toml_edit::Item::Table(table)
+    };
+    providers.insert(CC_SWITCH_CODEX_OFFICIAL_PROXY_PROVIDER_ID, route);
     Ok(doc.to_string())
 }
 
@@ -1457,17 +1649,19 @@ pub fn remove_codex_official_proxy_route(config_text: &str) -> Result<String, Ap
     }
 
     doc.as_table_mut().remove("model_provider");
-    if let Some(item) = doc.as_table_mut().remove("model_providers") {
-        let mut providers = item.into_table().map_err(|_| {
+    let mut now_empty = false;
+    if let Some(item) = doc.get_mut("model_providers") {
+        let providers = item.as_table_like_mut().ok_or_else(|| {
             AppError::Message(
                 "Invalid Codex config.toml: model_providers must be a table".to_string(),
             )
         })?;
         providers.remove(CC_SWITCH_CODEX_OFFICIAL_PROXY_PROVIDER_ID);
-        remove_codex_proxy_placeholders_from_providers(&mut providers);
-        if !providers.is_empty() {
-            doc["model_providers"] = toml_edit::Item::Table(providers);
-        }
+        remove_codex_proxy_placeholders_from_providers(providers);
+        now_empty = providers.is_empty();
+    }
+    if now_empty {
+        doc.as_table_mut().remove("model_providers");
     }
     Ok(doc.to_string())
 }
@@ -1691,11 +1885,55 @@ pub fn write_codex_live_for_provider(
             && !crate::settings::preserve_codex_official_auth_on_switch());
 
     if should_write_auth {
+        if category != Some("official") {
+            // Compat mode replaces auth.json wholesale. Keep a recoverable copy
+            // of a ChatGPT login cache before it is overwritten (CFG-38).
+            let auth_path = get_codex_auth_path();
+            if read_json_file::<Value>(&auth_path)
+                .is_ok_and(|live| codex_auth_has_oauth_login_material(&live))
+            {
+                if let Some(backup) = crate::config::backup_live_file("codex", &auth_path) {
+                    log::warn!(
+                        "Codex auth.json held a ChatGPT login; backed up to {} before the third-party switch",
+                        backup.display()
+                    );
+                }
+            }
+        }
         write_codex_live_atomic(auth, config_text)
     } else {
+        if category == Some("official") {
+            strip_foreign_codex_api_key(auth)?;
+        }
         let live_config = prepare_codex_provider_live_config(auth, config_text.unwrap_or(""))?;
         write_codex_live_config_atomic(Some(&live_config))
     }
+}
+
+/// Switching to an official provider whose stored `auth` carries no login
+/// material keeps `auth.json` — but an `OPENAI_API_KEY` left there by an
+/// earlier third-party write would make Codex send that key to OpenAI. Drop
+/// it (the previous file is backed up first); OAuth tokens stay (CFG-38).
+fn strip_foreign_codex_api_key(official_auth: &Value) -> Result<(), AppError> {
+    let auth_path = get_codex_auth_path();
+    let Ok(mut live) = read_json_file::<Value>(&auth_path) else {
+        return Ok(());
+    };
+    let Some(live_key) = extract_codex_auth_api_key(&live) else {
+        return Ok(());
+    };
+    if extract_codex_auth_api_key(official_auth).as_deref() == Some(live_key.as_str()) {
+        return Ok(());
+    }
+    if let Some(obj) = live.as_object_mut() {
+        obj.remove("OPENAI_API_KEY");
+    }
+    crate::config::backup_live_file("codex", &auth_path);
+    crate::config::write_json_file_secret(&auth_path, &live)?;
+    log::info!(
+        "Removed a third-party OPENAI_API_KEY from Codex auth.json for the official provider"
+    );
+    Ok(())
 }
 
 /// Build the live Codex config for provider switching.
@@ -2002,6 +2240,21 @@ command = "example"
         ] {
             let result = apply_codex_official_proxy_route(input, "http://127.0.0.1:15721/v1");
             assert!(result.is_err());
+        }
+    }
+
+    #[test]
+    fn official_proxy_route_round_trip_restores_original_text() {
+        for input in [
+            "# my config\nmodel = \"gpt-5.4\" # pinned\n\n[mcp_servers.example]\ncommand = \"example\"\n",
+            "model = \"gpt-5.4\"\nmodel_providers = { other = { name = \"Other\", base_url = \"https://o.example.com\" } }\n\n[profiles.fast]\nmodel = \"m\"\n",
+            "model = \"gpt-5.4\"\n\n# providers I use\n[model_providers.other]\nname = \"Other\" # keep\nbase_url = \"https://o.example.com\"\n\n[mcp_servers.x]\ncommand = \"x\"\n",
+        ] {
+            let projected = apply_codex_official_proxy_route(input, "http://127.0.0.1:15721/v1")
+                .expect("project");
+            assert!(codex_config_has_official_proxy_route(&projected));
+            let restored = remove_codex_official_proxy_route(&projected).expect("clean");
+            assert_eq!(restored, input, "projected:\n{projected}");
         }
     }
 
@@ -3270,6 +3523,72 @@ web_search = "disabled"
             .is_none(),
             "entries lacking slug are skipped; a fully-skipped catalog yields None"
         );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn interrupted_two_file_write_is_recovered_from_journal() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = dir.path().join("auth.json");
+        let config = dir.path().join("config.toml");
+        // state after a crash between the two renames: new auth, old config
+        fs::write(&auth, r#"{"OPENAI_API_KEY":"new"}"#).unwrap();
+        fs::write(&config, "model = \"old\"\n").unwrap();
+        let journal = CodexLiveJournal {
+            auth_path: auth.clone(),
+            config_path: config.clone(),
+            auth: Some(r#"{"OPENAI_API_KEY":"old"}"#.to_string()),
+            config: Some("model = \"old\"\n".to_string()),
+        };
+        let old_home = std::env::var_os("CC_SWITCH_TEST_HOME");
+        std::env::set_var("CC_SWITCH_TEST_HOME", dir.path());
+        let journal_path = codex_live_journal_path();
+        fs::create_dir_all(journal_path.parent().unwrap()).unwrap();
+        fs::write(&journal_path, serde_json::to_string(&journal).unwrap()).unwrap();
+
+        let recovered = recover_codex_live_journal().unwrap();
+        let journal_left = journal_path.exists();
+        match old_home {
+            Some(v) => std::env::set_var("CC_SWITCH_TEST_HOME", v),
+            None => std::env::remove_var("CC_SWITCH_TEST_HOME"),
+        }
+        assert!(recovered);
+        assert!(!journal_left);
+        assert_eq!(
+            fs::read_to_string(&auth).unwrap(),
+            r#"{"OPENAI_API_KEY":"old"}"#
+        );
+        assert_eq!(fs::read_to_string(&config).unwrap(), "model = \"old\"\n");
+    }
+
+    #[test]
+    fn catalog_template_lookup_never_runs_the_cli() {
+        let before = CODEX_CLI_PROBES.load(std::sync::atomic::Ordering::SeqCst);
+        let template = load_codex_model_catalog_template().expect("static fallback");
+        assert!(template.get("slug").is_some());
+        assert_eq!(
+            CODEX_CLI_PROBES.load(std::sync::atomic::Ordering::SeqCst),
+            before,
+            "the switch path must not spawn the codex CLI"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_probe_runner_kills_hung_process_after_timeout() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 10"]);
+        let started = std::time::Instant::now();
+        let output = run_with_timeout(command, std::time::Duration::from_millis(200)).unwrap();
+        assert!(output.is_none());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+
+        let mut command = Command::new("sh");
+        command.args(["-c", "echo ok"]);
+        let output = run_with_timeout(command, std::time::Duration::from_secs(5))
+            .unwrap()
+            .expect("finished");
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "ok");
     }
 
     #[test]
