@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { ProviderIcon } from "@/components/ProviderIcon";
+import { SessionTagEditor } from "./SessionTagEditor";
 import type { SessionMeta } from "@/types";
 import type { SessionAnnotation } from "@/lib/api/sessionAnnotations";
 import {
@@ -187,6 +188,10 @@ export function SessionItem({
               <Archive className="size-3.5" />
             )}
           </button>
+          <SessionTagEditor
+            tags={annotation?.tags ?? []}
+            onSave={(tags) => onAnnotate({ tags })}
+          />
         </div>
       ) : null}
     </div>
