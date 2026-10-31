@@ -38,3 +38,5 @@ CCS-222 (`p0-coverage-remeasure-baseline`).
 - `~/go/bin/actionlint .github/workflows/ci.yml` -> exit 0; YAML `safe_load` ok.
 - `pnpm typecheck` -> exit 0; `npx prettier --check` on the touched script/test files -> clean.
 - Not verifiable locally: the gate on a real GitHub Actions run.
+
+**Review.** Independent review of 9e65386 confirmed every acceptance criterion: `npx vitest run tests/scripts` -> 60 passed; the CCS-222 lcov with both floors exits 0, a raised `proxy=95` floor or a mistyped dir exits 1 naming the directory, and a malformed `--min` value is rejected; actionlint and YAML parse clean; `pnpm typecheck` and prettier clean. One follow-up: the comment above the coverage jobs in `ci.yml` still said all coverage was report-only and never blocks a PR; it now says that only coverage-frontend is report-only and coverage-rust gates on the CCS-242 floors. No script or test changes were needed.

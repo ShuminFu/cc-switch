@@ -300,9 +300,9 @@ jobs:
           path: e2e/artifacts/
           if-no-files-found: ignore
 
-  # Report-only coverage (CCS-019): never blocks a PR. Thresholds are ratcheted
-  # in P5 (target: 75% lines for proxy/ and database/). Baseline numbers live in
-  # docs/dev/perf-baseline.json.
+  # Coverage (CCS-019). coverage-frontend is report-only and never blocks a PR;
+  # coverage-rust gates proxy/ and database/ on ratcheted line floors (CCS-242).
+  # Baseline numbers live in docs/dev/perf-baseline.json.
   coverage-frontend:
     name: Coverage (frontend)
     runs-on: ubuntu-latest
