@@ -120,10 +120,7 @@ fn build_message_delta_event(stop_reason: Option<String>, usage_json: Option<Val
 }
 
 fn sse_event_bytes(event_name: &str, payload: &Value) -> Bytes {
-    Bytes::from(format!(
-        "event: {event_name}\ndata: {}\n\n",
-        serde_json::to_string(payload).unwrap_or_default()
-    ))
+    crate::proxy::sse::encode_event(event_name, payload)
 }
 
 fn anthropic_error_event(error_type: &str, message: &str) -> Bytes {
@@ -433,9 +430,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                     "usage": start_usage
                                                 }
                                             });
-                                            let sse_data = format!("event: message_start\ndata: {}\n\n",
-                                                serde_json::to_string(&event).unwrap_or_default());
-                                            yield Ok(Bytes::from(sse_data));
+                                            let sse_data = crate::proxy::sse::encode_event("message_start", &event);
+                                            yield Ok(sse_data);
                                             has_sent_message_start = true;
                                         }
 
@@ -475,9 +471,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                         "type": "content_block_stop",
                                                         "index": index
                                                     });
-                                                    let sse_data = format!("event: content_block_stop\ndata: {}\n\n",
-                                                        serde_json::to_string(&event).unwrap_or_default());
-                                                    yield Ok(Bytes::from(sse_data));
+                                                    let sse_data = crate::proxy::sse::encode_event("content_block_stop", &event);
+                                                    yield Ok(sse_data);
                                                 }
                                                 let index = next_content_index;
                                                 next_content_index += 1;
@@ -489,9 +484,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                         "thinking": ""
                                                     }
                                                 });
-                                                let sse_data = format!("event: content_block_start\ndata: {}\n\n",
-                                                    serde_json::to_string(&event).unwrap_or_default());
-                                                yield Ok(Bytes::from(sse_data));
+                                                let sse_data = crate::proxy::sse::encode_event("content_block_start", &event);
+                                                yield Ok(sse_data);
                                                 current_non_tool_block_type = Some("thinking");
                                                 current_non_tool_block_index = Some(index);
                                             }
@@ -505,9 +499,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                         "thinking": reasoning
                                                     }
                                                 });
-                                                let sse_data = format!("event: content_block_delta\ndata: {}\n\n",
-                                                    serde_json::to_string(&event).unwrap_or_default());
-                                                yield Ok(Bytes::from(sse_data));
+                                                let sse_data = crate::proxy::sse::encode_event("content_block_delta", &event);
+                                                yield Ok(sse_data);
                                             }
                                         }
 
@@ -520,9 +513,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                             "type": "content_block_stop",
                                                             "index": index
                                                         });
-                                                        let sse_data = format!("event: content_block_stop\ndata: {}\n\n",
-                                                            serde_json::to_string(&event).unwrap_or_default());
-                                                        yield Ok(Bytes::from(sse_data));
+                                                        let sse_data = crate::proxy::sse::encode_event("content_block_stop", &event);
+                                                        yield Ok(sse_data);
                                                     }
 
                                                     let index = next_content_index;
@@ -535,9 +527,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                             "text": ""
                                                         }
                                                     });
-                                                    let sse_data = format!("event: content_block_start\ndata: {}\n\n",
-                                                        serde_json::to_string(&event).unwrap_or_default());
-                                                    yield Ok(Bytes::from(sse_data));
+                                                    let sse_data = crate::proxy::sse::encode_event("content_block_start", &event);
+                                                    yield Ok(sse_data);
                                                     current_non_tool_block_type = Some("text");
                                                     current_non_tool_block_index = Some(index);
                                                 }
@@ -551,9 +542,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                             "text": content
                                                         }
                                                     });
-                                                    let sse_data = format!("event: content_block_delta\ndata: {}\n\n",
-                                                        serde_json::to_string(&event).unwrap_or_default());
-                                                    yield Ok(Bytes::from(sse_data));
+                                                    let sse_data = crate::proxy::sse::encode_event("content_block_delta", &event);
+                                                    yield Ok(sse_data);
                                                 }
                                             }
                                         }
@@ -566,9 +556,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                         "type": "content_block_stop",
                                                         "index": index
                                                     });
-                                                    let sse_data = format!("event: content_block_stop\ndata: {}\n\n",
-                                                        serde_json::to_string(&event).unwrap_or_default());
-                                                    yield Ok(Bytes::from(sse_data));
+                                                    let sse_data = crate::proxy::sse::encode_event("content_block_stop", &event);
+                                                    yield Ok(sse_data);
                                                 }
                                                 current_non_tool_block_type = None;
 
@@ -682,9 +671,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                                 "name": name
                                                             }
                                                         });
-                                                        let sse_data = format!("event: content_block_start\ndata: {}\n\n",
-                                                            serde_json::to_string(&event).unwrap_or_default());
-                                                        yield Ok(Bytes::from(sse_data));
+                                                        let sse_data = crate::proxy::sse::encode_event("content_block_start", &event);
+                                                        yield Ok(sse_data);
                                                         open_tool_block_indices.insert(anthropic_index);
                                                     }
 
@@ -697,9 +685,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                                 "partial_json": args
                                                             }
                                                         });
-                                                        let sse_data = format!("event: content_block_delta\ndata: {}\n\n",
-                                                            serde_json::to_string(&event).unwrap_or_default());
-                                                        yield Ok(Bytes::from(sse_data));
+                                                        let sse_data = crate::proxy::sse::encode_event("content_block_delta", &event);
+                                                        yield Ok(sse_data);
                                                     }
 
                                                     if let Some(args) = immediate_delta {
@@ -711,9 +698,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                                 "partial_json": args
                                                             }
                                                         });
-                                                        let sse_data = format!("event: content_block_delta\ndata: {}\n\n",
-                                                            serde_json::to_string(&event).unwrap_or_default());
-                                                        yield Ok(Bytes::from(sse_data));
+                                                        let sse_data = crate::proxy::sse::encode_event("content_block_delta", &event);
+                                                        yield Ok(sse_data);
                                                     }
                                                 }
                                             }
@@ -766,9 +752,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                             "message": format!("Stream error: {e}")
                         }
                     });
-                    let sse_data = format!("event: error\ndata: {}\n\n",
-                        serde_json::to_string(&error_event).unwrap_or_default());
-                    yield Ok(Bytes::from(sse_data));
+                    let sse_data = crate::proxy::sse::encode_event("error", &error_event);
+                    yield Ok(sse_data);
                     break;
                 }
             }
