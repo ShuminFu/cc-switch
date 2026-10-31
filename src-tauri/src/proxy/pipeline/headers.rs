@@ -60,6 +60,8 @@ const CLIENT_HOP_HEADERS: &[&str] = &[
     "x-b3-sampled",
     "traceparent",
     "tracestate",
+    // CC Switch's own access token is never forwarded upstream.
+    "x-cc-switch-token",
 ];
 
 /// Request-side hop-by-hop headers (RFC 7230 §6.1 plus `expect`, which the raw
@@ -139,7 +141,12 @@ impl HeaderPolicy<'_> {
                 continue;
             }
 
-            if matches!(key_str, "authorization" | "x-api-key" | "x-goog-api-key") {
+            // Client credentials are replaced by the provider's, never forwarded
+            // (`api-key` is the Azure OpenAI form).
+            if matches!(
+                key_str,
+                "authorization" | "x-api-key" | "x-goog-api-key" | "api-key"
+            ) {
                 if self.passthrough_client_authorization && key_str == "authorization" {
                     saw_auth = true;
                     out.append(key.clone(), value.clone());
@@ -594,6 +601,22 @@ mod tests {
 
     fn names(headers: &HeaderMap) -> Vec<&str> {
         headers.keys().map(|k| k.as_str()).collect()
+    }
+
+    #[test]
+    fn client_azure_key_and_access_token_are_not_forwarded() {
+        let mut client = client_headers();
+        client.append("api-key", HeaderValue::from_static("client-azure-key"));
+        client.append("x-cc-switch-token", HeaderValue::from_static("local-token"));
+        let auth = [(
+            HeaderName::from_static("api-key"),
+            HeaderValue::from_static("provider-key"),
+        )];
+        let out = policy(&client, &auth).build();
+        let values: Vec<_> = out.get_all("api-key").iter().collect();
+        assert_eq!(values, vec!["provider-key"]);
+        assert!(!out.contains_key("x-cc-switch-token"));
+        assert!(!out.contains_key("x-api-key"));
     }
 
     #[test]

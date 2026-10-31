@@ -113,7 +113,9 @@ fn insert_request_log(
         log.latency_ms as i64,
         log.first_token_ms.map(|v| v as i64),
         log.status_code as i64,
-        log.error_message,
+        log.error_message
+            .as_deref()
+            .map(crate::proxy::http_client::truncate_error_text),
         log.session_id,
         log.provider_type,
         log.is_streaming as i64,

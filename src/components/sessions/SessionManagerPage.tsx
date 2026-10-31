@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
@@ -75,6 +82,11 @@ import {
   type SessionProviderGroup,
   shouldHideCodexMessageFromToc,
 } from "./utils";
+
+/** Rows mounted per "show more" step in the flat list (PERF-46). */
+const SESSION_LIST_PAGE_SIZE = 100;
+/** Rows mounted per directory group before "show more" (PERF-46). */
+const SESSION_DIRECTORY_PAGE_SIZE = 50;
 
 const SESSION_LIST_VIEW_MODE_STORAGE_KEY =
   "cc-switch.sessionManager.listViewMode";
@@ -254,8 +266,12 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     return map;
   }, [transcriptHits]);
 
+  // PERF-46: typing stays responsive; the list re-filters/re-groups with the
+  // deferred value instead of synchronously on every keystroke.
+  const deferredSearch = useDeferredValue(search);
+
   const filteredSessions = useMemo(() => {
-    if (transcriptSearch && search.trim()) {
+    if (transcriptSearch && deferredSearch.trim()) {
       if (!transcriptHits) return [];
       const byKey = new Map(
         providerSessions.map((session) => [getSessionKey(session), session]),
@@ -264,8 +280,29 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         .map((hit) => byKey.get(hit.sessionKey))
         .filter((session): session is SessionMeta => Boolean(session));
     }
-    return filterSessionsByQuery(providerSessions, search);
-  }, [providerSessions, search, transcriptHits, transcriptSearch]);
+    return filterSessionsByQuery(providerSessions, deferredSearch);
+  }, [providerSessions, deferredSearch, transcriptHits, transcriptSearch]);
+
+  // PERF-46: mount the list incrementally instead of thousands of rows at once.
+  const [visibleCount, setVisibleCount] = useState(SESSION_LIST_PAGE_SIZE);
+  const [expandedDirectoryLimits, setExpandedDirectoryLimits] = useState<
+    Map<string, number>
+  >(() => new Map());
+  useEffect(() => {
+    setVisibleCount(SESSION_LIST_PAGE_SIZE);
+    setExpandedDirectoryLimits(new Map());
+  }, [deferredSearch, providerFilter, transcriptSearch, listViewMode]);
+  const showMoreDirectory = useCallback((key: string) => {
+    setExpandedDirectoryLimits((prev) => {
+      const next = new Map(prev);
+      next.set(
+        key,
+        (prev.get(key) ?? SESSION_DIRECTORY_PAGE_SIZE) +
+          SESSION_DIRECTORY_PAGE_SIZE,
+      );
+      return next;
+    });
+  }, []);
 
   // In-session highlighting follows the transcript search only; the list's
   // metadata search never matched message bodies (SESS-34).
@@ -761,6 +798,21 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     setExpandedProviderGroups(new Set());
     setExpandedDirectoryGroups(new Set());
   };
+
+  const renderShowMore = (remaining: number, onClick: () => void) =>
+    remaining > 0 ? (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="w-full text-xs text-muted-foreground"
+        onClick={onClick}
+      >
+        {t("sessionManager.showMore", {
+          defaultValue: "Show more ({{count}} remaining)",
+          count: remaining,
+        })}
+      </Button>
+    ) : null;
 
   const renderSessionItem = (session: SessionMeta) => {
     const sessionKey = getSessionKey(session);
@@ -1510,9 +1562,25 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                                           </CollapsibleTrigger>
                                         </div>
                                         <CollapsibleContent className="mt-1 space-y-1 pl-3">
-                                          {directoryGroup.sessions.map(
-                                            (session) =>
+                                          {directoryGroup.sessions
+                                            .slice(
+                                              0,
+                                              expandedDirectoryLimits.get(
+                                                directoryGroup.key,
+                                              ) ?? SESSION_DIRECTORY_PAGE_SIZE,
+                                            )
+                                            .map((session) =>
                                               renderSessionItem(session),
+                                            )}
+                                          {renderShowMore(
+                                            directoryGroup.sessions.length -
+                                              (expandedDirectoryLimits.get(
+                                                directoryGroup.key,
+                                              ) ?? SESSION_DIRECTORY_PAGE_SIZE),
+                                            () =>
+                                              showMoreDirectory(
+                                                directoryGroup.key,
+                                              ),
                                           )}
                                         </CollapsibleContent>
                                       </Collapsible>
@@ -1526,8 +1594,15 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                       </div>
                     ) : (
                       <div className="space-y-1">
-                        {filteredSessions.map((session) =>
-                          renderSessionItem(session),
+                        {filteredSessions
+                          .slice(0, visibleCount)
+                          .map((session) => renderSessionItem(session))}
+                        {renderShowMore(
+                          filteredSessions.length - visibleCount,
+                          () =>
+                            setVisibleCount(
+                              (count) => count + SESSION_LIST_PAGE_SIZE,
+                            ),
                         )}
                       </div>
                     )}

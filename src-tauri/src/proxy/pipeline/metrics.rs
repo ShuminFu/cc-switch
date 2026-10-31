@@ -7,8 +7,37 @@
 //! `success_rate` is derived when the status is read.
 
 use crate::proxy::types::ProxyStatus;
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+/// Upper bounds (seconds) of the per-provider attempt latency histogram
+/// exported on `/metrics` (PROXY-20). Latency is time to upstream response
+/// headers (first byte for streams), not full stream duration.
+pub const LATENCY_BUCKETS_SECS: [f64; 11] = [
+    0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0,
+];
+
+#[derive(Debug, Default, Clone)]
+struct ProviderCounters {
+    name: String,
+    success: u64,
+    failure: u64,
+    /// Non-cumulative bucket counts; the last slot is `+Inf`.
+    buckets: [u64; LATENCY_BUCKETS_SECS.len() + 1],
+    latency_sum_secs: f64,
+}
+
+/// One breaker's state for the `/metrics` gauge.
+#[derive(Debug, Clone)]
+pub struct BreakerGauge {
+    pub app_type: String,
+    pub provider_id: String,
+    /// 0 = closed, 1 = half-open, 2 = open.
+    pub state: u8,
+}
 
 #[derive(Debug, Default)]
 struct Detail {
@@ -27,6 +56,8 @@ pub struct ProxyMetrics {
     failed_requests: AtomicU64,
     failover_count: AtomicU64,
     detail: Mutex<Detail>,
+    /// Per `(app_type, provider_id)` attempt counters and latency histogram.
+    providers: Mutex<BTreeMap<(String, String), ProviderCounters>>,
 }
 
 /// How one client request ended, as far as the counters are concerned.
@@ -86,6 +117,139 @@ impl ProxyMetrics {
         self.detail().last_error = Some(error);
     }
 
+    /// One upstream attempt finished (PROXY-20): `success` is whether the
+    /// provider served the request; `elapsed` is the time to response headers.
+    pub fn record_attempt_result(
+        &self,
+        app_type: &str,
+        provider_id: &str,
+        provider_name: &str,
+        success: bool,
+        elapsed: Duration,
+    ) {
+        let secs = elapsed.as_secs_f64();
+        let bucket = LATENCY_BUCKETS_SECS
+            .iter()
+            .position(|upper| secs <= *upper)
+            .unwrap_or(LATENCY_BUCKETS_SECS.len());
+        let mut providers = self.providers.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = providers
+            .entry((app_type.to_string(), provider_id.to_string()))
+            .or_default();
+        if entry.name != provider_name {
+            entry.name = provider_name.to_string();
+        }
+        if success {
+            entry.success += 1;
+        } else {
+            entry.failure += 1;
+        }
+        entry.buckets[bucket] += 1;
+        entry.latency_sum_secs += secs;
+    }
+
+    /// Render all counters in the Prometheus text exposition format (v0.0.4).
+    pub fn render_prometheus(
+        &self,
+        breakers: &[BreakerGauge],
+        extra_gauges: &[(&str, &str, u64)],
+    ) -> String {
+        let mut out = String::with_capacity(4096);
+        let counter = |out: &mut String, name: &str, help: &str, value: u64| {
+            let _ = writeln!(
+                out,
+                "# HELP {name} {help}\n# TYPE {name} counter\n{name} {value}"
+            );
+        };
+        counter(
+            &mut out,
+            "ccswitch_proxy_requests_total",
+            "Client requests that entered the proxy pipeline.",
+            self.total_requests.load(Ordering::Relaxed),
+        );
+        counter(
+            &mut out,
+            "ccswitch_proxy_requests_succeeded_total",
+            "Client requests served by a provider.",
+            self.success_requests.load(Ordering::Relaxed),
+        );
+        counter(
+            &mut out,
+            "ccswitch_proxy_requests_failed_total",
+            "Client requests no provider could serve.",
+            self.failed_requests.load(Ordering::Relaxed),
+        );
+        counter(
+            &mut out,
+            "ccswitch_proxy_failovers_total",
+            "Requests served after an earlier provider failed or was skipped.",
+            self.failover_count.load(Ordering::Relaxed),
+        );
+        let _ = writeln!(
+            out,
+            "# HELP ccswitch_proxy_active_connections In-flight client requests.\n# TYPE ccswitch_proxy_active_connections gauge\nccswitch_proxy_active_connections {}",
+            self.active_connections.load(Ordering::Relaxed)
+        );
+        for (name, help, value) in extra_gauges {
+            let _ = writeln!(
+                out,
+                "# HELP {name} {help}\n# TYPE {name} gauge\n{name} {value}"
+            );
+        }
+
+        let providers = self.providers.lock().unwrap_or_else(|e| e.into_inner());
+        out.push_str("# HELP ccswitch_provider_attempts_total Upstream attempts per provider and result.\n# TYPE ccswitch_provider_attempts_total counter\n");
+        for ((app, id), c) in providers.iter() {
+            let labels = provider_labels(app, id, &c.name);
+            let _ = writeln!(
+                out,
+                "ccswitch_provider_attempts_total{{{labels},result=\"success\"}} {}",
+                c.success
+            );
+            let _ = writeln!(
+                out,
+                "ccswitch_provider_attempts_total{{{labels},result=\"failure\"}} {}",
+                c.failure
+            );
+        }
+        out.push_str("# HELP ccswitch_provider_latency_seconds Time to upstream response headers per attempt.\n# TYPE ccswitch_provider_latency_seconds histogram\n");
+        for ((app, id), c) in providers.iter() {
+            let labels = provider_labels(app, id, &c.name);
+            let mut cumulative = 0u64;
+            for (i, upper) in LATENCY_BUCKETS_SECS.iter().enumerate() {
+                cumulative += c.buckets[i];
+                let _ = writeln!(out, "ccswitch_provider_latency_seconds_bucket{{{labels},le=\"{upper}\"}} {cumulative}");
+            }
+            cumulative += c.buckets[LATENCY_BUCKETS_SECS.len()];
+            let _ = writeln!(
+                out,
+                "ccswitch_provider_latency_seconds_bucket{{{labels},le=\"+Inf\"}} {cumulative}"
+            );
+            let _ = writeln!(
+                out,
+                "ccswitch_provider_latency_seconds_sum{{{labels}}} {}",
+                c.latency_sum_secs
+            );
+            let _ = writeln!(
+                out,
+                "ccswitch_provider_latency_seconds_count{{{labels}}} {cumulative}"
+            );
+        }
+        drop(providers);
+
+        out.push_str("# HELP ccswitch_circuit_breaker_state Circuit breaker state (0=closed, 1=half-open, 2=open).\n# TYPE ccswitch_circuit_breaker_state gauge\n");
+        for b in breakers {
+            let _ = writeln!(
+                out,
+                "ccswitch_circuit_breaker_state{{app=\"{}\",provider_id=\"{}\"}} {}",
+                escape_label(&b.app_type),
+                escape_label(&b.provider_id),
+                b.state
+            );
+        }
+        out
+    }
+
     pub fn connection_opened(&self) {
         self.active_connections.fetch_add(1, Ordering::Relaxed);
     }
@@ -137,9 +301,72 @@ impl ProxyMetrics {
     }
 }
 
+fn escape_label(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
+fn provider_labels(app: &str, id: &str, name: &str) -> String {
+    format!(
+        "app=\"{}\",provider_id=\"{}\",provider=\"{}\"",
+        escape_label(app),
+        escape_label(id),
+        escape_label(name)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prometheus_render_has_provider_histograms_and_breakers() {
+        let metrics = ProxyMetrics::default();
+        metrics.record_request_start();
+        metrics.record_attempt_result(
+            "claude",
+            "p1",
+            "Main \"A\"",
+            true,
+            Duration::from_millis(300),
+        );
+        metrics.record_attempt_result(
+            "claude",
+            "p1",
+            "Main \"A\"",
+            false,
+            Duration::from_secs(400),
+        );
+        metrics.record_outcome(RequestOutcome::Served { failover: true });
+        let text = metrics.render_prometheus(
+            &[BreakerGauge {
+                app_type: "claude".into(),
+                provider_id: "p1".into(),
+                state: 2,
+            }],
+            &[("ccswitch_test_gauge", "Test.", 7)],
+        );
+        assert!(text.contains("ccswitch_proxy_requests_total 1"), "{text}");
+        assert!(text.contains("ccswitch_proxy_failovers_total 1"));
+        assert!(text.contains(
+            "ccswitch_provider_attempts_total{app=\"claude\",provider_id=\"p1\",provider=\"Main \\\"A\\\"\",result=\"success\"} 1"
+        ), "{text}");
+        assert!(text.contains("le=\"0.25\"} 0"));
+        assert!(text.contains("le=\"0.5\"} 1"));
+        assert!(text.contains("le=\"300\"} 1"));
+        assert!(text.contains("le=\"+Inf\"} 2"));
+        assert!(text.contains("ccswitch_provider_latency_seconds_count{app=\"claude\",provider_id=\"p1\",provider=\"Main \\\"A\\\"\"} 2"));
+        assert!(
+            text.contains("ccswitch_circuit_breaker_state{app=\"claude\",provider_id=\"p1\"} 2")
+        );
+        assert!(text.contains("ccswitch_test_gauge 7"));
+        // Every non-comment line is `name{labels} value` or `name value`.
+        for line in text.lines().filter(|l| !l.starts_with('#')) {
+            assert_eq!(line.rsplitn(2, ' ').count(), 2, "{line}");
+        }
+    }
 
     #[test]
     fn record_outcome_updates_counters_and_derives_success_rate() {

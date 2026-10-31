@@ -154,12 +154,8 @@ pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<boo
         .join("sessions.json");
     prune_sessions_index(&index_path, session_id, path)?;
 
-    std::fs::remove_file(path).map_err(|e| {
-        format!(
-            "Failed to delete OpenClaw session file {}: {e}",
-            path.display()
-        )
-    })?;
+    // SESS-41: move to the restorable session trash instead of deleting.
+    crate::session_manager::trash::move_to_trash("openclaw", session_id, &[path])?;
 
     Ok(true)
 }

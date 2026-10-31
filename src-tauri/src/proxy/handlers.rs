@@ -424,7 +424,10 @@ fn validate_claude_desktop_gateway_auth(
         .or_else(|| value.strip_prefix("bearer "))
         .unwrap_or("")
         .trim();
-    if token != expected {
+    // SEC-20: constant-time comparison of the gateway credential.
+    if token.is_empty()
+        || !super::server::access_guard::constant_time_eq(token.as_bytes(), expected.as_bytes())
+    {
         return Err(ProxyError::AuthError(
             "Claude Desktop gateway token 无效".to_string(),
         ));

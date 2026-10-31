@@ -246,6 +246,12 @@ export const handlers = [
     return success(deleteSession(providerId, sessionId, sourcePath));
   }),
 
+  http.post(`${TAURI_ENDPOINT}/list_session_trash`, () => success([])),
+
+  http.post(`${TAURI_ENDPOINT}/restore_session_from_trash`, () =>
+    HttpResponse.json("Trash entry not found", { status: 400 }),
+  ),
+
   http.post(`${TAURI_ENDPOINT}/delete_sessions`, async ({ request }) => {
     const { items = [] } = await withJson<{
       items?: {

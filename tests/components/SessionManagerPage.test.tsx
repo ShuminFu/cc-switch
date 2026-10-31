@@ -221,6 +221,38 @@ describe("SessionManagerPage", () => {
     setSessionFixtures(sessions, messages);
   });
 
+  it("mounts a large session list incrementally (PERF-46)", async () => {
+    const many: SessionMeta[] = Array.from({ length: 250 }, (_, i) => ({
+      providerId: "codex",
+      sessionId: `bulk-${i}`,
+      title: `Bulk Session ${i}`,
+      projectDir: "/mock/bulk",
+      createdAt: i,
+      lastActiveAt: 1000 - i,
+      sourcePath: `/mock/bulk/${i}.jsonl`,
+      resumeCommand: `codex resume bulk-${i}`,
+    }));
+    setSessionFixtures(many, {});
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/^Bulk Session \d+$/).length).toBeGreaterThan(
+        0,
+      ),
+    );
+    const countRows = () =>
+      screen
+        .getAllByText(/^Bulk Session \d+$/)
+        .filter((el) => el.tagName !== "H2" && el.tagName !== "H3").length;
+    expect(countRows()).toBeLessThanOrEqual(101);
+
+    fireEvent.click(screen.getByRole("button", { name: /150 remaining/ }));
+    await waitFor(() => expect(countRows()).toBeGreaterThan(150));
+    expect(
+      screen.getByRole("button", { name: /50 remaining/ }),
+    ).toBeInTheDocument();
+  });
+
   it("deletes the selected session and selects the next visible session", async () => {
     renderPage();
 

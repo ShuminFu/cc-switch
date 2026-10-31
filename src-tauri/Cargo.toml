@@ -35,6 +35,8 @@ tauri-build = { version = "2.4.0", features = [] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
+# Request/attempt spans in the proxy (PROXY-20); no subscriber is installed by default.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 chrono = { version = "0.4", features = ["serde"] }
 # No "protocol-asset": the asset:// protocol is unused (CI-43).
 tauri = { version = "2.8.2", features = ["tray-icon", "image-png"] }

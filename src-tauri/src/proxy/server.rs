@@ -8,8 +8,9 @@
 //! the hyper-based HTTP client, producing wire-level header casing identical to
 //! a direct (non-proxied) CLI request.
 
-mod access_guard;
+pub(crate) mod access_guard;
 mod header_capture;
+mod ip_limit;
 
 use super::{
     failover_switch::FailoverSwitchManager,
@@ -50,6 +51,9 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct ProxyState {
     pub db: Arc<Database>,
     pub config: Arc<RwLock<ProxyConfig>>,
+    /// Mirror of `config.enable_logging` (PERF-49), readable without the
+    /// config lock so a concurrent config write can never flip logging on.
+    pub logging_enabled: Arc<std::sync::atomic::AtomicBool>,
     /// Server-level status (running, address, port).
     pub status: Arc<RwLock<ProxyStatus>>,
     /// Request counters (PROXY-34), merged into the status on read.
@@ -101,6 +105,7 @@ impl ProxyServer {
         let state = ProxyState {
             db,
             config: Arc::new(RwLock::new(config.clone())),
+            logging_enabled: Arc::new(std::sync::atomic::AtomicBool::new(config.enable_logging)),
             status: Arc::new(RwLock::new(ProxyStatus::default())),
             metrics: super::pipeline::metrics::ProxyMetrics::new(),
             start_time: Arc::new(RwLock::new(None)),
@@ -181,6 +186,7 @@ impl ProxyServer {
         // 开启 preserve_header_case 以捕获客户端请求头的原始大小写
         let state = self.state.clone();
         let connection_slots = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
+        let per_ip = ip_limit::PerIpLimiter::new(ip_limit::MAX_CONNECTIONS_PER_REMOTE_IP);
         let handle = tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
             // PROXY-14: connection tasks are tracked so stop() can drain them.
@@ -208,6 +214,17 @@ impl ProxyServer {
                             drop(stream);
                             continue;
                         };
+                        // One non-loopback host cannot take every slot.
+                        let Some(ip_permit) = per_ip.try_acquire(remote_addr.ip()) else {
+                            log::warn!(
+                                "[{SRV}] {} 的连接数已达上限 {}，拒绝",
+                                remote_addr.ip(),
+                                ip_limit::MAX_CONNECTIONS_PER_REMOTE_IP,
+                                SRV = log_srv::CONN_ERR
+                            );
+                            drop(stream);
+                            continue;
+                        };
                         let peer_info = PeerInfo {
                             remote: remote_addr,
                             local: stream.local_addr().unwrap_or(local_addr),
@@ -217,6 +234,7 @@ impl ProxyServer {
                         let mut drain_rx = drain_rx.clone();
                         connections.spawn(async move {
                             let _permit = permit;
+                            let _ip_permit = ip_permit;
                             // Wait (bounded by the header timeout) for the client to
                             // send something so silent connections cannot park here.
                             if tokio::time::timeout(HEADER_READ_TIMEOUT, stream.readable()).await.is_err() {
@@ -410,6 +428,8 @@ impl ProxyServer {
             // 健康检查
             .route("/health", get(handlers::health_check))
             .route("/status", get(status_endpoint))
+            // Prometheus text metrics (PROXY-20)
+            .route("/metrics", get(metrics_endpoint))
             // Claude API (支持带前缀和不带前缀两种格式)
             .route("/v1/messages", post(handlers::handle_messages))
             .route("/claude/v1/messages", post(handlers::handle_messages))
@@ -493,7 +513,11 @@ impl ProxyServer {
 
     /// 在不重启服务的情况下更新运行时配置
     pub async fn apply_runtime_config(&self, config: &ProxyConfig) {
-        *self.state.config.write().await = config.clone();
+        let mut guard = self.state.config.write().await;
+        *guard = config.clone();
+        self.state
+            .logging_enabled
+            .store(config.enable_logging, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// 热更新熔断器配置
@@ -553,6 +577,81 @@ async fn status_endpoint(
     }
     let status = state.status.read().await;
     Json(public_status(&status)).into_response()
+}
+
+/// `/metrics`: Prometheus text exposition of the proxy counters, per-provider
+/// attempt counters / latency histograms and circuit-breaker states.
+///
+/// Provider ids and names are not public, so the full body is only served to
+/// token-authenticated callers or peers on this machine.
+async fn metrics_endpoint(
+    State(state): State<ProxyState>,
+    ctx: Option<Extension<AccessContext>>,
+    peer: Option<Extension<PeerInfo>>,
+) -> axum::response::Response {
+    let authenticated = ctx.is_some_and(|Extension(ctx)| ctx.token_authenticated);
+    let local = peer.is_some_and(|Extension(p)| p.remote.ip().to_canonical().is_loopback());
+    if !(authenticated || local) {
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            "metrics require the CC Switch access token\n",
+        )
+            .into_response();
+    }
+
+    let mut breakers = Vec::new();
+    for (key, breaker) in super::circuit_breaker::registered_breakers() {
+        let Some((app, provider_id)) = super::circuit_breaker::split_breaker_key(&key) else {
+            continue;
+        };
+        let state = match breaker.get_state().await {
+            super::circuit_breaker::CircuitState::Closed => 0,
+            super::circuit_breaker::CircuitState::HalfOpen => 1,
+            super::circuit_breaker::CircuitState::Open => 2,
+        };
+        breakers.push(super::pipeline::metrics::BreakerGauge {
+            app_type: app.to_string(),
+            provider_id: provider_id.to_string(),
+            state,
+        });
+    }
+    breakers.sort_by(|a, b| (&a.app_type, &a.provider_id).cmp(&(&b.app_type, &b.provider_id)));
+
+    let uptime = state
+        .start_time
+        .read()
+        .await
+        .map(|t| t.elapsed().as_secs())
+        .unwrap_or(0);
+    let history = state.codex_chat_history.stats().await;
+    let body = state.metrics.render_prometheus(
+        &breakers,
+        &[
+            (
+                "ccswitch_proxy_uptime_seconds",
+                "Seconds since the proxy server started.",
+                uptime,
+            ),
+            (
+                "ccswitch_codex_chat_history_responses",
+                "Responses held in the Codex chat bridge history cache.",
+                history.responses as u64,
+            ),
+            (
+                "ccswitch_codex_chat_history_bytes",
+                "Approximate bytes held in the Codex chat bridge history cache.",
+                history.bytes as u64,
+            ),
+        ],
+    );
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        body,
+    )
+        .into_response()
 }
 
 fn public_status(status: &ProxyStatus) -> serde_json::Value {

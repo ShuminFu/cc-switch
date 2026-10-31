@@ -167,6 +167,10 @@ impl CachedAccessToken {
         let now = chrono::Utc::now().timestamp_millis();
         self.expires_at_ms - now < TOKEN_REFRESH_BUFFER_MS
     }
+
+    fn is_expired(&self) -> bool {
+        chrono::Utc::now().timestamp_millis() >= self.expires_at_ms
+    }
 }
 
 /// 进行中的 Device Code 条目，带过期时间以便清理放弃的登录流程
@@ -245,6 +249,9 @@ pub struct CodexOAuthManager {
     /// by the token value so a fresh login is never blocked by an old failure.
     refresh_failures: Arc<RwLock<HashMap<String, RefreshFailure>>>,
     storage_path: PathBuf,
+    /// OAuth token endpoint; overridable so the networked flows can be tested
+    /// against a local mock server (PROV-28).
+    token_url: String,
 }
 
 impl CodexOAuthManager {
@@ -259,6 +266,7 @@ impl CodexOAuthManager {
             pending_device_codes: Arc::new(RwLock::new(HashMap::new())),
             refresh_failures: Arc::new(RwLock::new(HashMap::new())),
             storage_path,
+            token_url: OAUTH_TOKEN_URL.to_string(),
         };
 
         if let Err(e) = manager.load_from_disk_sync() {
@@ -443,7 +451,7 @@ impl CodexOAuthManager {
         code_verifier: &str,
     ) -> Result<OAuthTokenResponse, CodexOAuthError> {
         let response = crate::proxy::http_client::get()
-            .post(OAUTH_TOKEN_URL)
+            .post(&self.token_url)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .header("User-Agent", CODEX_USER_AGENT)
             .form(&[
@@ -476,7 +484,7 @@ impl CodexOAuthManager {
         refresh_token: &str,
     ) -> Result<OAuthTokenResponse, CodexOAuthError> {
         let response = crate::proxy::http_client::get()
-            .post(OAUTH_TOKEN_URL)
+            .post(&self.token_url)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .header("User-Agent", CODEX_USER_AGENT)
             .form(&[
@@ -485,6 +493,7 @@ impl CodexOAuthManager {
                 ("client_id", CODEX_CLIENT_ID),
                 ("scope", "openid profile email"),
             ])
+            .timeout(super::copilot_auth::TOKEN_REFRESH_TIMEOUT)
             .send()
             .await?;
 
@@ -507,6 +516,15 @@ impl CodexOAuthManager {
     }
 
     // ==================== Token 获取（含自动刷新） ====================
+
+    async fn cached_unexpired_token(&self, account_id: &str) -> Option<String> {
+        self.access_tokens
+            .read()
+            .await
+            .get(account_id)
+            .filter(|t| !t.is_expired())
+            .map(|t| t.token.clone())
+    }
 
     /// 获取指定账号的有效 access_token（必要时自动刷新）
     pub async fn get_valid_token_for_account(
@@ -568,7 +586,16 @@ impl CodexOAuthManager {
                 );
                 return Err(CodexOAuthError::RefreshTokenInvalid);
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                // PERF-44: keep serving with the cached token while it is valid.
+                if let Some(token) = self.cached_unexpired_token(account_id).await {
+                    log::warn!(
+                        "[CodexOAuth] 账号 {account_id} 刷新失败（{error}），沿用尚未过期的 access_token"
+                    );
+                    return Ok(token);
+                }
+                return Err(error);
+            }
         };
         self.refresh_failures.write().await.remove(account_id);
 
@@ -1029,6 +1056,139 @@ fn extract_identity_from_tokens(tokens: &OAuthTokenResponse) -> (Option<String>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Minimal HTTP mock: answers every request with `status` + `body` after
+    /// `delay`, counting hits. Returns the base URL.
+    async fn mock_token_server(
+        status: u16,
+        body: &'static str,
+        delay: std::time::Duration,
+    ) -> (String, Arc<AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let _ = sock.read(&mut buf).await;
+                    tokio::time::sleep(delay).await;
+                    let resp = format!(
+                        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        (format!("http://{addr}/oauth/token"), hits)
+    }
+
+    async fn manager_with_account(token_url: String) -> (tempfile::TempDir, CodexOAuthManager) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut manager = CodexOAuthManager::new(temp_dir.path().to_path_buf());
+        manager.token_url = token_url;
+        manager.accounts.write().await.insert(
+            "acct".to_string(),
+            CodexAccountData {
+                account_id: "acct".to_string(),
+                email: None,
+                refresh_token: "rt-old".to_string(),
+                authenticated_at: 0,
+            },
+        );
+        (temp_dir, manager)
+    }
+
+    async fn seed_access_token(manager: &CodexOAuthManager, expires_in_ms: i64) {
+        manager.access_tokens.write().await.insert(
+            "acct".to_string(),
+            CachedAccessToken {
+                token: "at-cached".to_string(),
+                expires_at_ms: chrono::Utc::now().timestamp_millis() + expires_in_ms,
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn mocked_refresh_success_rotates_refresh_token() {
+        let (url, hits) = mock_token_server(
+            200,
+            r#"{"access_token":"at-new","refresh_token":"rt-new","expires_in":3600}"#,
+            std::time::Duration::ZERO,
+        )
+        .await;
+        let (_dir, manager) = manager_with_account(url).await;
+        let token = manager.get_valid_token_for_account("acct").await.unwrap();
+        assert_eq!(token, "at-new");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            manager.accounts.read().await["acct"].refresh_token,
+            "rt-new"
+        );
+        // Cached now: no second call.
+        manager.get_valid_token_for_account("acct").await.unwrap();
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn mocked_refresh_401_requires_reauth_and_is_negatively_cached() {
+        let (url, hits) = mock_token_server(401, "{}", std::time::Duration::ZERO).await;
+        let (_dir, manager) = manager_with_account(url).await;
+        assert!(matches!(
+            manager.get_valid_token_for_account("acct").await,
+            Err(CodexOAuthError::RefreshTokenInvalid)
+        ));
+        assert!(matches!(
+            manager.get_valid_token_for_account("acct").await,
+            Err(CodexOAuthError::RefreshTokenInvalid)
+        ));
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "second call fails fast");
+    }
+
+    /// PERF-44: a failing refresh inside the buffer window serves the cache.
+    #[tokio::test]
+    async fn mocked_refresh_failure_returns_still_valid_cached_token() {
+        let (url, _hits) = mock_token_server(500, "{}", std::time::Duration::ZERO).await;
+        let (_dir, manager) = manager_with_account(url).await;
+        seed_access_token(&manager, 30_000).await; // expiring soon, still valid
+        assert_eq!(
+            manager.get_valid_token_for_account("acct").await.unwrap(),
+            "at-cached"
+        );
+
+        // Once actually expired the failure propagates.
+        seed_access_token(&manager, -1_000).await;
+        assert!(manager.get_valid_token_for_account("acct").await.is_err());
+    }
+
+    /// PROV-28: concurrent callers share one refresh.
+    #[tokio::test]
+    async fn mocked_concurrent_refresh_is_single_flight() {
+        let (url, hits) = mock_token_server(
+            200,
+            r#"{"access_token":"at-new","expires_in":3600}"#,
+            std::time::Duration::from_millis(100),
+        )
+        .await;
+        let (_dir, manager) = manager_with_account(url).await;
+        let manager = Arc::new(manager);
+        let mut tasks = Vec::new();
+        for _ in 0..10 {
+            let m = manager.clone();
+            tasks.push(tokio::spawn(async move {
+                m.get_valid_token_for_account("acct").await
+            }));
+        }
+        for t in tasks {
+            assert_eq!(t.await.unwrap().unwrap(), "at-new");
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
 
     #[tokio::test]
     async fn test_rejected_refresh_token_fails_fast_without_network() {

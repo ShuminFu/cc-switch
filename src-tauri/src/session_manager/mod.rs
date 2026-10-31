@@ -5,6 +5,7 @@ pub mod registry;
 pub mod resume;
 pub mod source;
 pub mod terminal;
+pub mod trash;
 
 use serde::{Deserialize, Serialize};
 

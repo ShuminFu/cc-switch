@@ -428,7 +428,7 @@ fn parse_skill_deeplink(
 }
 
 /// GitHub owner / repository name: 1-100 of `[A-Za-z0-9_.-]`, not `.`/`..`.
-fn is_valid_repo_part(part: &str) -> bool {
+pub(super) fn is_valid_repo_part(part: &str) -> bool {
     !part.is_empty()
         && part.len() <= 100
         && part != "."
@@ -439,7 +439,7 @@ fn is_valid_repo_part(part: &str) -> bool {
 }
 
 /// Git branch: 1-255 of `[A-Za-z0-9._/-]`, no `..`, no leading `/` or `-`.
-fn is_valid_branch(branch: &str) -> bool {
+pub(super) fn is_valid_branch(branch: &str) -> bool {
     !branch.is_empty()
         && branch.len() <= 255
         && !branch.contains("..")

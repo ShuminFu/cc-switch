@@ -51,6 +51,16 @@ pub async fn resolve_auth(
             codex_oauth = true;
             account_header = account_id;
         }
+        AuthStrategy::GoogleOAuth => {
+            // PROV-08: exchange the Gemini CLI refresh_token when the stored
+            // access token is missing or expiring.
+            if let Some(token) = crate::proxy::providers::gemini_oauth::GeminiOAuthManager::global()
+                .resolve(&auth.api_key)
+                .await?
+            {
+                auth = AuthInfo::with_access_token(auth.api_key.clone(), token);
+            }
+        }
         _ => {}
     }
 

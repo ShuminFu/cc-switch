@@ -227,7 +227,7 @@ pub async fn handle_non_streaming(
         read_decoded_body(response, ctx.tag, body_timeout).await?;
     strip_hop_by_hop_response_headers(&mut response_headers);
 
-    log::debug!(
+    log::trace!(
         "[{}] 上游响应体内容: {}",
         ctx.tag,
         super::http_client::log_body_excerpt(&String::from_utf8_lossy(&body_bytes))
@@ -708,12 +708,17 @@ pub(crate) fn converted_stream_usage_collector(
     ))
 }
 
+/// The single check for "request logging enabled" (PERF-49). Reads the
+/// atomic mirror kept in sync by `apply_runtime_config`, so a config write in
+/// progress can never make a disabled logger record a row.
+/// Upper bound on bytes buffered while looking for the next SSE block in the
+/// logged passthrough stream (PROXY-23).
+const MAX_SSE_INSPECT_BUFFER_BYTES: usize = 1024 * 1024;
+
 pub(crate) fn usage_logging_enabled(state: &ProxyState) -> bool {
     state
-        .config
-        .try_read()
-        .map(|config| config.enable_logging)
-        .unwrap_or(true)
+        .logging_enabled
+        .load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// 内部使用量记录函数
@@ -795,8 +800,8 @@ pub fn create_logged_passthrough_stream(
         let mut sse_buffer = SseBlockBuffer::new();
         let mut collector = usage_collector;
         let mut finish_guard = collector.clone().map(SseUsageFinishGuard::new);
-        let inspect_sse_events =
-            collector.is_some() || log::log_enabled!(log::Level::Debug);
+        let mut inspect_sse_events =
+            collector.is_some() || log::log_enabled!(log::Level::Trace);
         let mut is_first_chunk = true;
 
         // 超时配置
@@ -882,23 +887,37 @@ pub fn create_logged_passthrough_stream(
                                                 }
                                                 _ => false,
                                             };
+                                            // PERF-28 / SEC-13: per-event payloads are model
+                                            // output; keep them out of debug logs.
                                             if collected {
-                                                log::debug!(
+                                                log::trace!(
                                                     "[{tag}] <<< SSE 事件: {}",
                                                     super::http_client::log_body_excerpt(data)
                                                 );
                                             } else {
-                                                log::debug!(
+                                                log::trace!(
                                                     "[{tag}] <<< SSE 数据: {}",
                                                     super::http_client::log_body_excerpt(data)
                                                 );
                                             }
                                         } else {
-                                            log::debug!("[{tag}] <<< SSE: [DONE]");
+                                            log::trace!("[{tag}] <<< SSE: [DONE]");
                                         }
                                     }
                                 }
                             }
+                        }
+
+                        // PROXY-23: a body labelled text/event-stream that never
+                        // yields a block boundary (or one giant event) must not
+                        // grow the inspection buffer without bound; fall back to
+                        // pure passthrough for the rest of the stream.
+                        if sse_buffer.pending_len() > MAX_SSE_INSPECT_BUFFER_BYTES {
+                            log::warn!(
+                                "[{tag}] SSE 缓冲超过 {MAX_SSE_INSPECT_BUFFER_BYTES} 字节仍无事件边界，停止解析，仅透传"
+                            );
+                            sse_buffer.clear();
+                            inspect_sse_events = false;
                         }
                     }
 
@@ -1104,10 +1123,55 @@ pub(crate) mod tests {
         );
     }
 
+    /// PROXY-36: dropping the guard (client disconnect) still finishes usage.
+    #[tokio::test]
+    async fn sse_usage_finish_guard_fires_on_drop() {
+        let fired = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = fired.clone();
+        let collector = SseUsageCollector::new(std::time::Instant::now(), None, move |_, _| {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        let guard = SseUsageFinishGuard::new(collector.clone());
+        drop(guard);
+        for _ in 0..50 {
+            if fired.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(fired.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // A disarmed guard does not fire.
+        let fired2 = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen2 = fired2.clone();
+        let collector = SseUsageCollector::new(std::time::Instant::now(), None, move |_, _| {
+            seen2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        let mut guard = SseUsageFinishGuard::new(collector);
+        guard.disarm();
+        drop(guard);
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        assert_eq!(fired2.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn logging_disabled_stays_disabled_while_config_lock_is_held() {
+        let db = Arc::new(Database::memory().unwrap());
+        let state = build_state(db);
+        state
+            .logging_enabled
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        let _writer = state.config.write().await;
+        assert!(!usage_logging_enabled(&state));
+    }
+
     pub(crate) fn build_state(db: Arc<Database>) -> ProxyState {
         ProxyState {
             db: db.clone(),
             config: Arc::new(RwLock::new(ProxyConfig::default())),
+            logging_enabled: Arc::new(std::sync::atomic::AtomicBool::new(
+                ProxyConfig::default().enable_logging,
+            )),
             status: Arc::new(RwLock::new(ProxyStatus::default())),
             metrics: crate::proxy::pipeline::metrics::ProxyMetrics::new(),
             start_time: Arc::new(RwLock::new(None)),

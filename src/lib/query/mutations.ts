@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { providersApi, sessionsApi, settingsApi, type AppId } from "@/lib/api";
 import type { DeleteSessionOptions } from "@/lib/api/sessions";
+import { sessionTrashApi } from "@/lib/api/sessionTrash";
 import type { SwitchResult } from "@/lib/api/providers";
 import type { Provider, SessionMeta, Settings } from "@/types";
 import { extractErrorMessage } from "@/utils/errorUtils";
@@ -430,6 +431,29 @@ export const useDeleteSessionMutation = () => {
         t("sessionManager.sessionDeleted", {
           defaultValue: "Session deleted",
         }),
+        {
+          // SESS-41: file-based sessions go to the trash; offer to put it back.
+          action: {
+            label: t("sessionManager.undoDelete", { defaultValue: "Undo" }),
+            onClick: () => {
+              void sessionTrashApi
+                .undoDelete(input.providerId, input.sessionId)
+                .then(() =>
+                  queryClient.invalidateQueries({
+                    queryKey: queryKeys.sessions.all,
+                  }),
+                )
+                .catch((error: unknown) =>
+                  toast.error(
+                    extractErrorMessage(error) ||
+                      t("sessionManager.restoreFailed", {
+                        defaultValue: "Could not restore the session",
+                      }),
+                  ),
+                );
+            },
+          },
+        },
       );
     },
     onError: (error: unknown) => {

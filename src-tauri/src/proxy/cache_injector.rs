@@ -177,6 +177,7 @@ mod tests {
             enabled: true,
             thinking_optimizer: true,
             cache_injection: true,
+            ..OptimizerConfig::default()
         }
     }
 

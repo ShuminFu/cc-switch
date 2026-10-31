@@ -30,9 +30,10 @@ pub fn resolve_gemini_native_url(base_url: &str, endpoint: &str, is_full_url: bo
         .trim_end_matches('/');
     let (base_without_query, base_query) = split_query(base_url);
     let (_, endpoint_query) = split_query(endpoint);
+    let endpoint_query = strip_client_credential_params(endpoint_query);
 
     let mut url = base_without_query.to_string();
-    if let Some(query) = merge_queries(base_query, endpoint_query) {
+    if let Some(query) = merge_queries(base_query, endpoint_query.as_deref()) {
         url.push('?');
         url.push_str(&query);
     }
@@ -47,6 +48,7 @@ pub fn build_gemini_native_url(base_url: &str, endpoint: &str) -> String {
         .trim_end_matches('/');
     let (base_without_query, base_query) = split_query(base_url);
     let (endpoint_without_query, endpoint_query) = split_query(endpoint);
+    let endpoint_query = strip_client_credential_params(endpoint_query);
 
     let endpoint_path = format!("/{}", endpoint_without_query.trim_start_matches('/'));
     let (origin, raw_path) = split_origin_and_path(base_without_query);
@@ -58,12 +60,49 @@ pub fn build_gemini_native_url(base_url: &str, endpoint: &str) -> String {
         format!("{origin}{prefix_path}{endpoint_path}")
     };
 
-    if let Some(query) = merge_queries(base_query, endpoint_query) {
+    if let Some(query) = merge_queries(base_query, endpoint_query.as_deref()) {
         url.push('?');
         url.push_str(&query);
     }
 
     url
+}
+
+/// Query parameter names that carry credentials when sent by a *client*.
+///
+/// Google documents `?key=` as an alternative to `x-goog-api-key`; a client
+/// that authenticates that way would otherwise forward the user's real Google
+/// key to whatever relay is the current provider (SEC-12). The proxy injects
+/// the provider's own credential via headers, so the client's copy is dropped.
+/// Credentials configured in the provider's *base URL* are left untouched.
+const CLIENT_CREDENTIAL_QUERY_PARAMS: &[&str] = &["key", "access_token"];
+
+fn strip_client_credential_params(query: Option<&str>) -> Option<String> {
+    let query = query?;
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|part| !part.is_empty())
+        .filter(|part| {
+            let name = part.split_once('=').map_or(*part, |(name, _)| name);
+            !CLIENT_CREDENTIAL_QUERY_PARAMS
+                .iter()
+                .any(|blocked| name.eq_ignore_ascii_case(blocked))
+        })
+        .collect();
+    if kept.is_empty() {
+        None
+    } else {
+        Some(kept.join("&"))
+    }
+}
+
+/// Render a URL for logging with every query value redacted, so credentials
+/// carried in the query (`?key=...`) never reach the log file.
+pub(crate) fn redact_url_query_for_log(url: &str) -> String {
+    match url.split_once('?') {
+        Some((base, _)) => format!("{base}?[redacted]"),
+        None => url.to_string(),
+    }
 }
 
 fn should_normalize_gemini_full_url(base_url: &str) -> bool {
@@ -280,7 +319,52 @@ fn merge_queries(base_query: Option<&str>, endpoint_query: Option<&str>) -> Opti
 
 #[cfg(test)]
 mod tests {
-    use super::{build_gemini_native_url, normalize_gemini_model_id, resolve_gemini_native_url};
+    use super::{
+        build_gemini_native_url, normalize_gemini_model_id, redact_url_query_for_log,
+        resolve_gemini_native_url,
+    };
+
+    #[test]
+    fn client_key_query_param_is_not_forwarded_upstream() {
+        let url = build_gemini_native_url(
+            "https://relay.example.com",
+            "/v1beta/models/x:generateContent?key=abc&alt=sse",
+        );
+        assert!(url.contains("alt=sse"), "{url}");
+        assert!(!url.contains("key="), "{url}");
+
+        let url = build_gemini_native_url(
+            "https://relay.example.com",
+            "/v1beta/models/x:streamGenerateContent?ACCESS_TOKEN=t&alt=sse&Key=k",
+        );
+        assert!(url.ends_with("?alt=sse"), "{url}");
+
+        let url = resolve_gemini_native_url(
+            "https://relay.example.com/custom/endpoint",
+            "/v1beta/models/x:generateContent?key=abc",
+            true,
+        );
+        assert!(!url.contains("key="), "{url}");
+    }
+
+    #[test]
+    fn provider_base_url_key_is_preserved() {
+        let url = build_gemini_native_url(
+            "https://relay.example.com?key=provider",
+            "/v1beta/models/x:generateContent?key=client&alt=sse",
+        );
+        assert!(url.contains("key=provider"), "{url}");
+        assert!(!url.contains("key=client"), "{url}");
+    }
+
+    #[test]
+    fn redacts_query_for_log() {
+        assert_eq!(
+            redact_url_query_for_log("https://h/v1beta/models/x:generateContent?key=abc&alt=sse"),
+            "https://h/v1beta/models/x:generateContent?[redacted]"
+        );
+        assert_eq!(redact_url_query_for_log("https://h/v1"), "https://h/v1");
+    }
 
     #[test]
     fn strips_version_root_for_official_base() {

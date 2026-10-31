@@ -139,10 +139,19 @@ pub async fn get_proxy_config_for_app(
 #[tauri::command]
 pub async fn update_proxy_config_for_app(
     state: tauri::State<'_, AppState>,
-    config: AppProxyConfig,
+    mut config: AppProxyConfig,
 ) -> Result<(), String> {
     let db = &state.db;
     let app_type = config.app_type.clone();
+    // PROXY-48: `enabled` (takeover) and `auto_failover_enabled` have dedicated
+    // commands with their own invariants (live-config rewrite, queue auto-fill,
+    // P1 switch). A settings-form save carries a possibly stale snapshot of
+    // them, so keep the stored values instead of writing the form's copy.
+    let current = db
+        .get_proxy_config_for_app(&app_type)
+        .await
+        .map_err(|e| e.to_string())?;
+    preserve_switch_flags(&mut config, &current);
     let circuit_config = CircuitBreakerConfig::from(&config);
 
     db.update_proxy_config_for_app(config)
@@ -153,6 +162,11 @@ pub async fn update_proxy_config_for_app(
         .proxy_service
         .update_circuit_breaker_config_for_app(&app_type, circuit_config)
         .await
+}
+
+fn preserve_switch_flags(incoming: &mut AppProxyConfig, current: &AppProxyConfig) {
+    incoming.enabled = current.enabled;
+    incoming.auto_failover_enabled = current.auto_failover_enabled;
 }
 
 async fn get_default_cost_multiplier_internal(
@@ -523,4 +537,27 @@ pub async fn get_circuit_breaker_stats(
     // 目前先返回 None，后续可以通过 ProxyService 暴露接口来实现
     let _ = (state, provider_id, app_type);
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preserve_switch_flags;
+
+    #[tokio::test]
+    async fn settings_save_cannot_flip_takeover_or_failover() {
+        let db = crate::database::Database::memory().unwrap();
+        let mut current = db.get_proxy_config_for_app("claude").await.unwrap();
+        current.enabled = true;
+        current.auto_failover_enabled = true;
+
+        let mut stale_form = current.clone();
+        stale_form.enabled = false;
+        stale_form.auto_failover_enabled = false;
+        stale_form.circuit_failure_threshold = 9;
+
+        preserve_switch_flags(&mut stale_form, &current);
+        assert!(stale_form.enabled);
+        assert!(stale_form.auto_failover_enabled);
+        assert_eq!(stale_form.circuit_failure_threshold, 9);
+    }
 }

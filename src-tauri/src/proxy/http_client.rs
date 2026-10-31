@@ -463,10 +463,106 @@ pub(crate) fn log_body_excerpt(text: &str) -> String {
     format!("{}…(truncated, {} bytes total)", &text[..end], text.len())
 }
 
+/// Content-free description of a JSON request body for debug logs: size,
+/// sorted top-level keys and the length of the conversation arrays. Never
+/// contains message text (SEC-13).
+pub(crate) fn describe_body_shape(body: &serde_json::Value, size: usize) -> String {
+    let Some(obj) = body.as_object() else {
+        return format!("{size} bytes (non-object)");
+    };
+    let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    let mut out = format!("{size} bytes, keys=[{}]", keys.join(","));
+    for field in ["messages", "input", "contents", "tools"] {
+        if let Some(arr) = obj.get(field).and_then(|v| v.as_array()) {
+            out.push_str(&format!(", {field}={}", arr.len()));
+        }
+    }
+    out
+}
+
+/// Upper bound for an upstream error body stored in `proxy_request_logs`
+/// (SEC-13): a hostile or verbose upstream must not bloat the database.
+pub(crate) const MAX_STORED_ERROR_BYTES: usize = 2048;
+
+/// Truncate `text` to at most [`MAX_STORED_ERROR_BYTES`] bytes on a char
+/// boundary, appending a marker when something was cut.
+pub(crate) fn truncate_error_text(text: &str) -> String {
+    const MARKER: &str = "…(truncated)";
+    if text.len() <= MAX_STORED_ERROR_BYTES {
+        return text.to_string();
+    }
+    let mut end = MAX_STORED_ERROR_BYTES - MARKER.len();
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{MARKER}", &text[..end])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::{Mutex, OnceLock};
+
+    /// SEC-26: every log statement in the global-proxy code paths that mentions
+    /// a proxy URL goes through `mask_url` (credentials may be embedded as
+    /// `user:pass@`). Scans the sources so a future raw `{url}` log fails here.
+    #[test]
+    fn proxy_url_log_statements_are_masked() {
+        let sources = [
+            ("http_client.rs", include_str!("http_client.rs")),
+            (
+                "commands/global_proxy.rs",
+                include_str!("../commands/global_proxy.rs"),
+            ),
+        ];
+        for (name, source) in sources {
+            let source = source.split("#[cfg(test)]").next().unwrap_or(source);
+            let mut rest = source;
+            while let Some(start) = rest.find("log::") {
+                let tail = &rest[start..];
+                let end = tail.find(");").map(|i| i + 2).unwrap_or(tail.len());
+                let stmt = &tail[..end];
+                rest = &tail[end..];
+                let mentions_proxy_url =
+                    stmt.replace("test_url", "").contains("url") && !stmt.contains("url.len()");
+                assert!(
+                    !mentions_proxy_url || stmt.contains("mask_url"),
+                    "{name}: unmasked proxy URL in log statement: {stmt}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn body_shape_has_no_message_content() {
+        let body = serde_json::json!({
+            "model": "claude",
+            "messages": [{"role": "user", "content": "TOP SECRET PROMPT"}],
+            "system": "SYSTEM SECRET"
+        });
+        let out = describe_body_shape(&body, 99);
+        assert!(!out.contains("SECRET"), "{out}");
+        assert!(out.contains("messages=1"), "{out}");
+        assert!(out.contains("keys=[messages,model,system]"), "{out}");
+    }
+
+    #[test]
+    fn stored_error_text_is_bounded() {
+        let long = "错".repeat(5000);
+        let out = truncate_error_text(&long);
+        assert!(out.len() <= MAX_STORED_ERROR_BYTES, "{}", out.len());
+        assert!(out.ends_with("(truncated)"));
+        assert_eq!(truncate_error_text("short"), "short");
+    }
+
+    #[test]
+    fn mask_url_does_not_panic_on_multibyte_input() {
+        let masked = mask_url("代理服务器：http://127.0.0.1:7890");
+        assert!(masked.ends_with("..."), "{masked}");
+        let err = validate_proxy(Some("代理服务器：http://127.0.0.1:7890")).unwrap_err();
+        assert!(err.contains("Invalid proxy URL"), "{err}");
+    }
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

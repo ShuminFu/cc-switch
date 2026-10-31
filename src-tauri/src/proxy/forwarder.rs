@@ -375,11 +375,21 @@ impl RequestForwarder {
     ) -> Result<ForwardResult, ForwardError> {
         let mut guard = ActiveConnectionGuard::acquire(self.metrics.clone());
         self.metrics.record_request_start();
-        let result = self
-            .forward_with_retry_inner(
+        // PROXY-20: one span per client request with one child span per
+        // attempt. No-ops unless a tracing subscriber is installed.
+        let request_span = tracing::debug_span!(
+            "proxy_request",
+            app = app_type.as_str(),
+            endpoint = endpoint,
+            providers = providers.len(),
+        );
+        let result = tracing::Instrument::instrument(
+            self.forward_with_retry_inner(
                 app_type, method, endpoint, body, headers, extensions, providers,
-            )
-            .await;
+            ),
+            request_span,
+        )
+        .await;
         // Err 路径：guard 在函数 scope 内随返回值落地时自动 drop。
         result.map(|mut fr| {
             guard.stream_health = fr.stream_health.take();
@@ -420,7 +430,8 @@ impl RequestForwarder {
         let mut last_error = None;
         let mut last_provider = None;
         let mut attempted_providers = 0usize;
-        // 单 Provider 场景下跳过熔断器检查（故障转移关闭时），避免熔断器阻塞所有请求
+        // 单 Provider 场景下跳过熔断器检查（故障转移关闭，或队列只有一家时；与
+        // ProviderRouter 的选择规则一致，PROXY-11），避免熔断器阻塞所有请求
         let bypass_circuit_breaker = providers.len() == 1;
         // 跨 provider 携带的请求体：thinking 签名 / budget 整流生效后替换为整流后的
         // body，让下一家 provider 首次请求就用整流后的内容（PROXY-24）。
@@ -477,8 +488,15 @@ impl RequestForwarder {
             self.metrics
                 .record_attempt_target(&provider.id, &provider.name);
 
-            let outcome = self
-                .attempt_provider(
+            let attempt_started = std::time::Instant::now();
+            let attempt_span = tracing::debug_span!(
+                "proxy_attempt",
+                app = app_type_str,
+                provider_id = %provider.id,
+                attempt = attempted_providers,
+            );
+            let outcome = tracing::Instrument::instrument(
+                self.attempt_provider(
                     &request,
                     provider,
                     provider_body,
@@ -486,8 +504,17 @@ impl RequestForwarder {
                     provider_specific_body,
                     &mut half_open_permit,
                     (attempted_providers, providers.len()),
-                )
-                .await;
+                ),
+                attempt_span,
+            )
+            .await;
+            self.metrics.record_attempt_result(
+                app_type_str,
+                &provider.id,
+                &provider.name,
+                matches!(outcome, AttemptOutcome::Served { .. }),
+                attempt_started.elapsed(),
+            );
             match outcome {
                 AttemptOutcome::Served {
                     response,
@@ -850,7 +877,18 @@ impl RequestForwarder {
                 needs_transform,
             )
             .await?;
-        let request_body = transformed.body;
+        let mut request_body = transformed.body;
+        // PROV-23: Mistral / Ollama Chat quirks, detected from the upstream URL.
+        let url_path = target.url.split('?').next().unwrap_or_default();
+        if url_path
+            .trim_end_matches('/')
+            .ends_with("/chat/completions")
+        {
+            super::providers::upstream_compat::apply_chat_body_compat(
+                super::providers::upstream_compat::UpstreamFlavor::detect(&target.url),
+                &mut request_body,
+            );
+        }
         if let Some(model) = model_of(&request_body) {
             outbound_model = Some(model);
         }
@@ -968,6 +1006,11 @@ impl RequestForwarder {
     ) -> Result<http::HeaderMap, ProxyError> {
         let auth = resolve_auth(request.adapter, provider, self.app_handle.as_ref()).await?;
         let mut auth_headers = auth.headers;
+        // PROV-23: Azure OpenAI keys travel in `api-key`.
+        super::providers::upstream_compat::apply_auth_header_compat(
+            super::providers::upstream_compat::UpstreamFlavor::detect(url),
+            &mut auth_headers,
+        );
         if let Some(hints) = copilot_hints {
             apply_copilot_hint_headers(&mut auth_headers, hints, &self.copilot_optimizer_config);
         }
@@ -1291,10 +1334,20 @@ fn log_outbound_request(tag: &str, url: &str, body: &Value, body_bytes: &[u8]) {
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("<none>");
-    log::info!("[{tag}] >>> 请求 URL: {url} (model={request_model})");
+    let log_url = super::gemini_url::redact_url_query_for_log(url);
+    log::info!("[{tag}] >>> 请求 URL: {log_url} (model={request_model})");
+    // SEC-13 / PERF-28: debug only records the body's *shape* (size, top-level
+    // keys, array lengths); a bounded excerpt of the content is written only at
+    // trace level.
     if log::log_enabled!(log::Level::Debug) {
-        let body_str = String::from_utf8_lossy(body_bytes);
         log::debug!(
+            "[{tag}] >>> 请求体: {}",
+            super::http_client::describe_body_shape(body, body_bytes.len())
+        );
+    }
+    if log::log_enabled!(log::Level::Trace) {
+        let body_str = String::from_utf8_lossy(body_bytes);
+        log::trace!(
             "[{tag}] >>> 请求体内容 ({}字节): {}",
             body_bytes.len(),
             super::http_client::log_body_excerpt(&body_str)

@@ -20,11 +20,30 @@ finish-args:
   # detection, opening a terminal). The app does not use it yet (CI-44): until
   # then, tool detection and "open terminal" do not work inside the sandbox.
   - --talk-name=org.freedesktop.Flatpak
-  # GitHub Releases scenario: Users download and install manually.
-  # For "download and run" convenience (needs read/write access to ~/.cc-switch, ~/.claude, ~/.claude.json, ~/.codex, ~/.gemini,
-  # and supports custom directory overrides), we grant full Home access by default.
-  # If you plan to publish on Flathub or prefer minimal permissions, replace this with more precise directory grants (see flatpak/README.md).
-  - --filesystem=home
+  # Only the directories CC Switch manages (SEC-19). Custom directory
+  # overrides outside these need an explicit grant, e.g.
+  #   flatpak override --user --filesystem=~/my-claude-dir com.ccswitch.desktop
+  # (or --filesystem=home to restore the old full-home access; see flatpak/README.md).
+  - --filesystem=~/.cc-switch:create
+  - --filesystem=~/.claude:create
+  - --filesystem=~/.claude.json
+  - --filesystem=~/.codex:create
+  - --filesystem=~/.gemini:create
+  - --filesystem=~/.grok:create
+  - --filesystem=~/.agents:create
+  - --filesystem=~/.openclaw:create
+  - --filesystem=~/.hermes:create
+  - --filesystem=~/.opencode:create
+  - --filesystem=xdg-config/opencode:create
+  - --filesystem=xdg-config/Claude:create
+  - --filesystem=xdg-config/Claude-3p:create
+  - --filesystem=xdg-data/opencode
+  # Shell rc files: environment-variable conflict detection and cleanup.
+  - --filesystem=~/.bashrc
+  - --filesystem=~/.bash_profile
+  - --filesystem=~/.profile
+  - --filesystem=~/.zshrc
+  - --filesystem=~/.zprofile
 
 modules:
   # Required for libdbusmenu build (intltool was removed from GNOME SDK since 2019)
