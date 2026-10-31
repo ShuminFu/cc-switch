@@ -94,6 +94,8 @@ export function SettingsPage({
     autoSaveSettings,
     requiresRestart,
     acknowledgeRestart,
+    hasUnsavedAdvancedChanges,
+    resetSettings,
   } = useSettings();
 
   const {
@@ -556,7 +558,31 @@ export function SettingsPage({
                 style={{ backgroundColor: "hsl(var(--background))" }}
               >
                 <div className="px-6 flex items-center justify-end gap-3">
-                  <Button onClick={handleSave} disabled={isSaving}>
+                  {hasUnsavedAdvancedChanges && (
+                    <>
+                      <span
+                        className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300"
+                        data-testid="unsaved-changes"
+                      >
+                        {t("settings.unsavedChanges", {
+                          defaultValue: "Unsaved changes",
+                        })}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        onClick={resetSettings}
+                        disabled={isSaving}
+                      >
+                        {t("settings.discardChanges", {
+                          defaultValue: "Discard",
+                        })}
+                      </Button>
+                    </>
+                  )}
+                  <Button
+                    onClick={handleSave}
+                    disabled={isSaving || !hasUnsavedAdvancedChanges}
+                  >
                     {isSaving ? (
                       <span className="inline-flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />

@@ -7,7 +7,11 @@ import {
   type ResolvedDirectories,
 } from "./useDirectorySettings";
 import { useSettingsMetadata } from "./useSettingsMetadata";
-import { directoryValuesByApp, sanitizeDir } from "./settingsDirectoryFields";
+import {
+  DIRECTORY_SETTINGS_FIELDS,
+  directoryValuesByApp,
+  sanitizeDir,
+} from "./settingsDirectoryFields";
 import { useSaveSettings, type SaveResult } from "./useSaveSettings";
 
 export interface UseSettingsResult {
@@ -18,6 +22,12 @@ export interface UseSettingsResult {
   appConfigDir?: string;
   resolvedDirs: ResolvedDirectories;
   requiresRestart: boolean;
+  /**
+   * Whether the Advanced tab holds edits only its Save button persists
+   * (directory overrides, app config dir) that differ from the saved values
+   * (FE-UI-07).
+   */
+  hasUnsavedAdvancedChanges: boolean;
   updateSettings: (updates: Partial<SettingsFormState>) => void;
   updateDirectory: (app: DirectoryAppId, value?: string) => void;
   updateAppConfigDir: (value?: string) => void;
@@ -130,6 +140,16 @@ export function useSettings(): UseSettingsResult {
     ],
   );
 
+  const hasUnsavedAdvancedChanges = useMemo(() => {
+    if (!settings || !data) return false;
+    if (sanitizeDir(appConfigDir) !== sanitizeDir(initialAppConfigDir)) {
+      return true;
+    }
+    return DIRECTORY_SETTINGS_FIELDS.some(
+      (field) => sanitizeDir(settings[field]) !== sanitizeDir(data[field]),
+    );
+  }, [appConfigDir, data, initialAppConfigDir, settings]);
+
   const isLoading = useMemo(
     () => isFormLoading || isDirectoryLoading || isMetadataLoading,
     [isFormLoading, isDirectoryLoading, isMetadataLoading],
@@ -143,6 +163,7 @@ export function useSettings(): UseSettingsResult {
     appConfigDir,
     resolvedDirs,
     requiresRestart,
+    hasUnsavedAdvancedChanges,
     updateSettings,
     updateDirectory,
     updateAppConfigDir,

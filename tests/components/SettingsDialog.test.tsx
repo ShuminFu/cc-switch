@@ -42,6 +42,7 @@ interface SettingsMock {
   isLoading: boolean;
   isSaving: boolean;
   isPortable: boolean;
+  hasUnsavedAdvancedChanges: boolean;
   appConfigDir?: string;
   resolvedDirs: Record<string, string>;
   requiresRestart: boolean;
@@ -87,6 +88,7 @@ const createSettingsMock = (overrides: Partial<SettingsMock> = {}) => {
     saveSettings: vi.fn().mockResolvedValue({ requiresRestart: false }),
     autoSaveSettings: vi.fn().mockResolvedValue({ requiresRestart: false }),
     resetSettings: vi.fn(),
+    hasUnsavedAdvancedChanges: true,
     acknowledgeRestart: vi.fn(),
   };
 
@@ -406,6 +408,30 @@ describe("SettingsPage Component", () => {
       await lastUseImportExportOptions.onImportSuccess();
     }
     expect(onImportSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables Save when the Advanced tab has nothing to save (FE-UI-07)", () => {
+    settingsMock = createSettingsMock({ hasUnsavedAdvancedChanges: false });
+    renderSettingsPage();
+    fireEvent.click(screen.getByText("settings.tabAdvanced"));
+
+    expect(screen.getByRole("button", { name: /common\.save/ })).toBeDisabled();
+    expect(screen.queryByTestId("unsaved-changes")).toBeNull();
+  });
+
+  it("flags unsaved Advanced edits and can discard them (FE-UI-07)", () => {
+    settingsMock = createSettingsMock({ hasUnsavedAdvancedChanges: true });
+    renderSettingsPage();
+    fireEvent.click(screen.getByText("settings.tabAdvanced"));
+
+    expect(screen.getByTestId("unsaved-changes")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /common\.save/ }),
+    ).not.toBeDisabled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "settings.discardChanges" }),
+    );
+    expect(settingsMock.resetSettings).toHaveBeenCalledTimes(1);
   });
 
   it("should call saveSettings and close dialog when clicking save", async () => {
