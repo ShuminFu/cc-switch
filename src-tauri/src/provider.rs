@@ -794,18 +794,23 @@ impl UniversalProvider {
             base_trimmed.to_string()
         };
 
-        // 生成 Codex 的 config.toml 内容
+        // 生成 Codex 的 config.toml 内容。用户可控的值经 toml_edit 转义（CFG-25），
+        // 避免 `"`/`\`/换行破坏文档或注入额外键。
+        let toml_str = |s: &str| toml_edit::Value::from(s).to_string();
         let config_toml = format!(
             r#"model_provider = "custom"
-model = "{model}"
-model_reasoning_effort = "{reasoning_effort}"
+model = {model}
+model_reasoning_effort = {reasoning_effort}
 disable_response_storage = true
 
 [model_providers.custom]
 name = "NewAPI"
-base_url = "{codex_base_url}"
+base_url = {codex_base_url}
 wire_api = "responses"
-requires_openai_auth = true"#
+requires_openai_auth = true"#,
+            model = toml_str(&model),
+            reasoning_effort = toml_str(&reasoning_effort),
+            codex_base_url = toml_str(&codex_base_url),
         );
 
         let settings_config = serde_json::json!({
@@ -1232,6 +1237,33 @@ mod tests {
                 .pointer("/auth/OPENAI_API_KEY")
                 .and_then(|item| item.as_str()),
             Some("api-key")
+        );
+    }
+
+    #[test]
+    fn universal_provider_to_codex_provider_escapes_user_strings() {
+        let mut universal = UniversalProvider::new(
+            "u1".to_string(),
+            "Universal".to_string(),
+            "newapi".to_string(),
+            "https://api.example.com/a\"b\\c".to_string(),
+            "api-key".to_string(),
+        );
+        universal.apps.codex = true;
+        universal.models.codex = Some(CodexModelConfig {
+            model: Some("a\"b\nevil = true".to_string()),
+            reasoning_effort: Some("high\\".to_string()),
+        });
+
+        let provider = universal.to_codex_provider().expect("codex provider");
+        let config = provider.settings_config["config"].as_str().unwrap();
+        let doc: toml::Table = toml::from_str(config).expect("generated TOML parses");
+        assert_eq!(doc["model"].as_str(), Some("a\"b\nevil = true"));
+        assert_eq!(doc["model_reasoning_effort"].as_str(), Some("high\\"));
+        assert!(doc.get("evil").is_none());
+        assert_eq!(
+            doc["model_providers"]["custom"]["base_url"].as_str(),
+            Some("https://api.example.com/a\"b\\c")
         );
     }
 
