@@ -426,7 +426,10 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                     "id": super::transform::ensure_message_id(&mut message_id),
                                                     "type": "message",
                                                     "role": "assistant",
+                                                    "content": [],
                                                     "model": current_model.clone().unwrap_or_default(),
+                                                    "stop_reason": null,
+                                                    "stop_sequence": null,
                                                     "usage": start_usage
                                                 }
                                             });

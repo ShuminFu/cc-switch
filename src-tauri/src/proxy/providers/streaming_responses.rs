@@ -386,7 +386,10 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                         "id":super::transform::ensure_message_id(&mut message_id),
                                         "type":"message",
                                         "role":"assistant",
+                                        "content":[],
                                         "model":current_model.clone().unwrap_or_default(),
+                                        "stop_reason":null,
+                                        "stop_sequence":null,
                                         "usage":{"input_tokens":0,"output_tokens":0}
                                     }
                                 }),
@@ -1184,7 +1187,10 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                                 "id":super::transform::ensure_message_id(&mut message_id),
                                                 "type":"message",
                                                 "role":"assistant",
+                                                "content":[],
                                                 "model":current_model.clone().unwrap_or_default(),
+                                                "stop_reason":null,
+                                                "stop_sequence":null,
                                                 "usage":{"input_tokens":0,"output_tokens":0}
                                             }
                                         }),
@@ -1509,7 +1515,10 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                 "id":super::transform::ensure_message_id(&mut message_id),
                                 "type":"message",
                                 "role":"assistant",
+                                "content":[],
                                 "model":current_model.clone().unwrap_or_default(),
+                                "stop_reason":null,
+                                "stop_sequence":null,
                                 "usage":{"input_tokens":0,"output_tokens":0}
                             }
                         }),

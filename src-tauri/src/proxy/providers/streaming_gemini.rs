@@ -676,7 +676,10 @@ pub fn create_anthropic_sse_stream_from_gemini_with_text_mode<
                                     "id": super::transform::ensure_message_id(&mut message_id),
                                     "type": "message",
                                     "role": "assistant",
+                                    "content": [],
                                     "model": current_model.clone().unwrap_or_default(),
+                                    "stop_reason": null,
+                                    "stop_sequence": null,
                                     "usage": build_anthropic_usage(chunk_json.get("usageMetadata"))
                                 }
                             });
@@ -804,7 +807,10 @@ pub fn create_anthropic_sse_stream_from_gemini_with_text_mode<
                     "id": super::transform::ensure_message_id(&mut message_id),
                     "type": "message",
                     "role": "assistant",
+                    "content": [],
                     "model": current_model.clone().unwrap_or_default(),
+                    "stop_reason": null,
+                    "stop_sequence": null,
                     "usage": build_anthropic_usage(latest_usage.as_ref())
                 }
             });
