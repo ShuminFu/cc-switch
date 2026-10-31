@@ -37,11 +37,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ApiKeySection } from "./shared";
-import {
-  fetchModelsForConfig,
-  showFetchModelsError,
-  type FetchedModel,
-} from "@/lib/api/model-fetch";
+import { fetchModelsForConfig, type FetchedModel } from "@/lib/api/model-fetch";
+import { showFetchModelsError } from "./shared/showFetchModelsError";
 import { openclawApiProtocols } from "@/config/openclawProviderPresets";
 import type { ProviderCategory, OpenClawModel } from "@/types";
 

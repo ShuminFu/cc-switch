@@ -42,11 +42,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ApiKeySection } from "./shared";
-import {
-  fetchModelsForConfig,
-  showFetchModelsError,
-  type FetchedModel,
-} from "@/lib/api/model-fetch";
+import { fetchModelsForConfig, type FetchedModel } from "@/lib/api/model-fetch";
+import { showFetchModelsError } from "./shared/showFetchModelsError";
 import {
   hermesApiModes,
   type HermesApiMode,

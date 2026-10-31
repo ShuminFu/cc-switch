@@ -27,11 +27,8 @@ import {
 } from "lucide-react";
 import EndpointSpeedTest from "./EndpointSpeedTest";
 import { ApiKeySection, EndpointField, ModelDropdown } from "./shared";
-import {
-  fetchModelsForConfig,
-  showFetchModelsError,
-  type FetchedModel,
-} from "@/lib/api/model-fetch";
+import { fetchModelsForConfig, type FetchedModel } from "@/lib/api/model-fetch";
+import { showFetchModelsError } from "./shared/showFetchModelsError";
 import { CustomUserAgentField } from "./CustomUserAgentField";
 import { LocalProxyRequestOverridesField } from "./LocalProxyRequestOverridesField";
 import { cn } from "@/lib/utils";

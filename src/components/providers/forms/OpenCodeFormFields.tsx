@@ -19,11 +19,8 @@ import { toast } from "sonner";
 import { Download, Plus, Trash2, ChevronRight, Loader2 } from "lucide-react";
 import { ApiKeySection, ModelDropdown } from "./shared";
 import { useEndpointUrlError } from "./shared/useEndpointUrlError";
-import {
-  fetchModelsForConfig,
-  showFetchModelsError,
-  type FetchedModel,
-} from "@/lib/api/model-fetch";
+import { fetchModelsForConfig, type FetchedModel } from "@/lib/api/model-fetch";
+import { showFetchModelsError } from "./shared/showFetchModelsError";
 import { opencodeNpmPackages } from "@/config/opencodeProviderPresets";
 import { cn } from "@/lib/utils";
 import {

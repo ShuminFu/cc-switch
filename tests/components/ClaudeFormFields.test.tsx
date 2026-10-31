@@ -24,6 +24,9 @@ vi.mock("@/lib/api/copilot", () => ({
 vi.mock("@/lib/api/model-fetch", () => ({
   fetchCodexOauthModels: modelFetchApiMock.fetchCodexOauthModels,
   fetchModelsForConfig: modelFetchApiMock.fetchModelsForConfig,
+}));
+
+vi.mock("@/components/providers/forms/shared/showFetchModelsError", () => ({
   showFetchModelsError: modelFetchApiMock.showFetchModelsError,
 }));
 
