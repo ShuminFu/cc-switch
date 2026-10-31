@@ -4,6 +4,7 @@ import { useSettingsForm, type SettingsFormState } from "./useSettingsForm";
 import {
   useDirectorySettings,
   type DirectoryAppId,
+  type DirectoryLoadErrors,
   type ResolvedDirectories,
 } from "./useDirectorySettings";
 import { useSettingsMetadata } from "./useSettingsMetadata";
@@ -17,6 +18,8 @@ export interface UseSettingsResult {
   isPortable: boolean;
   appConfigDir?: string;
   resolvedDirs: ResolvedDirectories;
+  /** Directory fields that failed to resolve on load (FE-ARCH-45). */
+  directoryLoadErrors: DirectoryLoadErrors;
   requiresRestart: boolean;
   updateSettings: (updates: Partial<SettingsFormState>) => void;
   updateDirectory: (app: DirectoryAppId, value?: string) => void;
@@ -59,6 +62,7 @@ export function useSettings(): UseSettingsResult {
   const {
     appConfigDir,
     resolvedDirs,
+    loadErrors: directoryLoadErrors,
     isLoading: isDirectoryLoading,
     initialAppConfigDir,
     updateDirectory,
@@ -142,6 +146,7 @@ export function useSettings(): UseSettingsResult {
     isPortable,
     appConfigDir,
     resolvedDirs,
+    directoryLoadErrors,
     requiresRestart,
     updateSettings,
     updateDirectory,

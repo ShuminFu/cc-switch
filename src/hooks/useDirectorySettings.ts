@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { homeDir, join } from "@tauri-apps/api/path";
 import { settingsApi } from "@/lib/api";
+import { extractErrorMessage } from "@/utils/errorUtils";
 import type { SettingsFormState } from "./useSettingsForm";
 import {
   APP_DIRECTORY_META,
@@ -15,6 +16,9 @@ export type { DirectoryAppId };
 type DirectoryKey = "appConfig" | DirectoryAppId;
 
 export type ResolvedDirectories = Record<DirectoryKey, string>;
+
+/** Per-field resolution failures from the initial load (message per key). */
+export type DirectoryLoadErrors = Partial<Record<DirectoryKey, string>>;
 
 const emptyDirectories = (): ResolvedDirectories => {
   const result = { appConfig: "" } as ResolvedDirectories;
@@ -59,6 +63,8 @@ export interface UseDirectorySettingsResult {
   appConfigDir?: string;
   resolvedDirs: ResolvedDirectories;
   isLoading: boolean;
+  /** Fields whose current directory could not be resolved on load. */
+  loadErrors: DirectoryLoadErrors;
   initialAppConfigDir?: string;
   updateDirectory: (app: DirectoryAppId, value?: string) => void;
   updateAppConfigDir: (value?: string) => void;
@@ -94,6 +100,7 @@ export function useDirectorySettings({
   const [resolvedDirs, setResolvedDirs] =
     useState<ResolvedDirectories>(emptyDirectories);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadErrors, setLoadErrors] = useState<DirectoryLoadErrors>({});
 
   const defaultsRef = useRef<ResolvedDirectories>(emptyDirectories());
   const initialAppConfigDirRef = useRef<string | undefined>(undefined);
@@ -104,14 +111,22 @@ export function useDirectorySettings({
     setIsLoading(true);
 
     const load = async () => {
+      // Each field resolves independently (FE-ARCH-45): one app whose
+      // directory cannot be resolved (invalid path, unmounted drive) must not
+      // blank every other field.
+      const settled = <T>(promise: Promise<T>) =>
+        promise.then(
+          (value) => ({ ok: true as const, value }),
+          (error: unknown) => ({ ok: false as const, error }),
+        );
       try {
-        const [overrideRaw, defaultAppConfig, appDirs] = await Promise.all([
-          settingsApi.getAppConfigDirOverride(),
+        const [overrideResult, defaultAppConfig, appDirs] = await Promise.all([
+          settled(settingsApi.getAppConfigDirOverride()),
           computeDefaultAppConfigDir(),
           Promise.all(
             DIRECTORY_APP_IDS.map((app) =>
               Promise.all([
-                settingsApi.getConfigDir(app),
+                settled(settingsApi.getConfigDir(app)),
                 computeDefaultConfigDir(app),
               ]),
             ),
@@ -120,7 +135,17 @@ export function useDirectorySettings({
 
         if (!active) return;
 
-        const normalizedOverride = sanitizeDir(overrideRaw ?? undefined);
+        const errors: DirectoryLoadErrors = {};
+        if (!overrideResult.ok) {
+          console.error(
+            "[useDirectorySettings] Failed to load app config dir override",
+            overrideResult.error,
+          );
+          errors.appConfig = extractErrorMessage(overrideResult.error) || "?";
+        }
+        const normalizedOverride = overrideResult.ok
+          ? sanitizeDir(overrideResult.value ?? undefined)
+          : undefined;
         const defaults = emptyDirectories();
         defaults.appConfig = defaultAppConfig ?? "";
         const resolved = { ...defaults };
@@ -128,13 +153,23 @@ export function useDirectorySettings({
         DIRECTORY_APP_IDS.forEach((app, index) => {
           const [current, fallback] = appDirs[index];
           defaults[app] = fallback ?? "";
-          resolved[app] = current || defaults[app];
+          if (current.ok) {
+            resolved[app] = current.value || defaults[app];
+          } else {
+            console.error(
+              `[useDirectorySettings] Failed to resolve ${app} config dir`,
+              current.error,
+            );
+            errors[app] = extractErrorMessage(current.error) || "?";
+            resolved[app] = defaults[app];
+          }
         });
         defaultsRef.current = defaults;
 
         setAppConfigDir(normalizedOverride);
         initialAppConfigDirRef.current = normalizedOverride;
         setResolvedDirs(resolved);
+        setLoadErrors(errors);
       } catch (error) {
         console.error(
           "[useDirectorySettings] Failed to load directory info",
@@ -284,6 +319,7 @@ export function useDirectorySettings({
     appConfigDir,
     resolvedDirs,
     isLoading,
+    loadErrors,
     initialAppConfigDir: initialAppConfigDirRef.current,
     updateDirectory,
     updateAppConfigDir,
