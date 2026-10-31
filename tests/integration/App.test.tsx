@@ -542,6 +542,19 @@ describe("App integration with MSW", { timeout: 20_000 }, () => {
     fireEvent.click(screen.getByText("close-settings"));
     expect(await screen.findByTestId("provider-list")).toBeInTheDocument();
 
+    // PRODUCT-55: with the routing toggle off, the header still offers routing.
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Local routing and failover",
+        hidden: true,
+      }),
+    );
+    expect(await screen.findByTestId("settings-tab")).toHaveTextContent(
+      "proxy",
+    );
+    fireEvent.click(screen.getByText("close-settings"));
+    expect(await screen.findByTestId("provider-list")).toBeInTheDocument();
+
     // Cmd/Ctrl+, opens settings on the general tab.
     fireEvent.keyDown(window, { key: ",", ctrlKey: true });
     expect(await screen.findByTestId("settings-tab")).toHaveTextContent(
