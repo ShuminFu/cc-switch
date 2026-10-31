@@ -742,6 +742,7 @@ export const handlers = [
     }>(request);
     return success({ app, providerId, supported: false, files: [] });
   }),
+  http.post(`${TAURI_ENDPOINT}/validate_provider_settings`, () => success([])),
   http.post(`${TAURI_ENDPOINT}/get_codex_history_backup_usage`, () =>
     success({
       migrationBytes: 0,

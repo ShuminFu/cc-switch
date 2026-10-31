@@ -5,8 +5,10 @@ import {
   type AppType,
   type CodexHistoryBackupUsage,
   type ImportCandidate,
+  type JsonValue,
   type LiveWritePlan,
   type McpSyncSkip,
+  type ValidationIssue,
 } from "@/lib/bindings";
 
 /**
@@ -38,6 +40,14 @@ export const adaptersApi = {
     providerId: string,
   ): Promise<LiveWritePlan> {
     return await call(commands.previewLiveWrite(app, providerId));
+  },
+
+  /** Advisory field issues in a provider's settings (CFG-24); never blocks a save. */
+  async validateProviderSettings(
+    app: AppType,
+    settings: JsonValue,
+  ): Promise<ValidationIssue[]> {
+    return await call(commands.validateProviderSettings(app, settings));
   },
 
   async getCodexHistoryBackupUsage(): Promise<CodexHistoryBackupUsage> {
