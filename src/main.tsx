@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { DatabaseUpgrade } from "./components/DatabaseUpgrade";
+import { AppLoadingScreen } from "./components/AppLoadingScreen";
 import { UpdateProvider } from "./contexts/UpdateContext";
 import "./index.css";
 // 导入国际化配置
@@ -76,17 +77,29 @@ try {
 }
 
 async function bootstrap() {
-  // Load the active locale chunk before the first render (no English flash).
+  // One root for the whole lifetime; paint a loading screen right away so the
+  // window is not blank while the locale chunk and init check resolve.
+  const root = ReactDOM.createRoot(document.getElementById("root")!);
+  root.render(<AppLoadingScreen />);
+
+  // The locale chunk (no English flash) and the backend init-error check
+  // (avoids the event race) are independent: run them in parallel (PERF-33).
+  const initErrorPromise = (
+    invoke("get_init_error") as Promise<ConfigLoadErrorPayload | null>
+  ).then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
   await i18nReady;
 
   // 启动早期主动查询后端初始化错误，避免事件竞态
   try {
-    const initError = (await invoke(
-      "get_init_error",
-    )) as ConfigLoadErrorPayload | null;
+    const result = await initErrorPromise;
+    if (!result.ok) throw result.error;
+    const initError = result.value;
     if (initError && initError.kind === "db_version_too_new") {
       // 数据库版本过新：渲染应用内「升级应用」恢复界面，不进入正常 App
-      ReactDOM.createRoot(document.getElementById("root")!).render(
+      root.render(
         <React.StrictMode>
           <ThemeProvider defaultTheme="system" storageKey="cc-switch-theme">
             <DatabaseUpgrade payload={initError} />
@@ -106,7 +119,7 @@ async function bootstrap() {
     console.error("拉取初始化错误失败", e);
   }
 
-  ReactDOM.createRoot(document.getElementById("root")!).render(
+  root.render(
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider defaultTheme="system" storageKey="cc-switch-theme">
