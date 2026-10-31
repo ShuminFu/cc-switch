@@ -40,8 +40,11 @@ export interface ProviderCodec {
   readonly defaultConfig: string;
   /** Upstream endpoint (base URL), or `undefined` when none is configured. */
   getEndpoint(config: unknown): string | undefined;
-  /** API key, or `""` when none is configured. */
-  getApiKey(config: unknown): string;
+  /**
+   * API key, or `""` when none is configured. `apiKeyField` (from
+   * `meta.apiKeyField`) pins which env variable holds the key.
+   */
+  getApiKey(config: unknown, options?: { apiKeyField?: string }): string;
   /** Whether the config has a slot for an API key (even an empty one). */
   hasApiKeyField(config: unknown): boolean;
   /**
@@ -94,6 +97,27 @@ const CLAUDE_MODEL_KEYS = [
   "ANTHROPIC_SMALL_FAST_MODEL",
 ] as const;
 
+const CLAUDE_KEY_FIELDS = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
+
+/**
+ * Which env variable holds a Claude API key (FE-ARCH-47): an explicit
+ * `meta.apiKeyField` first, then whichever of AUTH_TOKEN / API_KEY is
+ * non-empty, then whichever exists. An empty `ANTHROPIC_AUTH_TOKEN` next to a
+ * populated `ANTHROPIC_API_KEY` must not hide the real key.
+ */
+export const resolveClaudeApiKeyField = (
+  env: Rec | undefined,
+  apiKeyField?: string,
+): string | undefined => {
+  if (apiKeyField && CLAUDE_KEY_FIELDS.includes(apiKeyField)) {
+    return apiKeyField;
+  }
+  return (
+    CLAUDE_KEY_FIELDS.find((key) => nonEmpty(env?.[key])) ??
+    CLAUDE_KEY_FIELDS.find((key) => has(env, key))
+  );
+};
+
 const makeClaudeCodec = (
   appId: "claude" | "claude-desktop",
   defaultConfig: string,
@@ -102,7 +126,7 @@ const makeClaudeCodec = (
   defaultConfig,
   getEndpoint: (config) =>
     nonEmpty(asRecord(asRecord(config)?.env)?.ANTHROPIC_BASE_URL),
-  getApiKey: (config) => {
+  getApiKey: (config, options = {}) => {
     const root = asRecord(config);
     // Top-level apiKey is used by Bedrock-style presets; ignore templates.
     const topLevel = root?.apiKey;
@@ -110,10 +134,8 @@ const makeClaudeCodec = (
       return topLevel;
     }
     const env = asRecord(root?.env);
-    if (typeof env?.ANTHROPIC_AUTH_TOKEN === "string") {
-      return env.ANTHROPIC_AUTH_TOKEN;
-    }
-    return str(env?.ANTHROPIC_API_KEY);
+    const field = resolveClaudeApiKeyField(env, options.apiKeyField);
+    return field ? str(env?.[field]) : "";
   },
   hasApiKeyField: (config) => {
     const root = asRecord(config);
@@ -136,11 +158,17 @@ const makeClaudeCodec = (
       env = {};
       next.env = env;
     }
-    if (has(env, "ANTHROPIC_AUTH_TOKEN")) env.ANTHROPIC_AUTH_TOKEN = apiKey;
-    else if (has(env, "ANTHROPIC_API_KEY")) env.ANTHROPIC_API_KEY = apiKey;
-    else if (options.createIfMissing)
-      env[options.apiKeyField ?? "ANTHROPIC_AUTH_TOKEN"] = apiKey;
-    else return config;
+    const pinned =
+      options.apiKeyField && CLAUDE_KEY_FIELDS.includes(options.apiKeyField)
+        ? options.apiKeyField
+        : undefined;
+    const existing = resolveClaudeApiKeyField(env);
+    let field: string | undefined;
+    if (pinned && (has(env, pinned) || options.createIfMissing)) field = pinned;
+    else if (existing) field = existing;
+    else if (options.createIfMissing) field = pinned ?? "ANTHROPIC_AUTH_TOKEN";
+    if (!field) return config;
+    env[field] = apiKey;
     return next;
   },
   getModels: (config) => {

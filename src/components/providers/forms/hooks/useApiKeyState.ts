@@ -3,9 +3,11 @@ import type { ProviderCategory } from "@/types";
 import type { AppId } from "@/lib/api";
 import { getProviderCodec, parseSettingsConfig } from "@/lib/providerCodecs";
 
-const readApiKey = (json: string, appType?: string) => {
+const readApiKey = (json: string, appType?: string, apiKeyField?: string) => {
   const config = parseSettingsConfig(json);
-  return config ? getProviderCodec(toAppId(appType)).getApiKey(config) : "";
+  return config
+    ? getProviderCodec(toAppId(appType)).getApiKey(config, { apiKeyField })
+    : "";
 };
 
 const toAppId = (appType?: string): AppId =>
@@ -34,7 +36,7 @@ export function useApiKeyState({
 }: UseApiKeyStateProps) {
   const [apiKey, setApiKey] = useState(() => {
     if (initialConfig) {
-      return readApiKey(initialConfig, appType);
+      return readApiKey(initialConfig, appType, apiKeyField);
     }
     return "";
   });
@@ -51,11 +53,11 @@ export function useApiKeyState({
     }
 
     // 从配置中提取 API Key（如果不存在则返回空字符串）
-    const extracted = readApiKey(initialConfig, appType);
+    const extracted = readApiKey(initialConfig, appType, apiKeyField);
     if (extracted !== apiKey) {
       setApiKey(extracted);
     }
-  }, [initialConfig, appType, apiKey]);
+  }, [initialConfig, appType, apiKeyField, apiKey]);
 
   const handleApiKeyChange = useCallback(
     (key: string) => {

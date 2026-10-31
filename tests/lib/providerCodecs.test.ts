@@ -65,6 +65,35 @@ describe("provider codecs (FE-PROV-22)", () => {
     ).toEqual({ env: { ANTHROPIC_API_KEY: "k" } });
   });
 
+  it("claude: an empty AUTH_TOKEN does not hide a populated API_KEY (FE-ARCH-47)", () => {
+    const codec = getProviderCodec("claude");
+    const config = {
+      env: { ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "sk-1" },
+    };
+    expect(codec.getApiKey(config)).toBe("sk-1");
+    expect(codec.setApiKey(config, "sk-2")).toEqual({
+      env: { ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "sk-2" },
+    });
+    // Both populated: AUTH_TOKEN keeps priority.
+    const both = { env: { ANTHROPIC_AUTH_TOKEN: "t", ANTHROPIC_API_KEY: "k" } };
+    expect(codec.getApiKey(both)).toBe("t");
+  });
+
+  it("claude: meta.apiKeyField pins the field for reads and writes", () => {
+    const codec = getProviderCodec("claude");
+    const opts = { apiKeyField: "ANTHROPIC_API_KEY" };
+    const config = {
+      env: { ANTHROPIC_AUTH_TOKEN: "t", ANTHROPIC_API_KEY: "k" },
+    };
+    expect(codec.getApiKey(config, opts)).toBe("k");
+    expect(codec.setApiKey(config, "new", opts)).toEqual({
+      env: { ANTHROPIC_AUTH_TOKEN: "t", ANTHROPIC_API_KEY: "new" },
+    });
+    expect(codec.getApiKey({ env: { ANTHROPIC_AUTH_TOKEN: "t" } }, opts)).toBe(
+      "",
+    );
+  });
+
   it("codex: reads the key from auth.OPENAI_API_KEY, not env.CODEX_API_KEY", () => {
     const codec = getProviderCodec("codex");
     const config = {
