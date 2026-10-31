@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
-import type { Provider, VisibleApps } from "@/types";
+import type { Provider } from "@/types";
 import type { AppId } from "@/lib/api";
 import { useProvidersQuery, useSettingsQuery } from "@/lib/query";
 import { useProviderActions } from "@/hooks/useProviderActions";
@@ -13,12 +13,7 @@ import { useEnvConflicts } from "@/hooks/useEnvConflicts";
 import { useWindowChrome } from "@/hooks/useWindowChrome";
 import { useLastValidValue } from "@/hooks/useLastValidValue";
 import { safeStorageSet } from "@/lib/storage";
-import {
-  ALL_APP_IDS,
-  appCaps,
-  sharedFeatureAppOf,
-  useAppCaps,
-} from "@/entities/app/registry";
+import { sharedFeatureAppOf, useAppCaps } from "@/entities/app/registry";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
 import { LazyMount, lazyNamed } from "@/components/common/LazyMount";
 import type { SkillsPageSource } from "@/components/skills/skillsPageHeaderActions";
@@ -37,11 +32,10 @@ import {
 } from "@/components/app-shell/AppConfirmDialogs";
 import { useShellPanelRefs } from "@/components/app-shell/panelRefs";
 import { useViewShortcuts } from "@/components/app-shell/useViewShortcuts";
+import { AppCommandPalette } from "@/components/app-shell/AppCommandPalette";
+import { useShellFallbacks } from "@/components/app-shell/useShellFallbacks";
 import {
-  CommandPalette,
-  useCommandPaletteShortcut,
-} from "@/components/app-shell/CommandPalette";
-import {
+  OPENCLAW_HEALTH_VIEWS,
   VIEW_STORAGE_KEY,
   getInitialApp,
   getInitialView,
@@ -60,27 +54,6 @@ const EditProviderDialog = lazyNamed(
 );
 const UsageScriptModal = lazy(() => import("@/components/UsageScriptModal"));
 
-const DEFAULT_VISIBLE_APPS: VisibleApps = {
-  claude: true,
-  "claude-desktop": true,
-  codex: true,
-  gemini: true,
-  grokbuild: true,
-  opencode: true,
-  openclaw: true,
-  hermes: true,
-};
-
-/** 使用这些视图时显示 OpenClaw 健康检查横幅 */
-const OPENCLAW_HEALTH_VIEWS: readonly View[] = [
-  "providers",
-  "workspace",
-  "sessions",
-  "openclawEnv",
-  "openclawTools",
-  "openclawAgents",
-];
-
 function App() {
   const [activeApp, setActiveApp] = useState<AppId>(getInitialApp);
   const sharedFeatureApp: AppId = sharedFeatureAppOf(activeApp);
@@ -94,12 +67,6 @@ function App() {
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [usageProvider, setUsageProvider] = useState<Provider | null>(null);
   const [launchDashboardOpen, setLaunchDashboardOpen] = useState(false);
-  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
-  // 命令面板跨应用切换：先切换 activeApp，待 useProviderActions 绑定到目标应用后再执行
-  const [pendingSwitch, setPendingSwitch] = useState<{
-    appId: AppId;
-    provider: Provider;
-  } | null>(null);
   const effectiveEditingProvider = useLastValidValue(editingProvider);
   const effectiveUsageProvider = useLastValidValue(usageProvider);
   const panelRefs = useShellPanelRefs();
@@ -110,24 +77,17 @@ function App() {
 
   const { data: settingsData } = useSettingsQuery();
   const chrome = useWindowChrome(settingsData);
-  const visibleApps = settingsData?.visibleApps ?? DEFAULT_VISIBLE_APPS;
-
-  useEffect(() => {
-    if (!visibleApps[activeApp]) {
-      setActiveApp(ALL_APP_IDS.find((id) => visibleApps[id]) ?? "claude");
-    }
-  }, [visibleApps, activeApp]);
-
-  // Fallback from sessions view when switching to an app without session support
-  useEffect(() => {
-    if (currentView === "sessions" && !sharedFeatureCaps.sessions) {
-      setCurrentView("providers");
-    }
-  }, [sharedFeatureCaps.sessions, currentView]);
+  const visibleApps = useShellFallbacks({
+    settings: settingsData,
+    activeApp,
+    setActiveApp,
+    currentView,
+    setCurrentView,
+    sessionsSupported: sharedFeatureCaps.sessions,
+  });
 
   useUsageCacheBridge();
   useViewShortcuts(currentView, setCurrentView);
-  useCommandPaletteShortcut(isPaletteOpen, setIsPaletteOpen);
 
   const {
     isRunning: isProxyRunning,
@@ -136,12 +96,9 @@ function App() {
     setTakeoverForApp,
   } = useProxyStatus();
   const isCurrentAppTakeoverActive = takeoverStatus?.[activeApp] || false;
-  const activeProviderId = useMemo(() => {
-    const target = proxyStatus?.active_targets?.find(
-      (t) => t.app_type === activeApp,
-    );
-    return target?.provider_id;
-  }, [proxyStatus?.active_targets, activeApp]);
+  const activeProviderId = proxyStatus?.active_targets?.find(
+    (t) => t.app_type === activeApp,
+  )?.provider_id;
 
   const { data, isLoading, refetch } = useProvidersQuery(activeApp, {
     isProxyRunning,
@@ -175,29 +132,6 @@ function App() {
   const providerConfirm = useProviderConfirm(activeApp, deleteProvider);
   const env = useEnvConflicts(activeApp);
   useAppShellEvents(activeApp, refetch);
-
-  useEffect(() => {
-    if (!pendingSwitch) return;
-    setPendingSwitch(null);
-    // 与 setActiveApp 同批提交，此时 activeApp 应已是目标应用；
-    // 若被可见性回退等逻辑改写则放弃，避免切换到错误应用
-    if (pendingSwitch.appId === activeApp) {
-      void switchProvider(pendingSwitch.provider);
-    }
-  }, [pendingSwitch, activeApp, switchProvider]);
-
-  const selectAppFromPalette = (appId: AppId) => {
-    setActiveApp(appId);
-    setCurrentView("providers");
-  };
-
-  const switchProviderFromPalette = (appId: AppId, provider: Provider) => {
-    selectAppFromPalette(appId);
-    // 累加模式应用没有“当前供应商”，只跳转到列表
-    if (!appCaps(appId).additive) {
-      setPendingSwitch({ appId, provider });
-    }
-  };
 
   const openHermesWebUI = useOpenHermesWebUI(() =>
     setLaunchDashboardOpen(true),
@@ -340,30 +274,17 @@ function App() {
       />
       <SettingsLoadFailureNotice />
 
-      <CommandPalette
-        open={isPaletteOpen}
-        onOpenChange={setIsPaletteOpen}
-        visibleApps={visibleApps}
+      <AppCommandPalette
         activeApp={activeApp}
-        onSwitchProvider={switchProviderFromPalette}
-        onSelectApp={selectAppFromPalette}
-        onOpenSettings={() => openSettings("general")}
-        onAddProvider={() => setIsAddOpen(true)}
-        onToggleTakeover={
-          settingsData?.enableLocalProxy && activeAppCaps.proxyTakeover
-            ? () =>
-                void setTakeoverForApp({
-                  appType: activeApp,
-                  enabled: !isCurrentAppTakeoverActive,
-                }).catch((error) => {
-                  console.error(
-                    "[CommandPalette] Toggle takeover failed:",
-                    error,
-                  );
-                })
-            : undefined
-        }
+        setActiveApp={setActiveApp}
+        setCurrentView={setCurrentView}
+        switchProvider={switchProvider}
+        visibleApps={visibleApps}
+        settings={settingsData}
+        setTakeoverForApp={setTakeoverForApp}
         isTakeoverActive={isCurrentAppTakeoverActive}
+        onOpenSettings={openSettings}
+        onAddProvider={() => setIsAddOpen(true)}
       />
 
       <DeepLinkImportDialog />

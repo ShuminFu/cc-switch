@@ -55,6 +55,16 @@ export const VALID_VIEWS: readonly View[] = [
   ...(Object.keys(VIEW_TITLES) as SubView[]),
 ];
 
+/** 使用这些视图时显示 OpenClaw 健康检查横幅 */
+export const OPENCLAW_HEALTH_VIEWS: readonly View[] = [
+  "providers",
+  "workspace",
+  "sessions",
+  "openclawEnv",
+  "openclawTools",
+  "openclawAgents",
+];
+
 export function isView(value: unknown): value is View {
   return (
     typeof value === "string" &&
