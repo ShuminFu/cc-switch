@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { History, Share2 } from "lucide-react";
+import { History, Share2, TerminalSquare } from "lucide-react";
 import {
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { CustomToolsPanel } from "./CustomToolsPanel";
 import { ConfigHistoryPanel } from "./ConfigHistoryPanel";
 import { AuditLogPanel } from "./AuditLogPanel";
 import { ShareBundlePanel } from "./ShareBundlePanel";
@@ -55,6 +56,17 @@ export function WorkbenchAccordionItems() {
   const { t } = useTranslation();
   return (
     <>
+      <Item
+        value="customTools"
+        icon={<TerminalSquare className="h-5 w-5 text-violet-500" />}
+        title={t("workbench.tools.title", { defaultValue: "Other CLI tools" })}
+        description={t("workbench.tools.subtitle", {
+          defaultValue:
+            "Endpoint, key and model profiles for Qwen Code, Aider and more",
+        })}
+      >
+        <CustomToolsPanel />
+      </Item>
       <Item
         value="history"
         icon={<History className="h-5 w-5 text-sky-500" />}
