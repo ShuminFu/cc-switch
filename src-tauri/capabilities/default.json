@@ -9,7 +9,6 @@
     "core:default",
     "opener:allow-open-url",
     "opener:allow-default-urls",
-    "updater:default",
     "core:window:allow-set-skip-taskbar",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",

@@ -1,0 +1,88 @@
+{
+  "anthropic": {
+    "model": "deepseek-chat",
+    "max_tokens": 512,
+    "tools": [
+      {
+        "name": "get_weather",
+        "description": "Weather",
+        "input_schema": {
+          "type": "object",
+          "properties": { "city": { "type": "string" } },
+          "required": ["city"]
+        }
+      },
+      { "name": "no_description", "input_schema": { "type": "object", "properties": {} } },
+      { "type": "BatchTool", "name": "batch" }
+    ],
+    "tool_choice": { "type": "auto", "disable_parallel_tool_use": true },
+    "messages": [
+      { "role": "user", "content": "Weather in Paris?" },
+      {
+        "role": "assistant",
+        "content": [
+          { "type": "text", "text": "Checking." },
+          { "type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": { "city": "Paris" } }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          { "type": "tool_result", "tool_use_id": "toolu_1", "content": [{ "type": "text", "text": "18C" }] },
+          { "type": "text", "text": "Thanks" }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          { "type": "tool_result", "tool_use_id": "toolu_2", "is_error": true, "content": "timeout" }
+        ]
+      }
+    ]
+  },
+  "chat": {
+    "model": "deepseek-chat",
+    "messages": [
+      { "role": "user", "content": "Weather in Paris?" },
+      {
+        "role": "assistant",
+        "content": "Checking.",
+        "tool_calls": [
+          {
+            "id": "toolu_1",
+            "type": "function",
+            "function": { "name": "get_weather", "arguments": "{\"city\":\"Paris\"}" }
+          }
+        ]
+      },
+      { "role": "tool", "tool_call_id": "toolu_1", "content": "18C" },
+      { "role": "user", "content": "Thanks" },
+      { "role": "tool", "tool_call_id": "toolu_2", "content": "[error] timeout" }
+    ],
+    "max_tokens": 512,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Weather",
+          "parameters": {
+            "type": "object",
+            "properties": { "city": { "type": "string" } },
+            "required": ["city"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "no_description",
+          "description": null,
+          "parameters": { "type": "object", "properties": {} }
+        }
+      }
+    ],
+    "tool_choice": "auto",
+    "parallel_tool_calls": false
+  }
+}

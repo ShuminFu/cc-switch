@@ -6,7 +6,7 @@ use serde::Serialize;
 use tauri::AppHandle;
 
 use super::profile::finish_profile_change;
-use super::run_blocking_with_state;
+use super::timed_blocking_with_state;
 
 use crate::services::profile::ProfileScope;
 use crate::services::project_binding::{self, DetectedProject, ProjectApplyReport, ProjectBinding};
@@ -37,7 +37,7 @@ fn resolve_dir(path: Option<String>) -> Result<PathBuf, String> {
 
 #[tauri::command]
 pub async fn list_project_bindings(handle: AppHandle) -> Result<ProjectBindingsResponse, String> {
-    run_blocking_with_state(handle, |state| {
+    timed_blocking_with_state("list_project_bindings", handle, |state| {
         Ok(ProjectBindingsResponse {
             bindings: project_binding::load_bindings(&state.db).map_err(|e| e.to_string())?,
             project_level_scopes: project_binding::project_level_scopes(),
@@ -55,7 +55,7 @@ pub async fn bind_project_directory(
     project_level: Option<bool>,
 ) -> Result<ProjectBinding, String> {
     let scopes = parse_scopes(scopes)?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("bind_project_directory", handle, move |state| {
         project_binding::bind(
             &state.db,
             &PathBuf::from(path),
@@ -71,7 +71,7 @@ pub async fn bind_project_directory(
 #[tauri::command]
 #[specta::specta]
 pub async fn unbind_project_directory(handle: AppHandle, path: String) -> Result<bool, String> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("unbind_project_directory", handle, move |state| {
         project_binding::unbind(&state.db, &path).map_err(|e| e.to_string())
     })
     .await
@@ -84,7 +84,7 @@ pub async fn detect_project(
     path: Option<String>,
 ) -> Result<DetectedProject, String> {
     let dir = resolve_dir(path)?;
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("detect_project", handle, move |state| {
         project_binding::detect(&state.db, &dir).map_err(|e| e.to_string())
     })
     .await
@@ -97,7 +97,7 @@ pub async fn apply_project_binding(
     path: Option<String>,
 ) -> Result<Option<ProjectApplyReport>, String> {
     let dir = resolve_dir(path)?;
-    let report = run_blocking_with_state(app.clone(), move |state| {
+    let report = timed_blocking_with_state("apply_project_binding", app.clone(), move |state| {
         project_binding::apply_for_directory(state, &dir).map_err(|e| e.to_string())
     })
     .await?;

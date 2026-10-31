@@ -1,4 +1,4 @@
-use super::{run_blocking, run_blocking_with_state};
+use super::{timed_blocking, timed_blocking_with_state};
 use std::time::Duration;
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
@@ -21,7 +21,7 @@ const HERMES_WEB_OFFLINE_ERROR: &str = "hermes_web_offline";
 #[tauri::command]
 #[specta::specta]
 pub async fn import_hermes_providers_from_live(handle: tauri::AppHandle) -> Result<usize, String> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("import_hermes_providers_from_live", handle, move |state| {
         crate::services::provider::import_hermes_providers_from_live(state)
             .map_err(|e| e.to_string())
     })
@@ -32,7 +32,7 @@ pub async fn import_hermes_providers_from_live(handle: tauri::AppHandle) -> Resu
 #[tauri::command]
 #[specta::specta]
 pub async fn get_hermes_live_provider_ids() -> Result<Vec<String>, String> {
-    run_blocking(move || {
+    timed_blocking("get_hermes_live_provider_ids", move || {
         hermes_config::get_providers()
             .map(|providers| providers.keys().cloned().collect())
             .map_err(|e| e.to_string())
@@ -46,7 +46,10 @@ pub async fn get_hermes_live_provider_ids() -> Result<Vec<String>, String> {
 pub async fn get_hermes_live_provider(
     #[allow(non_snake_case)] providerId: String,
 ) -> Result<Option<serde_json::Value>, String> {
-    run_blocking(move || hermes_config::get_provider(&providerId).map_err(|e| e.to_string())).await
+    timed_blocking("get_hermes_live_provider", move || {
+        hermes_config::get_provider(&providerId).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // ============================================================================
@@ -57,7 +60,10 @@ pub async fn get_hermes_live_provider(
 /// happen implicitly through `apply_switch_defaults` when switching providers.
 #[tauri::command]
 pub async fn get_hermes_model_config() -> Result<Option<hermes_config::HermesModelConfig>, String> {
-    run_blocking(move || hermes_config::get_model_config().map_err(|e| e.to_string())).await
+    timed_blocking("get_hermes_model_config", move || {
+        hermes_config::get_model_config().map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // ============================================================================
@@ -67,7 +73,10 @@ pub async fn get_hermes_model_config() -> Result<Option<hermes_config::HermesMod
 #[tauri::command]
 #[specta::specta]
 pub async fn get_hermes_memory(kind: hermes_config::MemoryKind) -> Result<String, String> {
-    run_blocking(move || hermes_config::read_memory(kind).map_err(|e| e.to_string())).await
+    timed_blocking("get_hermes_memory", move || {
+        hermes_config::read_memory(kind).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -76,14 +85,19 @@ pub async fn set_hermes_memory(
     kind: hermes_config::MemoryKind,
     content: String,
 ) -> Result<(), String> {
-    run_blocking(move || hermes_config::write_memory(kind, &content).map_err(|e| e.to_string()))
-        .await
+    timed_blocking("set_hermes_memory", move || {
+        hermes_config::write_memory(kind, &content).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn get_hermes_memory_limits() -> Result<hermes_config::HermesMemoryLimits, String> {
-    run_blocking(move || hermes_config::read_memory_limits().map_err(|e| e.to_string())).await
+    timed_blocking("get_hermes_memory_limits", move || {
+        hermes_config::read_memory_limits().map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -92,7 +106,7 @@ pub async fn set_hermes_memory_enabled(
     kind: hermes_config::MemoryKind,
     enabled: bool,
 ) -> Result<hermes_config::HermesWriteOutcome, String> {
-    run_blocking(move || {
+    timed_blocking("set_hermes_memory_enabled", move || {
         hermes_config::set_memory_enabled(kind, enabled).map_err(|e| e.to_string())
     })
     .await

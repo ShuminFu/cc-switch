@@ -179,6 +179,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             super::patch_settings,
             super::install_update_and_restart,
             super::check_app_update_available,
+            super::check_app_update,
             super::get_app_config_dir_override,
             super::set_app_config_dir_override,
             super::set_auto_launch,

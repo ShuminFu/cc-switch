@@ -45,6 +45,29 @@ pub struct AttemptRecord {
     pub duration_ms: u64,
 }
 
+/// One decision or rewrite the proxy made for a request (PRODUCT-57).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceEntry {
+    /// `routingRule`, `rectifier`, `mediaFallback` or `bridge`.
+    pub kind: String,
+    /// Short English detail (rule label, rectifier name, API format...).
+    pub detail: String,
+    /// Provider the entry applies to, when it is provider-specific.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+}
+
+impl TraceEntry {
+    pub fn new(kind: &str, detail: impl Into<String>, provider_id: Option<&str>) -> Self {
+        Self {
+            kind: kind.to_string(),
+            detail: detail.into(),
+            provider_id: provider_id.map(str::to_string),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestRecord {
@@ -59,6 +82,8 @@ pub struct RequestRecord {
     pub duration_ms: u64,
     pub success: bool,
     pub attempts: Vec<AttemptRecord>,
+    /// Routing rules, rectifiers and format bridges applied (PRODUCT-57).
+    pub trace: Vec<TraceEntry>,
 }
 
 /// Bounded ring buffer of [`RequestRecord`]s.
@@ -150,6 +175,11 @@ mod tests {
                 error: Some("boom".to_string()),
                 duration_ms: 5,
             }],
+            trace: vec![TraceEntry::new(
+                "rectifier",
+                "thinking signature",
+                Some("p1"),
+            )],
         }
     }
 
@@ -179,6 +209,8 @@ mod tests {
         assert_eq!(lines[0]["appType"], "claude");
         assert_eq!(lines[0]["attempts"][0]["result"], "failover");
         assert_eq!(lines[0]["attempts"][0]["status"], 500);
+        assert_eq!(lines[0]["trace"][0]["kind"], "rectifier");
+        assert_eq!(lines[0]["trace"][0]["providerId"], "p1");
     }
 
     #[test]

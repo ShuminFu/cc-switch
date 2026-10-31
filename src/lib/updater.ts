@@ -1,4 +1,6 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { commands } from "@/lib/bindings";
+import { call } from "@/lib/api/invoke";
 
 export type UpdateChannel = "stable" | "beta";
 
@@ -22,27 +24,26 @@ export async function getCurrentVersion(): Promise<string> {
   }
 }
 
+/**
+ * Ask the backend's updater (`check_app_update`, CMD-39). The webview no
+ * longer talks to the updater plugin directly, so it needs no updater grant.
+ */
 export async function checkForUpdate(
   opts: CheckOptions = {},
 ): Promise<
   { status: "up-to-date" } | { status: "available"; info: UpdateInfo }
 > {
-  // 动态引入，避免在未安装插件时导致打包期问题
-  const { check } = await import("@tauri-apps/plugin-updater");
-
-  const currentVersion = await getCurrentVersion();
-  const update = await check({ timeout: opts.timeout ?? 30000 });
+  const update = await call(commands.checkAppUpdate(opts.timeout ?? 30000));
 
   if (!update) {
     return { status: "up-to-date" };
   }
 
   const info: UpdateInfo = {
-    currentVersion,
-    availableVersion: update.version ?? "",
-    // The plugin exposes release notes as `body` (there is no `notes`).
-    notes: update.body,
-    pubDate: update.date,
+    currentVersion: update.currentVersion || (await getCurrentVersion()),
+    availableVersion: update.availableVersion,
+    notes: update.notes ?? undefined,
+    pubDate: update.pubDate ?? undefined,
   };
 
   return { status: "available", info };

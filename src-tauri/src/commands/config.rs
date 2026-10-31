@@ -327,7 +327,7 @@ pub async fn set_common_config_snippet(
 ) -> Result<(), String> {
     // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
     let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
-    super::run_blocking_with_state(handle, move |state| {
+    super::timed_blocking_with_state("set_common_config_snippet", handle, move |state| {
         apply_common_config_snippet(state, &app_type, snippet)
     })
     .await

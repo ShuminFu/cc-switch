@@ -20,6 +20,9 @@ pub struct ValidationIssue {
     pub key: String,
     /// Interpolation values for the message (`value`, `allowed`, `expected`).
     pub params: Value,
+    /// English rendering of the issue, usable as the `t(key, { defaultValue })`
+    /// fallback until every locale carries `key`.
+    pub message: String,
 }
 
 /// Codex `wire_api` values (see the Codex config reference).
@@ -72,6 +75,9 @@ fn env_key_case_issues(settings: &Value, known: &[&str]) -> Vec<ValidationIssue>
                 path: format!("env.{key}"),
                 key: "validation.env.keyCase".to_string(),
                 params: json!({ "value": key, "expected": expected }),
+                message: format!(
+                    "\"{key}\" differs from \"{expected}\" only by letter case; the CLI ignores it."
+                ),
             })
         })
         .collect()
@@ -90,6 +96,7 @@ pub fn validate_codex_config_text(text: &str) -> Vec<ValidationIssue> {
                 path: String::new(),
                 key: "validation.toml.syntax".to_string(),
                 params: json!({ "message": e.message() }),
+                message: format!("TOML syntax error: {}", e.message()),
             }]
         }
     };
@@ -101,11 +108,19 @@ pub fn validate_codex_config_text(text: &str) -> Vec<ValidationIssue> {
         };
         let valid = value.as_str().is_some_and(|v| CODEX_WIRE_APIS.contains(&v));
         if !valid {
+            let shown = value
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| value.to_string());
             issues.push(ValidationIssue {
                 path,
                 key: "validation.codex.wireApi.invalid".to_string(),
+                message: format!(
+                    "Invalid wire_api \"{shown}\"; expected one of: {}.",
+                    CODEX_WIRE_APIS.join(", ")
+                ),
                 params: json!({
-                    "value": value.as_str().map(str::to_string).unwrap_or_else(|| value.to_string()),
+                    "value": shown,
                     "allowed": CODEX_WIRE_APIS,
                 }),
             });
@@ -133,6 +148,9 @@ pub fn validate_codex_config_text(text: &str) -> Vec<ValidationIssue> {
                 path: "model_provider".to_string(),
                 key: "validation.codex.modelProvider.undefined".to_string(),
                 params: json!({ "value": active }),
+                message: format!(
+                    "model_provider \"{active}\" has no matching [model_providers.{active}] table."
+                ),
             });
         }
     }
@@ -157,6 +175,10 @@ wire_api = "response"
         assert_eq!(issues[0].path, "model_providers.custom.wire_api");
         assert_eq!(issues[0].key, "validation.codex.wireApi.invalid");
         assert_eq!(issues[0].params["value"], "response");
+        assert_eq!(
+            issues[0].message,
+            "Invalid wire_api \"response\"; expected one of: responses, chat."
+        );
     }
 
     #[test]
@@ -191,5 +213,14 @@ wire_api = "responses"
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].path, "env.ANTHROPIC_BASE_URl");
         assert_eq!(issues[0].params["expected"], "ANTHROPIC_BASE_URL");
+        assert!(issues[0].message.contains("ANTHROPIC_BASE_URL"));
+    }
+
+    #[test]
+    fn every_issue_carries_english_text() {
+        let undefined = validate_codex_config_text("model_provider = \"custom\"");
+        assert!(undefined[0].message.contains("[model_providers.custom]"));
+        let syntax = validate_codex_config_text("model_provider = ");
+        assert!(syntax[0].message.starts_with("TOML syntax error"));
     }
 }

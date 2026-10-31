@@ -390,9 +390,23 @@ impl LocalProxyRequestOverrides {
     }
 }
 
+/// One extra API key of a provider's key pool (PRODUCT-32).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, specta::Type)]
+pub struct ApiKeyPoolEntry {
+    /// Short name shown in the UI and the request trace (never the key).
+    #[serde(default)]
+    pub label: String,
+    pub key: String,
+}
+
 /// 供应商元数据
 #[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct ProviderMeta {
+    /// Extra API keys the proxy rotates through on 429/401 before failing over
+    /// to another provider (PRODUCT-32). The provider's own key is tried as
+    /// `primary`. Not covered by the provider-key vault yet.
+    #[serde(rename = "apiKeyPool", default, skip_serializing_if = "Vec::is_empty")]
+    pub api_key_pool: Vec<ApiKeyPoolEntry>,
     /// 自定义端点列表（按 URL 去重存储）
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub custom_endpoints: HashMap<String, crate::settings::CustomEndpoint>,

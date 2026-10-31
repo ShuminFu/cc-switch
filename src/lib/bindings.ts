@@ -1508,6 +1508,19 @@ async checkAppUpdateAvailable() : Promise<Result<string | null, string>> {
 }
 },
 /**
+ * Check the update endpoint (CMD-39). The frontend calls this instead of
+ * the updater plugin's JS API, so the webview needs no `updater:*` grant.
+ * `timeout_ms` defaults to 30 s.
+ */
+async checkAppUpdate(timeoutMs: number | null) : Promise<Result<AppUpdateInfo | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("check_app_update", { timeoutMs }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * 获取 app_config_dir 覆盖配置 (从 Store)
  * 
  * Read-only: it no longer refreshes the process-wide override cache. The data
@@ -1803,6 +1816,14 @@ async openWorkspaceDirectory(subdir: string) : Promise<Result<boolean, string>> 
 /** user-defined types **/
 
 /**
+ * One extra API key of a provider's key pool (PRODUCT-32).
+ */
+export type ApiKeyPoolEntry = { 
+/**
+ * Short name shown in the UI and the request trace (never the key).
+ */
+label?: string; key: string }
+/**
  * One tool's resolved config directory.
  */
 export type AppConfigDirInfo = { app: AppType; path: string; exists: boolean; source: ConfigDirSource }
@@ -1821,6 +1842,18 @@ export type AppErrorPayload = { code: string; message: string; params?: Partial<
  * 应用类型
  */
 export type AppType = "claude" | "claude-desktop" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes"
+/**
+ * An available update (CMD-39).
+ */
+export type AppUpdateInfo = { currentVersion: string; availableVersion: string; 
+/**
+ * Release notes (`body` of the update manifest).
+ */
+notes: string | null; 
+/**
+ * `pub_date` of the update manifest, as published.
+ */
+pubDate: string | null }
 /**
  * 通用认证绑定
  */
@@ -2061,6 +2094,12 @@ inFailoverQueue?: boolean }
  */
 export type ProviderMeta = { 
 /**
+ * Extra API keys the proxy rotates through on 429/401 before failing over
+ * to another provider (PRODUCT-32). The provider's own key is tried as
+ * `primary`. Not covered by the provider-key vault yet.
+ */
+apiKeyPool: ApiKeyPoolEntry[]; 
+/**
  * 自定义端点列表（按 URL 去重存储）
  */
 custom_endpoints: Partial<{ [key in string]: CustomEndpoint }>; 
@@ -2298,7 +2337,12 @@ key: string;
 /**
  * Interpolation values for the message (`value`, `allowed`, `expected`).
  */
-params: JsonValue }
+params: JsonValue; 
+/**
+ * English rendering of the issue, usable as the `t(key, { defaultValue })`
+ * fallback until every locale carries `key`.
+ */
+message: string }
 
 /** tauri-specta globals **/
 

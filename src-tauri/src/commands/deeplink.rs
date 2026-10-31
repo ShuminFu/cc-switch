@@ -1,6 +1,6 @@
 use crate::deeplink::{
     import_mcp_from_deeplink, import_prompt_from_deeplink, import_provider_from_deeplink,
-    import_skill_from_deeplink, parse_deeplink_url, DeepLinkImportRequest,
+    import_skill_from_deeplink, DeepLinkImportRequest,
 };
 use crate::store::AppState;
 use serde::{Deserialize, Serialize};
@@ -229,14 +229,6 @@ fn import_one(
     }
 }
 
-/// Parse a deep link URL for display only. The result carries no nonce and
-/// therefore cannot be imported.
-#[tauri::command]
-pub fn parse_deeplink(url: String) -> Result<DeepLinkImportRequest, String> {
-    log::info!("Parsing deep link URL: {}", crate::redact_url_for_log(&url));
-    parse_deeplink_url(&url).map_err(|e| e.to_string())
-}
-
 /// Merge configuration from Base64/URL into a deep link request
 /// This is used by the frontend to show the complete configuration in the confirmation dialog
 #[tauri::command]
@@ -245,24 +237,6 @@ pub fn merge_deeplink_config(
 ) -> Result<DeepLinkImportRequest, String> {
     log::info!("Merging config for deep link request: {:?}", request.name);
     crate::deeplink::parse_and_merge_config(&request).map_err(|e| e.to_string())
-}
-
-/// Import a provider from a deep link request (legacy, kept for compatibility).
-/// Like the unified command it only imports a pending, OS-delivered link.
-#[tauri::command]
-pub fn import_from_deeplink(
-    state: State<AppState>,
-    request: DeepLinkImportRequest,
-) -> Result<String, String> {
-    let stored = take_pending(request.nonce.as_deref())?;
-    if stored.resource != "provider" {
-        return Err(format!(
-            "Expected provider resource, got '{}'",
-            stored.resource
-        ));
-    }
-    let final_request = apply_choices(stored, request.enabled, request.usage_enabled);
-    import_provider_from_deeplink(&state, final_request).map_err(|e| e.to_string())
 }
 
 /// Import a single-resource deep link the user confirmed.

@@ -15,6 +15,7 @@ mod claude;
 mod codex;
 mod gemini;
 mod grokbuild;
+pub mod health;
 mod hermes;
 pub(crate) mod merge;
 mod opencode;

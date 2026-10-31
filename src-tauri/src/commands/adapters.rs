@@ -13,7 +13,7 @@ use crate::codex_history_migration::CodexHistoryBackupUsage;
 use crate::config::ConfigDirSource;
 use crate::error::AppError;
 
-use super::{run_blocking, run_blocking_with_state};
+use super::{timed_blocking, timed_blocking_with_state};
 
 /// One tool's resolved config directory.
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -30,7 +30,7 @@ pub struct AppConfigDirInfo {
 #[tauri::command]
 #[specta::specta]
 pub async fn get_app_config_dirs() -> Result<Vec<AppConfigDirInfo>, AppError> {
-    run_blocking(|| {
+    timed_blocking("get_app_config_dirs", || {
         Ok(AppType::all()
             .map(|app| {
                 let (path, source) = crate::config::resolve_app_config_dir(&app);
@@ -51,7 +51,10 @@ pub async fn get_app_config_dirs() -> Result<Vec<AppConfigDirInfo>, AppError> {
 #[tauri::command]
 #[specta::specta]
 pub async fn get_mcp_sync_skips() -> Result<Vec<McpSyncSkip>, AppError> {
-    run_blocking(|| Ok(crate::adapters::mcp_sync_skips(AppType::all()))).await
+    timed_blocking("get_mcp_sync_skips", || {
+        Ok(crate::adapters::mcp_sync_skips(AppType::all()))
+    })
+    .await
 }
 
 /// Providers found in `app`'s live config that can be imported (CFG-23).
@@ -60,7 +63,10 @@ pub async fn get_mcp_sync_skips() -> Result<Vec<McpSyncSkip>, AppError> {
 #[tauri::command]
 #[specta::specta]
 pub async fn get_import_candidates(app: AppType) -> Result<Vec<ImportCandidate>, AppError> {
-    run_blocking(move || adapter_for(&app).import_candidates()).await
+    timed_blocking("get_import_candidates", move || {
+        adapter_for(&app).import_candidates()
+    })
+    .await
 }
 
 /// What switching `app` to `provider_id` would write to its primary live
@@ -75,7 +81,7 @@ pub async fn preview_live_write(
     app: AppType,
     provider_id: String,
 ) -> Result<LiveWritePlan, AppError> {
-    run_blocking_with_state(app_handle, move |state| {
+    timed_blocking_with_state("preview_live_write", app_handle, move |state| {
         let provider = state
             .db
             .get_provider_by_id(&provider_id, app.as_str())?
@@ -126,7 +132,10 @@ pub async fn validate_provider_settings(
 #[tauri::command]
 #[specta::specta]
 pub async fn get_codex_history_backup_usage() -> Result<CodexHistoryBackupUsage, AppError> {
-    run_blocking(|| Ok(crate::codex_history_migration::codex_history_backup_usage())).await
+    timed_blocking("get_codex_history_backup_usage", || {
+        Ok(crate::codex_history_migration::codex_history_backup_usage())
+    })
+    .await
 }
 
 /// Delete the Codex history migration backups. The official-history
@@ -136,7 +145,7 @@ pub async fn get_codex_history_backup_usage() -> Result<CodexHistoryBackupUsage,
 pub async fn purge_codex_history_backups(
     include_restore_ledger: bool,
 ) -> Result<CodexHistoryBackupUsage, AppError> {
-    run_blocking(move || {
+    timed_blocking("purge_codex_history_backups", move || {
         crate::codex_history_migration::purge_codex_history_backups(include_restore_ledger)
     })
     .await

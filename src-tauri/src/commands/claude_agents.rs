@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::run_blocking;
+use super::timed_blocking;
 use crate::error::AppError;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -209,7 +209,7 @@ fn create_in(dir: &Path, agent: &NewClaudeAgent) -> Result<ClaudeAgentInfo, AppE
 /// User-level Claude Code subagents in `~/.claude/agents`.
 #[tauri::command]
 pub async fn list_claude_agents() -> Result<Vec<ClaudeAgentInfo>, String> {
-    run_blocking(move || list_in(&agents_dir()))
+    timed_blocking("list_claude_agents", move || list_in(&agents_dir()))
         .await
         .map_err(|e: AppError| e.to_string())
 }
@@ -217,9 +217,11 @@ pub async fn list_claude_agents() -> Result<Vec<ClaudeAgentInfo>, String> {
 /// Create `~/.claude/agents/<name>.md`; refuses to overwrite an existing file.
 #[tauri::command]
 pub async fn create_claude_agent(agent: NewClaudeAgent) -> Result<ClaudeAgentInfo, String> {
-    run_blocking(move || create_in(&agents_dir(), &agent))
-        .await
-        .map_err(|e: AppError| e.to_string())
+    timed_blocking("create_claude_agent", move || {
+        create_in(&agents_dir(), &agent)
+    })
+    .await
+    .map_err(|e: AppError| e.to_string())
 }
 
 #[cfg(test)]

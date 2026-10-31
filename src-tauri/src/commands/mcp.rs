@@ -51,6 +51,36 @@ pub async fn validate_mcp_command(cmd: String) -> Result<bool, AppError> {
     claude_mcp::validate_command_in_path(&cmd)
 }
 
+/// Test a saved MCP server (PRODUCT-23): run the MCP `initialize` +
+/// `tools/list` handshake (spawning a stdio server, or POSTing to an HTTP
+/// one) and report server info, tools, latency and errors.
+///
+/// Takes the server `id`, not a spec, so the webview cannot make the backend
+/// spawn an arbitrary command. `timeoutMs` defaults to 20 s (max 60 s).
+#[tauri::command]
+pub async fn test_mcp_server(
+    state: State<'_, AppState>,
+    id: String,
+    timeoutMs: Option<u64>,
+) -> Result<crate::mcp::health::McpTestResult, AppError> {
+    let servers = McpService::get_all_servers(&state)?;
+    let server = servers.get(&id).ok_or_else(|| {
+        AppError::localized(
+            "mcp.error.notFound",
+            format!("未找到 MCP 服务器: {id}"),
+            format!("MCP server not found: {id}"),
+        )
+    })?;
+    let spec = server.server.clone();
+    let timeout = timeoutMs
+        .map(|ms| std::time::Duration::from_millis(ms.clamp(500, 60_000)))
+        .unwrap_or(crate::mcp::health::DEFAULT_TIMEOUT);
+    super::timed_blocking("test_mcp_server", move || {
+        Ok::<_, AppError>(crate::mcp::health::test_server(&spec, timeout))
+    })
+    .await
+}
+
 // ============================================================================
 // v3.7.0 新增：统一 MCP 管理命令
 // ============================================================================

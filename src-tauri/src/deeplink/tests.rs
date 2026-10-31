@@ -1323,3 +1323,18 @@ fn test_prompt_with_empty_sanitized_name_is_rejected() {
     let state = AppState::new(db);
     assert!(import_prompt_from_deeplink(&state, request).is_err());
 }
+
+#[test]
+fn test_percent_encoded_plus_survives_url_decoding() {
+    // SESS-23: `%2B` must reach the base64 decoder as `+` (a raw `+` becomes a
+    // space during query decoding, which the decoder also accepts).
+    let url = "ccswitch://v1/import?resource=prompt&app=codex&name=P&content=Pj4%2B";
+    let request = parse_deeplink_url(url).unwrap();
+    assert_eq!(request.content.as_deref(), Some("Pj4+"));
+    for raw in ["Pj4+", "Pj4 "] {
+        assert_eq!(
+            super::utils::decode_base64_param("content", raw).unwrap(),
+            b">>>"
+        );
+    }
+}

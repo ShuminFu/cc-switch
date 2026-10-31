@@ -326,7 +326,7 @@ pub(crate) fn inject_openai_stream_include_usage(result: &mut Value) {
 /// The Responses API uses a flatter `{"type":"function","name":"X"}` selector,
 /// so it has a sibling `map_tool_choice_to_responses` in `transform_responses.rs`.
 /// Keep the two in sync.
-fn map_tool_choice_to_chat(tool_choice: &Value) -> Value {
+pub(crate) fn map_tool_choice_to_chat(tool_choice: &Value) -> Value {
     match tool_choice {
         Value::String(s) => match s.as_str() {
             "any" => json!("required"),
