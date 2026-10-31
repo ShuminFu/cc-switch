@@ -179,6 +179,11 @@ export const queryKeys = {
     all: ["profiles"] as const,
   },
 
+  /** Universal (multi-app) providers (FE-PROV-37). */
+  universalProviders: {
+    all: ["universalProviders"] as const,
+  },
+
   /** Claude Code subagents in ~/.claude/agents, PRODUCT-42. */
   claudeAgents: {
     all: ["claudeAgents"] as const,
@@ -218,6 +223,8 @@ export const queryKeys = {
     appConfig: (appType: string) => ["appProxyConfig", appType] as const,
     upstreamStatus: ["upstreamProxyStatus"] as const,
     globalUrl: ["globalProxyUrl"] as const,
+    routing: (appType: string) => ["proxyRouting", appType] as const,
+    flightRecorder: ["proxyFlightRecorder"] as const,
   },
 
   failover: {
@@ -242,6 +249,25 @@ export const queryKeys = {
   mcp: {
     root: ["mcp"] as const,
     all: ["mcp", "all"] as const,
+    /** Apps whose config dir is missing, so MCP sync skipped them (CFG-46). */
+    syncSkips: ["mcp", "syncSkips"] as const,
+  },
+
+  /** Live-config adapter diagnostics (`src/lib/api/adapters.ts`). */
+  adapters: {
+    all: ["adapters"] as const,
+    configDirs: ["adapters", "configDirs"] as const,
+    importCandidates: (app: AppId | string) =>
+      ["adapters", "importCandidates", app] as const,
+    livePreview: (app: AppId | string, providerId: string) =>
+      ["adapters", "livePreview", app, providerId] as const,
+    validation: (app: AppId | string, settingsJson: string) =>
+      ["adapters", "validation", app, settingsJson] as const,
+    codexHistoryBackupUsage: ["adapters", "codexHistoryBackupUsage"] as const,
+    claudeDesktopProxyDependency: [
+      "adapters",
+      "claudeDesktopProxyDependency",
+    ] as const,
   },
 
   skills: {

@@ -40,7 +40,16 @@ describe("useProxyStatus", () => {
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
 
-    invokeMock.mockImplementation((command: string) => {
+    invokeMock.mockImplementation(function respond(
+      command: string,
+    ): Promise<unknown> {
+      if (command === "get_proxy_overview") {
+        return Promise.all([
+          respond("get_proxy_status"),
+          respond("get_proxy_takeover_status"),
+        ]).then(([status, takeover]) => ({ status, takeover }));
+      }
+
       if (command === "get_proxy_status") {
         return Promise.resolve({
           running: false,

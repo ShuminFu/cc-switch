@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ProviderSettingsWarnings } from "./ProviderSettingsWarnings";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslation } from "react-i18next";
@@ -321,6 +322,11 @@ function ProviderFormShell({
           )}
 
           <adapter.Body key={`${appId}:${bodyKeyOf(initialData)}`} ctx={ctx} />
+
+          <ProviderSettingsWarnings
+            appId={appId}
+            settingsConfig={settingsConfig}
+          />
 
           {adapter.showPricing(category) && (
             <ProviderAdvancedConfig

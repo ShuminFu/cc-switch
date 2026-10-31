@@ -2,7 +2,9 @@ import { FolderSearch, Undo2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { ResolvedDirectories } from "@/hooks/useSettings";
+import type { AppConfigDirInfo } from "@/lib/bindings";
 import {
   DIRECTORY_APP_IDS,
   type DirectoryAppId,
@@ -67,6 +69,33 @@ interface DirectorySettingsProps {
   onDirectoryChange: (app: DirectoryAppId, value?: string) => void;
   onBrowseDirectory: (app: DirectoryAppId) => Promise<void>;
   onResetDirectory: (app: DirectoryAppId) => Promise<void>;
+  /**
+   * The directory each tool actually uses and where it came from
+   * (`get_app_config_dirs`); shown under each input when given.
+   */
+  configDirInfo?: AppConfigDirInfo[];
+}
+
+/** "cc-switch setting" / "CODEX_HOME environment variable" / "Default". */
+export function configDirSourceLabel(
+  t: TFunction,
+  info: AppConfigDirInfo,
+): string {
+  switch (info.source.kind) {
+    case "override":
+      return t("settings.configDirSource.override", {
+        defaultValue: "cc-switch setting",
+      });
+    case "env":
+      return t("settings.configDirSource.env", {
+        defaultValue: "{{var}} environment variable",
+        var: info.source.var,
+      });
+    default:
+      return t("settings.configDirSource.default", {
+        defaultValue: "Default",
+      });
+  }
 }
 
 export function DirectorySettings({
@@ -79,6 +108,7 @@ export function DirectorySettings({
   onDirectoryChange,
   onBrowseDirectory,
   onResetDirectory,
+  configDirInfo,
 }: DirectorySettingsProps) {
   const { t } = useTranslation();
 
@@ -148,6 +178,7 @@ export function DirectorySettings({
             onChange={(val) => onDirectoryChange(app, val)}
             onBrowse={() => onBrowseDirectory(app)}
             onReset={() => onResetDirectory(app)}
+            info={configDirInfo?.find((entry) => entry.app === app)}
           />
         ))}
       </section>
@@ -164,6 +195,7 @@ interface DirectoryInputProps {
   onChange: (value?: string) => void;
   onBrowse: () => Promise<void>;
   onReset: () => Promise<void>;
+  info?: AppConfigDirInfo;
 }
 
 function DirectoryInput({
@@ -175,6 +207,7 @@ function DirectoryInput({
   onChange,
   onBrowse,
   onReset,
+  info,
 }: DirectoryInputProps) {
   const { t } = useTranslation();
 
@@ -214,6 +247,26 @@ function DirectoryInput({
           <Undo2 className="h-4 w-4" />
         </Button>
       </div>
+      {info ? (
+        <p
+          className="break-all text-[11px] text-muted-foreground"
+          data-testid={`config-dir-source-${info.app}`}
+        >
+          {t("settings.configDirSource.inUse", {
+            defaultValue: "In use: {{path}} ({{source}})",
+            path: info.path,
+            source: configDirSourceLabel(t, info),
+            interpolation: { escapeValue: false },
+          })}
+          {!info.exists ? (
+            <span className="ml-1 text-amber-600 dark:text-amber-400">
+              {t("settings.configDirSource.missing", {
+                defaultValue: "Directory does not exist yet",
+              })}
+            </span>
+          ) : null}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { lazy, Suspense, useMemo, useRef, useState } from "react";
+import { HelpLink } from "@/components/common/HelpLink";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -18,6 +19,7 @@ import {
   Wrench,
   type LucideIcon,
   Bot,
+  Waypoints,
 } from "lucide-react";
 import type { Provider } from "@/types";
 import { providersApi, settingsApi, type AppId } from "@/lib/api";
@@ -359,6 +361,7 @@ export default function ProvidersPage() {
             <Settings className="w-4 h-4" />
           </Button>
           <UpdateBadge onClick={() => navigate("settings", { tab: "about" })} />
+          <HelpLink topic="providers.switch" />
           {isCurrentAppTakeoverActive && (
             <Button
               variant="ghost"
@@ -382,10 +385,26 @@ export default function ProvidersPage() {
           >
             {app.capabilities.desktopRoute ? (
               <ClaudeDesktopRouteToggle />
+            ) : app.capabilities.proxy && settingsData?.enableLocalProxy ? (
+              <ProxyToggle activeApp={activeApp} />
             ) : (
-              app.capabilities.proxy &&
-              settingsData?.enableLocalProxy && (
-                <ProxyToggle activeApp={activeApp} />
+              app.capabilities.proxy && (
+                // PRODUCT-55: routing stays discoverable while its header
+                // toggle is off; this opens the routing settings.
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => navigate("settings", { tab: "proxy" })}
+                  title={t("proxy.discover.open", {
+                    defaultValue: "Local routing and failover",
+                  })}
+                  aria-label={t("proxy.discover.open", {
+                    defaultValue: "Local routing and failover",
+                  })}
+                  className="hover:bg-black/5 dark:hover:bg-white/5"
+                >
+                  <Waypoints className="w-4 h-4" />
+                </Button>
               )
             )}
             {app.capabilities.failover &&

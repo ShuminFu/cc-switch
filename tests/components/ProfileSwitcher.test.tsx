@@ -125,6 +125,25 @@ describe("ProfileSwitcher", () => {
     expect(work.textContent).not.toContain(en.profiles.noSnapshotForScope);
   });
 
+  it("shows the provider and MCP count a project will activate (FE-PROV-40)", async () => {
+    const withMcp = profile("work", "Work");
+    withMcp.payload.mcp = { ...emptySlots, claude: ["fs", "git"] } as never;
+    mockInvoke({
+      list_profiles: { ...listing(null), profiles: [withMcp] },
+      get_providers: {
+        p1: { id: "p1", name: "Relay One", settingsConfig: {} },
+      },
+    });
+    renderSwitcher(<ProfileSwitcher activeApp="claude" />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("combobox"));
+    await waitFor(() =>
+      expect(screen.getByTestId("profile-scope-preview").textContent).toBe(
+        "→ Relay One · 2 MCP",
+      ),
+    );
+  });
+
   it("creates a project from the current state with a trimmed name", async () => {
     const recorder = mockInvoke({
       list_profiles: listing(null),

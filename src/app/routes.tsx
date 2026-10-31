@@ -2,6 +2,7 @@ import { lazy, type ComponentType } from "react";
 import type { TFunction } from "i18next";
 import type { AppId } from "@/lib/api/types";
 import ProvidersPage from "@/routes/ProvidersPage";
+import type { HelpTopic } from "@/lib/helpLinks";
 import type { ViewId } from "./navigation";
 
 export interface RouteTitleContext {
@@ -17,6 +18,8 @@ export interface RouteDefinition {
    * with the `healthBanner` capability).
    */
   appHealthBanner?: boolean;
+  /** Manual page opened by the "?" next to the header title (DOCS-16). */
+  help?: HelpTopic;
 }
 
 /**
@@ -33,23 +36,28 @@ export const ROUTES: Record<ViewId, RouteDefinition> = {
     appHealthBanner: true,
   },
   settings: {
+    help: "settings",
     title: (t) => t("settings.title"),
     Component: lazy(() => import("@/routes/SettingsRoute")),
   },
   prompts: {
+    help: "prompts",
     title: (t, { featureApp }) =>
       t("prompts.title", { appName: t(`apps.${featureApp}`) }),
     Component: lazy(() => import("@/routes/PromptsRoute")),
   },
   skills: {
+    help: "skills",
     title: (t) => t("skills.title"),
     Component: lazy(() => import("@/routes/SkillsRoute")),
   },
   skillsDiscovery: {
+    help: "skills",
     title: (t) => t("skills.title"),
     Component: lazy(() => import("@/routes/SkillsDiscoveryRoute")),
   },
   mcp: {
+    help: "mcp",
     title: (t) => t("mcp.unifiedPanel.title"),
     Component: lazy(() => import("@/routes/McpRoute")),
   },
@@ -62,6 +70,7 @@ export const ROUTES: Record<ViewId, RouteDefinition> = {
     Component: lazy(() => import("@/routes/UniversalRoute")),
   },
   sessions: {
+    help: "sessions",
     title: (t) => t("sessionManager.title"),
     Component: lazy(() => import("@/routes/SessionsRoute")),
     appHealthBanner: true,

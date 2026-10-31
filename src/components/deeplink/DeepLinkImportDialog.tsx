@@ -21,6 +21,7 @@ import { McpConfirmation } from "./McpConfirmation";
 import { SkillConfirmation } from "./SkillConfirmation";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { decodeBase64Lenient, getEndpointHost } from "./safety";
+import { decodeBase64Utf8 } from "@/lib/utils/base64";
 import {
   deeplinkV2Api,
   isBundle,
@@ -436,22 +437,10 @@ export function DeepLinkImportDialog() {
     raw: Record<string, unknown>;
   }
 
-  // Helper to decode base64 with UTF-8 support
-  const b64ToUtf8 = (str: string): string => {
-    try {
-      const binString = atob(str);
-      const bytes = Uint8Array.from(binString, (m) => m.codePointAt(0) || 0);
-      return new TextDecoder().decode(bytes);
-    } catch (e) {
-      console.error("Failed to decode base64:", e);
-      return atob(str);
-    }
-  };
-
   const parsedConfig = useMemo((): ParsedConfig | null => {
     if (!request?.config) return null;
     try {
-      const decoded = b64ToUtf8(request.config);
+      const decoded = decodeBase64Utf8(request.config);
       const parsed = JSON.parse(decoded) as Record<string, unknown>;
 
       if (request.app === "claude") {

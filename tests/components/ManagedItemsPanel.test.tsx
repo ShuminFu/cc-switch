@@ -153,6 +153,38 @@ describe("ManagedItemsPanel adapters", () => {
     expect(api.callsTo("delete_mcp_server")[0].args).toEqual({ id: "fs" });
   });
 
+  it("MCP: shows a warning badge per app whose config dir is missing and refreshes it after a toggle (CFG-46)", async () => {
+    let skips: { app: string; missingDir: string }[] = [];
+    const api = mockInvoke({
+      get_mcp_servers: {
+        fs: {
+          id: "fs",
+          name: "Filesystem",
+          server: { type: "stdio", command: "npx" },
+          apps: { ...appsOff, claude: true },
+        },
+      },
+      get_mcp_sync_skips: () => skips,
+      toggle_mcp_app: () => {
+        skips = [{ app: "gemini", missingDir: "/home/mock/.gemini" }];
+        return skips;
+      },
+    });
+    renderWithQuery(<UnifiedMcpPanel onOpenChange={vi.fn()} />);
+
+    await screen.findByText("Filesystem");
+    expect(screen.queryByTestId("mcp-sync-skips")).toBeNull();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Gemini" })[0]);
+    expect(await screen.findByText("Gemini: not synced")).toBeInTheDocument();
+    expect(
+      screen.getByTitle(
+        /config directory \/home\/mock\/\.gemini does not exist/,
+      ),
+    ).toBeInTheDocument();
+    expect(api.callsTo("get_mcp_sync_skips").length).toBeGreaterThanOrEqual(2);
+  });
+
   it("Skills: toggles an app and uninstalls after confirm", async () => {
     const api = mockInvoke({
       get_installed_skills: [

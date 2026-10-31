@@ -41,6 +41,7 @@ import type {
   SkillsShDiscoverableSkill,
 } from "@/lib/api/skills";
 import { formatSkillError } from "@/lib/errors/skillErrorParser";
+import { showError } from "@/lib/errors/showError";
 
 export type SkillsPageSource = "repos" | "skillssh";
 
@@ -295,9 +296,7 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
           { closeButton: true },
         );
       } catch (error) {
-        toast.error(t("common.error"), {
-          description: String(error),
-        });
+        showError({ title: t("common.error"), error });
       }
     };
 
@@ -308,9 +307,7 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
           closeButton: true,
         });
       } catch (error) {
-        toast.error(t("common.error"), {
-          description: String(error),
-        });
+        showError({ title: t("common.error"), error });
       }
     };
 

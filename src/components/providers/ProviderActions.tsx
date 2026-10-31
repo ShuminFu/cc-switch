@@ -5,6 +5,7 @@ import {
   Check,
   Copy,
   Edit,
+  FileDiff,
   Loader2,
   Minus,
   Play,
@@ -43,6 +44,8 @@ interface ProviderActionsProps {
   onOpenTerminal?: () => void;
   /** Copy a ccswitch:// share link (without the API key). */
   onShare?: () => void;
+  /** Open the "Preview changes" diff of what a switch would write (CFG-22). */
+  onPreview?: () => void;
   isAutoFailoverEnabled?: boolean;
   isInFailoverQueue?: boolean;
   onToggleFailover?: (enabled: boolean) => void;
@@ -86,6 +89,7 @@ export function ProviderActions({
   onDisableOmo,
   onOpenTerminal,
   onShare,
+  onPreview,
   isAutoFailoverEnabled = false,
   isInFailoverQueue = false,
   onToggleFailover,
@@ -380,6 +384,23 @@ export function ProviderActions({
 
         {appId && providerId && (
           <CopyEnvProfileMenu appId={appId} providerId={providerId} iconOnly />
+        )}
+
+        {onPreview && (
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onPreview}
+            title={t("provider.preview.title", {
+              defaultValue: "Preview changes",
+            })}
+            aria-label={t("provider.preview.title", {
+              defaultValue: "Preview changes",
+            })}
+            className={iconButtonClass}
+          >
+            <FileDiff className="h-4 w-4" />
+          </Button>
         )}
 
         {onShare && (

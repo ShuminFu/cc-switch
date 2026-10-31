@@ -261,6 +261,46 @@ describe("SessionManagerPage", () => {
     expect(screen.getByText("Archived")).toBeInTheDocument();
   });
 
+  it("edits a session's tags through set_session_annotation (SESS-18)", async () => {
+    const saved: unknown[] = [];
+    const stored: Record<string, unknown> = {};
+    server.use(
+      http.post("http://tauri.local/get_session_annotations", () =>
+        HttpResponse.json(stored as never),
+      ),
+      http.post(
+        "http://tauri.local/set_session_annotation",
+        async ({ request }) => {
+          const body = (await request.json()) as {
+            sessionKey: string;
+            annotation: unknown;
+          };
+          saved.push(body);
+          stored[body.sessionKey] = body.annotation;
+          return HttpResponse.json(body.annotation as never);
+        },
+      ),
+    );
+    renderPage();
+
+    await screen.findAllByText("Alpha Session");
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit tags" })[0]);
+    const input = await screen.findByLabelText("Tags, separated by commas");
+    fireEvent.change(input, { target: { value: "#bugfix, client-a, Bugfix" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]).toEqual({
+      sessionKey: "codex:codex-session-1:/mock/codex/session-1.jsonl",
+      annotation: {
+        pinned: false,
+        archived: false,
+        tags: ["bugfix", "client-a"],
+      },
+    });
+    expect(await screen.findByText("#client-a")).toBeInTheDocument();
+  });
+
   it("mounts a large session list incrementally (PERF-46)", async () => {
     const many: SessionMeta[] = Array.from({ length: 250 }, (_, i) => ({
       providerId: "codex",

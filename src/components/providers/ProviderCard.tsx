@@ -9,6 +9,10 @@ import type { Provider } from "@/types";
 import type { AppId } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ProviderActions } from "@/components/providers/ProviderActions";
+import {
+  LiveWritePreviewDialog,
+  supportsLivePreview,
+} from "@/components/providers/LiveWritePreviewDialog";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import UsageFooter from "@/components/UsageFooter";
 import SubscriptionQuotaFooter from "@/components/SubscriptionQuotaFooter";
@@ -233,6 +237,11 @@ function ProviderCardImpl({
       setIsExpanded(true);
     }
   }, [hasMultiplePlans]);
+
+  // "Preview changes" before a switch: only apps with a live-write planner,
+  // and only when the switch would actually write (not the current one).
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const canPreview = supportsLivePreview(appId) && !isCurrent;
 
   // Share links go through the deep-link importer, which creates Claude,
   // Codex and Gemini providers (FE-PROV-55).
@@ -618,6 +627,7 @@ function ProviderCardImpl({
                 onOpenTerminal ? () => onOpenTerminal(provider) : undefined
               }
               onShare={canShare ? handleShare : undefined}
+              onPreview={canPreview ? () => setPreviewOpen(true) : undefined}
               isAutoFailoverEnabled={isAutoFailoverEnabled}
               isInFailoverQueue={isInFailoverQueue}
               onToggleFailover={onToggleFailover}
@@ -628,6 +638,18 @@ function ProviderCardImpl({
           </div>
         </div>
       </div>
+
+      {canPreview && previewOpen && (
+        <LiveWritePreviewDialog
+          open={previewOpen}
+          appId={appId}
+          providerId={provider.id}
+          providerName={provider.name}
+          onOpenChange={setPreviewOpen}
+          onConfirm={() => onSwitch(provider)}
+          confirmLabel={t("provider.enable")}
+        />
+      )}
 
       {isExpanded && hasMultiplePlans && (
         <div className="mt-4 pt-4 border-t border-border-default">

@@ -42,6 +42,8 @@ export interface ManagedItemsPanelProps<T> {
   onToggleApp?: (item: T, app: AppId, enabled: boolean) => void;
   /** Extra controls rendered next to the count bar. */
   toolbar?: React.ReactNode;
+  /** Notices rendered between the count bar and the list (e.g. sync warnings). */
+  banner?: React.ReactNode;
 
   /** Row slots. */
   renderLeading?: (item: T) => React.ReactNode;
@@ -88,6 +90,7 @@ export function ManagedItemsPanel<T>({
   getApps,
   onToggleApp,
   toolbar,
+  banner,
   renderLeading,
   renderPrimary,
   renderSecondary,
@@ -133,6 +136,8 @@ export function ManagedItemsPanel<T>({
       ) : (
         countBar
       )}
+
+      {banner}
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden pb-24">
         {isLoading ? (

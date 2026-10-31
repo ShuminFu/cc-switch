@@ -7,6 +7,8 @@ import type {
   ProxyTakeoverStatus,
   GlobalProxyConfig,
   AppProxyConfig,
+  ProxyRequestRecord,
+  RoutingConfig,
 } from "@/types/proxy";
 
 export const proxyApi = {
@@ -130,5 +132,30 @@ export const proxyApi = {
   // 设置计费模式来源
   async setPricingModelSource(appType: string, value: string): Promise<void> {
     return call(commands.setPricingModelSource(appType, value));
+  },
+
+  // ========== Routing (PROXY-19) ==========
+
+  async getRoutingConfig(appType: string): Promise<RoutingConfig> {
+    return invoke("get_proxy_routing_config", { appType });
+  },
+
+  async setRoutingConfig(
+    appType: string,
+    config: RoutingConfig,
+  ): Promise<void> {
+    return invoke("set_proxy_routing_config", { appType, config });
+  },
+
+  // ========== Flight recorder (PROXY-21) ==========
+
+  /** The proxy's last requests (in memory, newest first, no bodies). */
+  async listRecentRequests(): Promise<ProxyRequestRecord[]> {
+    return invoke("list_recent_proxy_requests");
+  },
+
+  /** The same records as JSON Lines, oldest first, for bug reports. */
+  async exportRecentRequests(): Promise<string> {
+    return invoke("export_recent_proxy_requests");
   },
 };

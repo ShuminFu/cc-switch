@@ -190,66 +190,6 @@ requires_openai_auth = true`;
     };
   }, [geminiEnabled, baseUrl, apiKey, models.gemini]);
 
-  // 提交表单
-  const handleSubmit = useCallback(async () => {
-    if (!name.trim() || !baseUrl.trim() || !apiKey.trim()) {
-      return;
-    }
-
-    const provider: UniversalProvider = editingProvider
-      ? {
-          ...editingProvider,
-          name: name.trim(),
-          baseUrl: baseUrl.trim(),
-          apiKey: apiKey.trim(),
-          websiteUrl: websiteUrl.trim() || undefined,
-          notes: notes.trim() || undefined,
-          apps: {
-            claude: claudeEnabled,
-            codex: codexEnabled,
-            gemini: geminiEnabled,
-          },
-          models,
-        }
-      : createUniversalProviderFromPreset(
-          selectedPreset || universalProviderPresets[0],
-          crypto.randomUUID(),
-          baseUrl.trim(),
-          apiKey.trim(),
-          name.trim(),
-        );
-
-    // 如果是新建，更新应用启用状态和模型
-    if (!editingProvider) {
-      provider.apps = {
-        claude: claudeEnabled,
-        codex: codexEnabled,
-        gemini: geminiEnabled,
-      };
-      provider.models = models;
-      provider.websiteUrl = websiteUrl.trim() || undefined;
-      provider.notes = notes.trim() || undefined;
-    }
-
-    // Wait for the save so a failed upsert keeps the entered values.
-    if ((await onSave(provider)) === false) return;
-    onClose();
-  }, [
-    editingProvider,
-    name,
-    baseUrl,
-    apiKey,
-    websiteUrl,
-    notes,
-    claudeEnabled,
-    codexEnabled,
-    geminiEnabled,
-    models,
-    selectedPreset,
-    onSave,
-    onClose,
-  ]);
-
   // 构建 provider 对象的辅助函数
   const buildProvider = useCallback((): UniversalProvider | null => {
     if (!name.trim() || !baseUrl.trim() || !apiKey.trim()) {
@@ -305,6 +245,16 @@ requires_openai_auth = true`;
     models,
     selectedPreset,
   ]);
+
+  // 提交表单 (FE-PROV-37: the one builder above produces the provider)
+  const handleSubmit = useCallback(async () => {
+    const provider = buildProvider();
+    if (!provider) return;
+
+    // Wait for the save so a failed upsert keeps the entered values.
+    if ((await onSave(provider)) === false) return;
+    onClose();
+  }, [buildProvider, onSave, onClose]);
 
   // 打开保存并同步确认弹窗
   const handleSaveAndSyncClick = useCallback(() => {

@@ -22,6 +22,7 @@ import {
   DRAG_REGION_STYLE,
 } from "@/lib/platform";
 import { Button } from "@/components/ui/button";
+import { HelpLink } from "@/components/common/HelpLink";
 import { DeepLinkImportDialog } from "@/components/DeepLinkImportDialog";
 import { DeepLinkActionHandler } from "@/components/deeplink-actions/DeepLinkActionHandler";
 import { FirstRunWizard } from "@/components/onboarding";
@@ -191,6 +192,7 @@ function AppShell() {
                   <h1 className="text-lg font-semibold">
                     {route.title?.(t, { featureApp })}
                   </h1>
+                  {route.help && <HelpLink topic={route.help} />}
                 </div>
               )}
               {/* Filled by the root page via <PageHeaderStart>. */}

@@ -38,18 +38,18 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
     }),
   );
 
-  const handleDragEnd = useCallback(
-    async (event: DragEndEvent) => {
-      const { active, over } = event;
-      if (!over || active.id === over.id) {
+  /** Move `activeId` to the position of `overId` and persist the order. */
+  const reorder = useCallback(
+    async (activeId: string, overId: string) => {
+      if (activeId === overId) {
         return;
       }
 
       const oldIndex = sortedProviders.findIndex(
-        (provider) => provider.id === active.id,
+        (provider) => provider.id === activeId,
       );
       const newIndex = sortedProviders.findIndex(
-        (provider) => provider.id === over.id,
+        (provider) => provider.id === overId,
       );
 
       if (oldIndex === -1 || newIndex === -1) {
@@ -113,9 +113,20 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
     [sortedProviders, appId, queryClient, t],
   );
 
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over) return;
+      await reorder(String(active.id), String(over.id));
+    },
+    [reorder],
+  );
+
   return {
     sortedProviders,
     sensors,
     handleDragEnd,
+    /** Keyboard alternative to dragging (PRODUCT-28): Alt+Up / Alt+Down. */
+    reorder,
   };
 }

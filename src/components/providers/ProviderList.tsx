@@ -15,6 +15,7 @@ import {
   useState,
   type CSSProperties,
   type ReactNode,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -40,6 +41,11 @@ import { useStableCallback } from "@/hooks/useStableCallback";
 import { useShortcut } from "@/lib/shortcuts";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
+import { ProviderHealthPanel } from "@/components/providers/ProviderHealthPanel";
+import {
+  ImportCandidatesDialog,
+  supportsImportPicker,
+} from "@/components/providers/ImportCandidatesDialog";
 import {
   useAutoFailoverEnabled,
   useFailoverQueue,
@@ -121,7 +127,7 @@ export function ProviderList({
   const stableOnOpenTerminal = useStableCallback(onOpenTerminal);
   const stableOnSetAsDefault = useStableCallback(onSetAsDefault);
   const { checkProvider, isChecking } = useStreamCheck(appId);
-  const { sortedProviders, sensors, handleDragEnd } = useDragSort(
+  const { sortedProviders, sensors, handleDragEnd, reorder } = useDragSort(
     providers,
     appId,
   );
@@ -246,6 +252,9 @@ export function ProviderList({
   );
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [isImportPickerOpen, setIsImportPickerOpen] = useState(false);
+  const [isHealthOpen, setIsHealthOpen] = useState(false);
+  const canPickImport = supportsImportPicker(appId);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { data: claudeDesktopStatus } = useQuery({
@@ -504,13 +513,28 @@ export function ProviderList({
     );
   }
 
+  const importPicker = canPickImport && isImportPickerOpen && (
+    <ImportCandidatesDialog
+      open={isImportPickerOpen}
+      appId={appId}
+      existingIds={Object.keys(providers)}
+      onOpenChange={setIsImportPickerOpen}
+    />
+  );
+
   if (sortedProviders.length === 0) {
     return (
-      <ProviderEmptyState
-        appId={appId}
-        onCreate={onCreate}
-        onImport={() => importMutation.mutate()}
-      />
+      <>
+        <ProviderEmptyState
+          appId={appId}
+          onCreate={onCreate}
+          onImport={() => importMutation.mutate()}
+          onPickImport={
+            canPickImport ? () => setIsImportPickerOpen(true) : undefined
+          }
+        />
+        {importPicker}
+      </>
     );
   }
 
@@ -572,6 +596,24 @@ export function ProviderList({
     );
   };
 
+  // PRODUCT-28: Alt+Up / Alt+Down moves the focused card among the visible
+  // ones, the keyboard alternative to drag-and-drop.
+  const handleReorderKey = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown"))
+      return;
+    const card = (event.target as HTMLElement).closest<HTMLElement>(
+      "[data-provider-id]",
+    );
+    const id = card?.dataset.providerId;
+    if (!id) return;
+    const index = filteredProviders.findIndex((provider) => provider.id === id);
+    const target =
+      filteredProviders[index + (event.key === "ArrowUp" ? -1 : 1)];
+    if (index === -1 || !target) return;
+    event.preventDefault();
+    void reorder(id, target.id);
+  };
+
   const renderProviderList = () => (
     <DndContext
       sensors={sensors}
@@ -585,6 +627,7 @@ export function ProviderList({
         {shouldVirtualize ? (
           <div
             ref={listRef}
+            onKeyDown={handleReorderKey}
             data-testid="provider-list-virtual"
             style={{
               height: virtualizer.getTotalSize(),
@@ -610,7 +653,7 @@ export function ProviderList({
             })}
           </div>
         ) : (
-          <div ref={listRef} className="space-y-3">
+          <div ref={listRef} className="space-y-3" onKeyDown={handleReorderKey}>
             {filteredProviders.map(renderCard)}
           </div>
         )}
@@ -753,6 +796,38 @@ export function ProviderList({
         </div>
       ) : (
         renderProviderList()
+      )}
+
+      <div className="flex flex-wrap justify-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-xs text-muted-foreground"
+          onClick={() => setIsHealthOpen(true)}
+        >
+          {t("provider.health.open", { defaultValue: "Provider health…" })}
+        </Button>
+        {canPickImport && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-muted-foreground"
+            onClick={() => setIsImportPickerOpen(true)}
+          >
+            {t("provider.importPicker.open", {
+              defaultValue: "Choose providers from the live config…",
+            })}
+          </Button>
+        )}
+      </div>
+      {importPicker}
+      {isHealthOpen && (
+        <ProviderHealthPanel
+          open={isHealthOpen}
+          appId={appId}
+          providers={sortedProviders}
+          onOpenChange={setIsHealthOpen}
+        />
       )}
     </div>
   );
@@ -916,7 +991,7 @@ const SortableProviderCard = memo(function SortableProviderCard({
   );
 
   return (
-    <div ref={setNodeRef} style={style}>
+    <div ref={setNodeRef} style={style} data-provider-id={provider.id}>
       <ProviderCard
         provider={provider}
         isCurrent={isCurrent}

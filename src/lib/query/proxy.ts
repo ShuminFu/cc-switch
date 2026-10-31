@@ -1,5 +1,10 @@
 import { useSyncExternalStore } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { proxyApi } from "@/lib/api/proxy";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -8,6 +13,7 @@ import type {
   GlobalProxyConfig,
   AppProxyConfig,
   ProxyStatus,
+  RoutingConfig,
 } from "@/types/proxy";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { getAppLabel, isAnyTakeoverActive } from "@/config/proxyApps";
@@ -18,6 +24,35 @@ import { queryKeys } from "./keys";
 // This module is the single proxy query layer (FE-ARCH-05). `useProxyStatus`
 // below is the only `get_proxy_status` poller (key `queryKeys.proxy.status`,
 // polled only while the server runs); `@/hooks/useProxyStatus` re-exports it.
+
+type ProxyOverview = Awaited<ReturnType<typeof proxyApi.getProxyOverview>>;
+
+const inflightOverview = new WeakMap<QueryClient, Promise<ProxyOverview>>();
+
+/**
+ * One `get_proxy_overview` round trip for both proxy caches: the status and
+ * takeover queries share it, concurrent fetches reuse the call in flight, and
+ * each result refreshes both keys so the two always describe the same moment.
+ */
+export function fetchProxyOverview(
+  queryClient: QueryClient,
+): Promise<ProxyOverview> {
+  const pending = inflightOverview.get(queryClient);
+  if (pending) return pending;
+  const request = proxyApi
+    .getProxyOverview()
+    .then((overview) => {
+      queryClient.setQueryData(queryKeys.proxy.status, overview.status);
+      queryClient.setQueryData(
+        queryKeys.proxy.takeoverStatus,
+        overview.takeover,
+      );
+      return overview;
+    })
+    .finally(() => inflightOverview.delete(queryClient));
+  inflightOverview.set(queryClient, request);
+  return request;
+}
 
 /** Fallback refresh for takeover state changed outside this window. */
 const TAKEOVER_FALLBACK_REFETCH_MS = 30_000;
@@ -60,7 +95,7 @@ export function useProxyTakeoverStatus() {
 
   return useQuery({
     queryKey: queryKeys.proxy.takeoverStatus,
-    queryFn: () => proxyApi.getProxyTakeoverStatus(),
+    queryFn: async () => (await fetchProxyOverview(queryClient)).takeover,
     // Opt out of the global staleTime: the tray can change this at any time.
     staleTime: 0,
     refetchInterval: TAKEOVER_FALLBACK_REFETCH_MS,
@@ -79,7 +114,7 @@ export function useProxyStatus() {
   // 查询状态（自动轮询）
   const { data: status, isLoading } = useQuery({
     queryKey: queryKeys.proxy.status,
-    queryFn: () => proxyApi.getProxyStatus(),
+    queryFn: async () => (await fetchProxyOverview(queryClient)).status,
     // Always refresh on focus/mount (global staleTime does not apply).
     staleTime: 0,
     // 仅在服务运行时轮询
@@ -397,5 +432,42 @@ export function useUpdateAppProxyConfig() {
         }),
       );
     },
+  });
+}
+
+// ========== Routing (PROXY-19) and flight recorder (PROXY-21) ==========
+
+/** One app's routing settings (strategy, sticky sessions, concurrency). */
+export function useRoutingConfig(appType: string) {
+  return useQuery({
+    queryKey: queryKeys.proxy.routing(appType),
+    queryFn: () => proxyApi.getRoutingConfig(appType),
+    enabled: !!appType,
+  });
+}
+
+export function useSetRoutingConfig(appType: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (config: RoutingConfig) =>
+      proxyApi.setRoutingConfig(appType, config),
+    onSuccess: (_, config) => {
+      queryClient.setQueryData(queryKeys.proxy.routing(appType), config);
+    },
+  });
+}
+
+/** Refresh cadence of the flight recorder while the proxy runs. */
+const FLIGHT_RECORDER_REFETCH_MS = 5000;
+
+/** The proxy's last requests with every provider attempt (in memory). */
+export function useRecentProxyRequests(running: boolean, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.proxy.flightRecorder,
+    queryFn: () => proxyApi.listRecentRequests(),
+    enabled,
+    staleTime: 0,
+    refetchInterval: running ? FLIGHT_RECORDER_REFETCH_MS : false,
+    refetchIntervalInBackground: false,
   });
 }
