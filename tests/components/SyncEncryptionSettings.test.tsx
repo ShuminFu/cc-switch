@@ -1,16 +1,12 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { SyncEncryptionSettings } from "@/components/settings/SyncEncryptionSettings";
+import { mockInvoke } from "../msw/invokeRecorder";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-const api = vi.hoisted(() => ({
-  getStatus: vi.fn(),
-  setPassphrase: vi.fn(),
-  disable: vi.fn(),
-}));
-vi.mock("@/lib/api/syncEncryption", () => ({ syncEncryptionApi: api }));
+// TEST-12: IPC-level mocks; the real syncEncryptionApi wrapper runs.
 
 const off = {
   enabled: false,
@@ -32,15 +28,11 @@ function renderIt() {
 }
 
 describe("SyncEncryptionSettings", () => {
-  beforeEach(() => {
-    api.getStatus.mockReset();
-    api.setPassphrase.mockReset();
-    api.disable.mockReset();
-  });
-
   it("enables encryption only with a long enough, confirmed passphrase", async () => {
-    api.getStatus.mockResolvedValue(off);
-    api.setPassphrase.mockResolvedValue(on);
+    const api = mockInvoke({
+      sync_encryption_get_status: off,
+      sync_encryption_set_passphrase: on,
+    });
     renderIt();
 
     fireEvent.click(await screen.findByRole("switch"));
@@ -60,7 +52,12 @@ describe("SyncEncryptionSettings", () => {
     fireEvent.click(save);
 
     await waitFor(() =>
-      expect(api.setPassphrase).toHaveBeenCalledWith("long passphrase"),
+      expect(api.callsTo("sync_encryption_set_passphrase")).toEqual([
+        {
+          command: "sync_encryption_set_passphrase",
+          args: { passphrase: "long passphrase" },
+        },
+      ]),
     );
     expect(
       await screen.findByText("Passphrase stored in the system keychain."),
@@ -68,12 +65,16 @@ describe("SyncEncryptionSettings", () => {
   });
 
   it("turning the switch off disables encryption", async () => {
-    api.getStatus.mockResolvedValue(on);
-    api.disable.mockResolvedValue(off);
+    const api = mockInvoke({
+      sync_encryption_get_status: on,
+      sync_encryption_disable: off,
+    });
     renderIt();
 
     await screen.findByText("Passphrase stored in the system keychain.");
     fireEvent.click(screen.getByRole("switch"));
-    await waitFor(() => expect(api.disable).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(api.callsTo("sync_encryption_disable")).toHaveLength(1),
+    );
   });
 });

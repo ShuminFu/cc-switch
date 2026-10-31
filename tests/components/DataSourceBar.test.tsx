@@ -2,18 +2,15 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DataSourceBar } from "@/components/usage/DataSourceBar";
+import { mockInvoke } from "../msw/invokeRecorder";
 
-const usageApiMock = vi.hoisted(() => ({
-  getDataSourceBreakdown: vi.fn(),
-  syncSessionUsage: vi.fn(),
-}));
+// TEST-12: IPC-level mocks; the real usageApi wrapper runs.
 const toast = vi.hoisted(() => ({
   success: vi.fn(),
   info: vi.fn(),
   error: vi.fn(),
 }));
 
-vi.mock("@/lib/api/usage", () => ({ usageApi: usageApiMock }));
 vi.mock("sonner", () => ({ toast }));
 const renderBar = () => {
   const client = new QueryClient({
@@ -30,20 +27,21 @@ const renderBar = () => {
 
 describe("DataSourceBar", () => {
   beforeEach(() => {
-    Object.values(usageApiMock).forEach((fn) => fn.mockReset());
     Object.values(toast).forEach((fn) => fn.mockReset());
   });
 
   it("lists data sources and imports session logs on demand", async () => {
-    usageApiMock.getDataSourceBreakdown.mockResolvedValue([
-      { dataSource: "proxy", requestCount: 12, totalCostUsd: "1" },
-      { dataSource: "session_log", requestCount: 3, totalCostUsd: "0.5" },
-    ]);
-    usageApiMock.syncSessionUsage.mockResolvedValue({
-      imported: 4,
-      skipped: 0,
-      filesScanned: 2,
-      errors: [],
+    const api = mockInvoke({
+      get_usage_data_sources: [
+        { dataSource: "proxy", requestCount: 12, totalCostUsd: "1" },
+        { dataSource: "session_log", requestCount: 3, totalCostUsd: "0.5" },
+      ],
+      sync_session_usage: {
+        imported: 4,
+        skipped: 0,
+        filesScanned: 2,
+        errors: [],
+      },
     });
     const { invalidate } = renderBar();
 
@@ -54,17 +52,17 @@ describe("DataSourceBar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Sync/ }));
     await waitFor(() =>
-      expect(usageApiMock.syncSessionUsage).toHaveBeenCalled(),
+      expect(api.callsTo("sync_session_usage")).toHaveLength(1),
     );
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["usage"] });
   });
 
   it("renders nothing when there is no usage data yet", async () => {
-    usageApiMock.getDataSourceBreakdown.mockResolvedValue([]);
+    const api = mockInvoke({ get_usage_data_sources: [] });
     renderBar();
     await waitFor(() =>
-      expect(usageApiMock.getDataSourceBreakdown).toHaveBeenCalled(),
+      expect(api.callsTo("get_usage_data_sources")).toHaveLength(1),
     );
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
