@@ -37,12 +37,12 @@ export const needsEndpointAndKey = (category: ProviderCategory | undefined) =>
 
 export const endpointRequiredIssue = (t: TFunction) =>
   t("providerForm.endpointRequired", {
-    defaultValue: "非官方供应商请填写 API 端点",
+    defaultValue: "API endpoint is required for non-official providers",
   });
 
 export const apiKeyRequiredIssue = (t: TFunction) =>
   t("providerForm.apiKeyRequired", {
-    defaultValue: "非官方供应商请填写 API Key",
+    defaultValue: "API Key is required for non-official providers",
   });
 
 /** API-key link / partner info of the selected preset for this app. */
@@ -146,7 +146,7 @@ export function useLocalProxyOverridesState(ctx: ProviderFormAdapterContext) {
       const result = build();
       if (!result.error) return null;
       return t("providerForm.localProxyRequestOverridesInvalid", {
-        defaultValue: `本地代理请求覆盖格式错误：${result.error}`,
+        defaultValue: "Local proxy request overrides format error: {{error}}",
         error: result.error,
       });
     },

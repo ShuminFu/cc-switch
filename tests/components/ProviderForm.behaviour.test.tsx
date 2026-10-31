@@ -209,7 +209,7 @@ describe("soft validation is not short-circuited by native validation (FE-PROV-0
 
     fireEvent.submit(formElement);
     expect(
-      await screen.findByRole("button", { name: "仍要保存" }),
+      await screen.findByRole("button", { name: "Save anyway" }),
     ).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });

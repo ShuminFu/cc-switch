@@ -43,7 +43,8 @@ describe("ProviderActions", () => {
   it("disables Duplicate for read-only (Hermes-managed) providers (FE-PROV-42)", () => {
     const props = renderActions({ appId: "hermes", isReadOnly: true });
 
-    const hint = "由 Hermes 管理，请在 Hermes Web UI 中编辑";
+    const hint =
+      "Defined in Hermes' providers: dict. Edit or remove it via Hermes Web UI.";
     // Edit, Duplicate and Delete all carry the managed hint when read-only.
     const buttons = screen.getAllByTitle(hint);
     expect(buttons).toHaveLength(3);

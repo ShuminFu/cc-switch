@@ -603,7 +603,7 @@ export function OpenCodeFormFields({
       <div className="space-y-2">
         <FormLabel htmlFor="opencode-npm">
           {t("opencode.npmPackage", {
-            defaultValue: "接口格式",
+            defaultValue: "API Format",
           })}
         </FormLabel>
         <Select value={npm} onValueChange={onNpmChange}>
@@ -899,10 +899,10 @@ export function OpenCodeFormFields({
             <div className="flex items-center gap-2 text-xs text-muted-foreground px-1 mb-1">
               <span className="w-9" />
               <span className="flex-1">
-                {t("opencode.modelId", { defaultValue: "模型 ID" })}
+                {t("opencode.modelId", { defaultValue: "Model ID" })}
               </span>
               <span className="flex-1">
-                {t("opencode.modelName", { defaultValue: "显示名称" })}
+                {t("opencode.modelName", { defaultValue: "Display Name" })}
               </span>
               <span className="w-9" />
             </div>
@@ -1031,7 +1031,7 @@ export function OpenCodeFormFields({
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-muted-foreground">
                           {t("opencode.modelExtraFields", {
-                            defaultValue: "模型属性",
+                            defaultValue: "Model Properties",
                           })}
                         </span>
                         <Button
@@ -1048,7 +1048,7 @@ export function OpenCodeFormFields({
                         <p className="text-xs text-muted-foreground py-1">
                           {t("opencode.noModelExtraFields", {
                             defaultValue:
-                              "模型属性 (variants, cost 等)，点击 + 添加",
+                              "Model properties (variants, cost, etc.), click + to add",
                           })}
                         </p>
                       ) : (
@@ -1112,7 +1112,7 @@ export function OpenCodeFormFields({
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-muted-foreground">
                           {t("opencode.sdkOptions", {
-                            defaultValue: "SDK 选项",
+                            defaultValue: "SDK Options",
                           })}
                         </span>
                         <Button
@@ -1128,7 +1128,7 @@ export function OpenCodeFormFields({
                       {Object.keys(model.options || {}).length === 0 ? (
                         <p className="text-xs text-muted-foreground py-1">
                           {t("opencode.noModelOptions", {
-                            defaultValue: "模型选项，点击 + 添加",
+                            defaultValue: "Model options, click + to add",
                           })}
                         </p>
                       ) : (

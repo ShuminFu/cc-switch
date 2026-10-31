@@ -64,7 +64,7 @@ export function useProviderActions(
         const detail =
           extractErrorMessage(error) ||
           t("notifications.syncClaudePluginFailed", {
-            defaultValue: "同步 Claude 插件失败",
+            defaultValue: "Sync Claude plugin failed",
           });
         toast.error(detail, { duration: 4200 });
       }
@@ -120,7 +120,7 @@ export function useProviderActions(
             if (modelsRegistered) {
               toast.success(
                 t("notifications.openclawModelsRegistered", {
-                  defaultValue: "模型已注册到 /model 列表",
+                  defaultValue: "Models have been registered to /model list",
                 }),
                 { closeButton: true },
               );
@@ -206,31 +206,31 @@ export function useProviderActions(
       if (!isProxyRunning && provider.category !== "official") {
         if (isCopilotProvider) {
           proxyRequiredReason = t("notifications.proxyReasonCopilot", {
-            defaultValue: "使用 GitHub Copilot 作为 Claude 供应商",
+            defaultValue: "uses GitHub Copilot as a Claude provider",
           });
         } else if (
           provider.meta?.apiFormat === "openai_chat" &&
           activeApp === "claude"
         ) {
           proxyRequiredReason = t("notifications.proxyReasonOpenAIChat", {
-            defaultValue: "使用 OpenAI Chat 接口格式",
+            defaultValue: "uses OpenAI Chat API format",
           });
         } else if (
           provider.meta?.apiFormat === "openai_responses" &&
           activeApp === "claude"
         ) {
           proxyRequiredReason = t("notifications.proxyReasonOpenAIResponses", {
-            defaultValue: "使用 OpenAI Responses 接口格式",
+            defaultValue: "uses OpenAI Responses API format",
           });
         } else if (isCodexChatFormat) {
           proxyRequiredReason = t("notifications.proxyReasonOpenAIChat", {
-            defaultValue: "使用 OpenAI Chat 接口格式",
+            defaultValue: "uses OpenAI Chat API format",
           });
         } else if (isCodexAnthropicFormat) {
           proxyRequiredReason = t(
             "notifications.proxyReasonAnthropicMessages",
             {
-              defaultValue: "使用 Anthropic Messages 接口格式",
+              defaultValue: "uses Anthropic Messages API format",
             },
           );
         } else if (
@@ -247,7 +247,7 @@ export function useProviderActions(
             activeApp === "grokbuild")
         ) {
           proxyRequiredReason = t("notifications.proxyReasonFullUrl", {
-            defaultValue: "开启了完整 URL 连接模式",
+            defaultValue: "has full URL connection mode enabled",
           });
         }
       }
@@ -257,7 +257,7 @@ export function useProviderActions(
           t("notifications.proxyRequiredForSwitch", {
             reason: proxyRequiredReason,
             defaultValue:
-              "此供应商{{reason}}，需要代理服务才能正常使用，请先启动代理",
+              "This provider {{reason}}, requires the routing service to work properly. Start routing first.",
           }),
         );
       }
@@ -276,7 +276,7 @@ export function useProviderActions(
         toast.error(
           t("notifications.officialBlockedByProxy", {
             defaultValue:
-              "代理接管模式下不能切换到官方供应商，使用代理访问官方 API 可能导致账号被封禁",
+              "Cannot switch to official provider while local routing is active. Using routing with official APIs may cause account bans.",
           }),
           { duration: 6000 },
         );
@@ -292,7 +292,7 @@ export function useProviderActions(
           toast.warning(
             t("notifications.backfillWarning", {
               defaultValue:
-                "切换成功，但旧供应商配置回填失败，您手动修改的配置可能未保存",
+                "Switched successfully, but failed to save changes back to the previous provider",
             }),
             { duration: 5000 },
           );
@@ -373,7 +373,7 @@ export function useProviderActions(
         });
         toast.success(
           t("provider.usageSaved", {
-            defaultValue: "用量查询配置已保存",
+            defaultValue: "Usage query configuration saved",
           }),
           { closeButton: true },
         );
@@ -381,7 +381,7 @@ export function useProviderActions(
         const detail =
           extractErrorMessage(error) ||
           t("provider.usageSaveFailed", {
-            defaultValue: "用量查询配置保存失败",
+            defaultValue: "Failed to save usage query configuration",
           });
         toast.error(detail);
       }
@@ -396,7 +396,7 @@ export function useProviderActions(
       if (!config.models || config.models.length === 0) {
         toast.error(
           t("notifications.openclawNoModels", {
-            defaultValue: "该供应商没有配置模型",
+            defaultValue: "No models configured",
           }),
         );
         return;
@@ -417,7 +417,7 @@ export function useProviderActions(
         });
         toast.success(
           t("notifications.openclawDefaultModelSet", {
-            defaultValue: "已设为默认模型",
+            defaultValue: "Set as default model",
           }),
           { closeButton: true },
         );
@@ -425,7 +425,7 @@ export function useProviderActions(
         const detail =
           extractErrorMessage(error) ||
           t("notifications.openclawDefaultModelSetFailed", {
-            defaultValue: "设置默认模型失败",
+            defaultValue: "Failed to set default model",
           });
         toast.error(detail);
       }

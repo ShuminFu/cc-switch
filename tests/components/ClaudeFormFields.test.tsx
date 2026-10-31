@@ -189,7 +189,7 @@ describe("ClaudeFormFields", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "一键设置",
+        name: "Quick Set",
       }),
     );
 

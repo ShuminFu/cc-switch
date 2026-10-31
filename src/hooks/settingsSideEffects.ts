@@ -58,7 +58,7 @@ async function syncClaudePlugin(ctx: SideEffectContext): Promise<void> {
   const failed = () =>
     toast.error(
       t("notifications.syncClaudePluginFailed", {
-        defaultValue: "同步 Claude 插件失败",
+        defaultValue: "Sync Claude plugin failed",
       }),
     );
   try {
@@ -112,7 +112,7 @@ export const SETTINGS_SIDE_EFFECTS: readonly SettingsSideEffect[] = [
         console.error("Failed to update auto-launch:", error);
         toast.error(
           ctx.t("settings.autoLaunchFailed", {
-            defaultValue: "设置开机自启失败",
+            defaultValue: "Failed to set auto-launch",
           }),
         );
       }
@@ -139,10 +139,10 @@ export const SETTINGS_SIDE_EFFECTS: readonly SettingsSideEffect[] = [
         toast.error(
           skip
             ? ctx.t("notifications.skipClaudeOnboardingFailed", {
-                defaultValue: "跳过 Claude Code 初次安装确认失败",
+                defaultValue: "Failed to skip Claude Code first-run confirmation",
               })
             : ctx.t("notifications.clearClaudeOnboardingSkipFailed", {
-                defaultValue: "恢复 Claude Code 初次安装确认失败",
+                defaultValue: "Failed to restore Claude Code first-run confirmation",
               }),
         );
       }

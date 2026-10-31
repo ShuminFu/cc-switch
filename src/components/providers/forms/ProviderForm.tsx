@@ -154,15 +154,15 @@ function ProviderFormShell({
 
   const presetCategoryLabels: Record<string, string> = useMemo(
     () => ({
-      official: t("providerForm.categoryOfficial", { defaultValue: "官方" }),
+      official: t("providerForm.categoryOfficial", { defaultValue: "Official" }),
       cn_official: t("providerForm.categoryCnOfficial", {
-        defaultValue: "国内官方",
+        defaultValue: "Opensource Official",
       }),
       aggregator: t("providerForm.categoryAggregation", {
-        defaultValue: "聚合服务",
+        defaultValue: "Aggregation",
       }),
       third_party: t("providerForm.categoryThirdParty", {
-        defaultValue: "第三方",
+        defaultValue: "Third Party",
       }),
       omo: "OMO",
     }),
@@ -257,7 +257,7 @@ function ProviderFormShell({
     ) {
       toast.error(
         t("settings.globalProxy.defaultCostMultiplierInvalid", {
-          defaultValue: "成本倍率必须为非负数",
+          defaultValue: "Invalid multiplier format",
         }),
       );
       return;
@@ -267,7 +267,7 @@ function ProviderFormShell({
     if (!values.name.trim()) {
       issues.push(
         t("providerForm.fillSupplierName", {
-          defaultValue: "请填写供应商名称",
+          defaultValue: "Please fill in provider name",
         }),
       );
     }

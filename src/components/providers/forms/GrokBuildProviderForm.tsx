@@ -177,15 +177,15 @@ export function GrokBuildProviderForm({
 
   const presetCategoryLabels = useMemo(
     () => ({
-      official: t("providerForm.categoryOfficial", { defaultValue: "官方" }),
+      official: t("providerForm.categoryOfficial", { defaultValue: "Official" }),
       cn_official: t("providerForm.categoryCnOfficial", {
-        defaultValue: "国内官方",
+        defaultValue: "Opensource Official",
       }),
       aggregator: t("providerForm.categoryAggregation", {
-        defaultValue: "聚合服务",
+        defaultValue: "Aggregation",
       }),
       third_party: t("providerForm.categoryThirdParty", {
-        defaultValue: "第三方",
+        defaultValue: "Third Party",
       }),
     }),
     [t],
@@ -309,7 +309,7 @@ export function GrokBuildProviderForm({
     if (!Number.isInteger(parsedContextWindow) || parsedContextWindow <= 0) {
       toast.error(
         t("grokBuild.contextWindowInvalid", {
-          defaultValue: "上下文窗口必须是正整数",
+          defaultValue: "Context window must be a positive integer",
         }),
       );
       return;
@@ -329,7 +329,7 @@ export function GrokBuildProviderForm({
       toast.error(
         t("grokBuild.invalidToml", {
           error: configError,
-          defaultValue: `config.toml 格式错误: ${configError}`,
+          defaultValue: "Invalid config.toml: {{error}}",
         }),
       );
       return;
@@ -418,7 +418,7 @@ export function GrokBuildProviderForm({
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <FormItem>
             <FormLabel htmlFor="grokbuild-profile">
-              {t("grokBuild.profile", { defaultValue: "客户端模型档位" })}
+              {t("grokBuild.profile", { defaultValue: "Client model profile" })}
             </FormLabel>
             <Input
               id="grokbuild-profile"
@@ -452,7 +452,7 @@ export function GrokBuildProviderForm({
 
           <FormItem>
             <FormLabel htmlFor="grokbuild-context-window">
-              {t("grokBuild.contextWindow", { defaultValue: "上下文窗口" })}
+              {t("grokBuild.contextWindow", { defaultValue: "Context window" })}
             </FormLabel>
             <Input
               id="grokbuild-context-window"

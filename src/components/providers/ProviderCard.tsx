@@ -146,7 +146,7 @@ function ProviderCardImpl({
   );
 
   const fallbackUrlText = t("provider.notConfigured", {
-    defaultValue: "未配置接口地址",
+    defaultValue: "Not configured for official website",
   });
 
   const providerUrl = useMemo(
@@ -347,7 +347,7 @@ function ProviderCardImpl({
                 provider.meta?.claudeDesktopMode === "proxy" && (
                   <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
                     {t("claudeDesktop.modeProxy", {
-                      defaultValue: "需要路由",
+                      defaultValue: "Requires routing",
                     })}
                   </span>
                 )}
@@ -358,7 +358,7 @@ function ProviderCardImpl({
                 provider.meta.apiFormat !== "anthropic" && (
                   <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
                     {t("claudeCode.needsRouting", {
-                      defaultValue: "需要路由",
+                      defaultValue: "Needs Routing",
                     })}
                   </span>
                 )}
@@ -366,7 +366,7 @@ function ProviderCardImpl({
               {codexNeedsRouting && (
                 <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
                   {t("codex.needsRouting", {
-                    defaultValue: "需要路由",
+                    defaultValue: "Needs Routing",
                   })}
                 </span>
               )}
@@ -374,7 +374,7 @@ function ProviderCardImpl({
               {appId === "claude" && provider.category === "official" && (
                 <span className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200">
                   {t("claudeCode.noRoutingSupport", {
-                    defaultValue: "不支持路由",
+                    defaultValue: "No Routing Support",
                   })}
                 </span>
               )}
@@ -383,10 +383,10 @@ function ProviderCardImpl({
                 <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
                   {isProxyTakeover
                     ? t("codex.officialRouting", {
-                        defaultValue: "官方账号路由",
+                        defaultValue: "Official Account Routing",
                       })
                     : t("codex.nativeLogin", {
-                        defaultValue: "Codex 登录",
+                        defaultValue: "Codex Sign-in",
                       })}
                 </span>
               )}
@@ -396,7 +396,7 @@ function ProviderCardImpl({
                 !supportsOfficialRouting && (
                   <span className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200">
                     {t("codex.noRoutingSupport", {
-                      defaultValue: "不支持路由",
+                      defaultValue: "No Routing Support",
                     })}
                   </span>
                 )}
@@ -421,7 +421,7 @@ function ProviderCardImpl({
                   <span
                     className="text-yellow-500 dark:text-yellow-400"
                     title={t("provider.officialPartner", {
-                      defaultValue: "官方合作伙伴",
+                      defaultValue: "Official Partner",
                     })}
                   >
                     ⭐
@@ -432,7 +432,7 @@ function ProviderCardImpl({
                 <span
                   className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200"
                   title={t("provider.managedByHermesHint", {
-                    defaultValue: "由 Hermes 管理，请在 Hermes Web UI 中编辑",
+                    defaultValue: "Defined in Hermes' providers: dict. Edit or remove it via Hermes Web UI.",
                   })}
                 >
                   {t("provider.managedByHermes", {
@@ -510,7 +510,7 @@ function ProviderCardImpl({
                   <span className="font-medium">
                     {t("usage.multiplePlans", {
                       count: usage?.data?.length || 0,
-                      defaultValue: `${usage?.data?.length || 0} 个套餐`,
+                      defaultValue: "{{count}} plans",
                     })}
                   </span>
                 </div>

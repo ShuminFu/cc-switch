@@ -72,7 +72,7 @@ async function submitAndCapture(
   await settle();
   fireEvent.submit(document.getElementById("provider-form")!);
   const saveAnyway = await screen
-    .findByRole("button", { name: "仍要保存" }, { timeout: 400 })
+    .findByRole("button", { name: "Save anyway" }, { timeout: 400 })
     .catch(() => null);
   if (saveAnyway) fireEvent.click(saveAnyway);
   await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));

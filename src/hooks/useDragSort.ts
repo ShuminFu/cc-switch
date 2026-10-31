@@ -91,7 +91,7 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
         if (previous) queryClient.setQueryData(queryKey, previous);
         toast.error(
           t("provider.sortUpdateFailed", {
-            defaultValue: "排序更新失败",
+            defaultValue: "Failed to update sort order",
           }),
         );
         return;

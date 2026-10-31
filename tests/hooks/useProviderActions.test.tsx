@@ -461,7 +461,7 @@ describe("useProviderActions", () => {
     });
 
     expect(toastErrorMock).toHaveBeenCalledTimes(1);
-    expect(toastErrorMock.mock.calls[0]?.[0]).toBe("同步 Claude 插件失败");
+    expect(toastErrorMock.mock.calls[0]?.[0]).toBe("Sync Claude plugin failed");
   });
 
   it("handles mutation errors when plugin sync is skipped", async () => {
@@ -582,7 +582,7 @@ describe("useProviderActions", () => {
     });
 
     expect(toastErrorMock).toHaveBeenCalledTimes(1);
-    expect(toastErrorMock.mock.calls[0]?.[0]).toBe("用量查询配置保存失败");
+    expect(toastErrorMock.mock.calls[0]?.[0]).toBe("Failed to save usage query configuration");
   });
 
   it("propagates addProvider errors to caller", async () => {

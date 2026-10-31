@@ -76,7 +76,7 @@ export function useSaveSettings() {
           appConfigDir !== (request.initialAppConfigDir ?? undefined);
         if (!request.silent) {
           toast.success(
-            t("notifications.settingsSaved", { defaultValue: "设置已保存" }),
+            t("notifications.settingsSaved", { defaultValue: "Settings saved" }),
             { closeButton: true },
           );
         }
@@ -90,7 +90,7 @@ export function useSaveSettings() {
         );
         toast.error(
           t("notifications.settingsSaveFailed", {
-            defaultValue: "保存设置失败: {{error}}",
+            defaultValue: "Failed to save settings: {{error}}",
             error: (error as Error)?.message ?? String(error),
           }),
         );

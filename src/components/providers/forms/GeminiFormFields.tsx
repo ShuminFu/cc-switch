@@ -114,13 +114,13 @@ export function GeminiFormFields({
             <div className="space-y-1">
               <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
                 {t("provider.form.gemini.oauthTitle", {
-                  defaultValue: "OAuth 认证模式",
+                  defaultValue: "OAuth Authentication Mode",
                 })}
               </p>
               <p className="text-sm text-blue-700 dark:text-blue-300">
                 {t("provider.form.gemini.oauthHint", {
                   defaultValue:
-                    "Google 官方使用 OAuth 个人认证，无需填写 API Key。首次使用时会自动打开浏览器进行登录。",
+                    "Google official uses OAuth personal authentication, no need to fill in API Key. The browser will automatically open for login on first use.",
                 })}
               </p>
             </div>
@@ -145,7 +145,7 @@ export function GeminiFormFields({
       {shouldShowSpeedTest && (
         <EndpointField
           id="baseUrl"
-          label={t("providerForm.apiEndpoint", { defaultValue: "API 端点" })}
+          label={t("providerForm.apiEndpoint", { defaultValue: "API Endpoint" })}
           value={baseUrl}
           onChange={onBaseUrlChange}
           placeholder={t("providerForm.apiEndpointPlaceholder", {
@@ -160,7 +160,7 @@ export function GeminiFormFields({
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <FormLabel htmlFor="gemini-model">
-              {t("provider.form.gemini.model", { defaultValue: "模型" })}
+              {t("provider.form.gemini.model", { defaultValue: "Model" })}
             </FormLabel>
             <Button
               type="button"

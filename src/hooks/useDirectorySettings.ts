@@ -242,7 +242,7 @@ export function useDirectorySettings({
         console.error("[useDirectorySettings] Failed to pick directory", error);
         toast.error(
           t("settings.selectFileFailed", {
-            defaultValue: "选择目录失败",
+            defaultValue: "Please choose a valid SQL backup file",
           }),
         );
       }
@@ -264,7 +264,7 @@ export function useDirectorySettings({
       );
       toast.error(
         t("settings.selectFileFailed", {
-          defaultValue: "选择目录失败",
+          defaultValue: "Please choose a valid SQL backup file",
         }),
       );
     }

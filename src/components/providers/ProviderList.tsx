@@ -344,7 +344,7 @@ export function ProviderList({
     if (!claudeDesktopStatus.supported) {
       messages.push(
         t("claudeDesktop.statusUnsupported", {
-          defaultValue: "当前平台暂不支持 Claude Desktop 3P 配置写入。",
+          defaultValue: "This platform does not support writing Claude Desktop 3P configuration yet.",
         }),
       );
       return messages;
@@ -354,7 +354,7 @@ export function ProviderList({
       messages.push(
         t("claudeDesktop.statusStaleRawModels", {
           defaultValue:
-            "Claude Desktop profile 中存在非 claude-* 模型名，新版 Claude Desktop 可能拒绝加载；重新切换当前供应商可修复。",
+            "The Claude Desktop profile contains model IDs outside the Sonnet / Opus / Haiku role families. Newer Claude Desktop versions may reject it; switch to the current provider again to repair it.",
         }),
       );
     }
@@ -362,7 +362,7 @@ export function ProviderList({
       messages.push(
         t("claudeDesktop.statusMissingRouteMappings", {
           defaultValue:
-            "当前供应商启用了模型映射，但没有有效路由；请编辑供应商并补全至少一个模型映射。",
+            "The current provider has model mapping enabled but no valid routes. Edit the provider and add at least one mapping.",
         }),
       );
     }
@@ -373,7 +373,7 @@ export function ProviderList({
       messages.push(
         t("claudeDesktop.statusGatewayTokenMissing", {
           defaultValue:
-            "当前本地路由 token 尚未生成；重新切换该供应商会写入新的本地 token。",
+            "The local routing token has not been generated yet. Switching to this provider again will write a new local token.",
         }),
       );
     }
@@ -386,7 +386,7 @@ export function ProviderList({
           expected,
           actual,
           defaultValue:
-            "Claude Desktop profile 指向的地址与当前供应商不一致；当前为 {{actual}}，应为 {{expected}}。重新切换当前供应商可修复。",
+            "The Claude Desktop profile points to a different URL than the current provider. Current: {{actual}}; expected: {{expected}}. Switch to the current provider again to repair it.",
         }),
       );
     }
@@ -496,7 +496,7 @@ export function ProviderList({
           <div className="flex items-center gap-2 font-medium">
             <AlertTriangle className="h-4 w-4 shrink-0" />
             {t("claudeDesktop.statusTitle", {
-              defaultValue: "Claude Desktop 配置需要检查",
+              defaultValue: "Claude Desktop configuration needs attention",
             })}
           </div>
           <ul className="mt-2 space-y-1 text-xs leading-relaxed">
