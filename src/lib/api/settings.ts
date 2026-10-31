@@ -379,6 +379,10 @@ export interface OptimizerConfig {
   enabled: boolean;
   thinkingOptimizer: boolean;
   cacheInjection: boolean;
+  /** Adaptive models: inject `output_config.effort = "max"` (opt-in, PROXY-47). */
+  thinkingMaxEffort?: boolean;
+  /** Adaptive models: append the `context-1m-2025-08-07` beta (opt-in, PROXY-47). */
+  context1mBeta?: boolean;
 }
 
 export interface LogConfig {
