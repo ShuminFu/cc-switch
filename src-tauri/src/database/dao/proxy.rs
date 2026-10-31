@@ -324,21 +324,32 @@ impl Database {
         match result {
             Ok(config) => Ok(config),
             Err(rusqlite::Error::QueryReturnedNoRows) => {
-                // 如果不存在，创建默认配置
+                // 如果不存在，创建默认配置（DB-18: 与 seed 相同的按应用默认值）
                 self.init_proxy_config_rows_blocking()?;
+                let (
+                    retries,
+                    first_byte,
+                    idle,
+                    non_streaming,
+                    cb_fail,
+                    cb_ok,
+                    cb_timeout,
+                    cb_rate,
+                    cb_min,
+                ) = crate::database::schema::proxy_config_defaults(&app_type_owned);
                 Ok(AppProxyConfig {
                     app_type: app_type_owned,
                     enabled: false,
                     auto_failover_enabled: false,
-                    max_retries: 3,
-                    streaming_first_byte_timeout: 60,
-                    streaming_idle_timeout: 120,
-                    non_streaming_timeout: 600,
-                    circuit_failure_threshold: 4,
-                    circuit_success_threshold: 2,
-                    circuit_timeout_seconds: 60,
-                    circuit_error_rate_threshold: 0.6,
-                    circuit_min_requests: 10,
+                    max_retries: retries as u32,
+                    streaming_first_byte_timeout: first_byte as u32,
+                    streaming_idle_timeout: idle as u32,
+                    non_streaming_timeout: non_streaming as u32,
+                    circuit_failure_threshold: cb_fail as u32,
+                    circuit_success_threshold: cb_ok as u32,
+                    circuit_timeout_seconds: cb_timeout as u32,
+                    circuit_error_rate_threshold: cb_rate,
+                    circuit_min_requests: cb_min as u32,
                 })
             }
             Err(e) => Err(AppError::Database(e.to_string())),
@@ -403,97 +414,14 @@ impl Database {
             .conn
             .lock()
             .map_err(|e| AppError::Lock(e.to_string()))?;
-
-        // 根据 app_type 使用不同的默认值（与 schema.rs seed 保持一致）
-        let (retries, fb_timeout, idle_timeout, cb_fail, cb_succ, cb_timeout, cb_rate, cb_min) =
-            match app_type {
-                "claude" => (6, 90, 180, 8, 3, 90, 0.7, 15),
-                "codex" => (3, 60, 120, 4, 2, 60, 0.6, 10),
-                "gemini" => (5, 60, 120, 4, 2, 60, 0.6, 10),
-                "grokbuild" => (3, 60, 120, 4, 2, 60, 0.6, 10),
-                _ => (3, 60, 120, 4, 2, 60, 0.6, 10), // 默认值
-            };
-
-        conn.execute(
-            "INSERT OR IGNORE INTO proxy_config (
-                app_type, max_retries,
-                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
-                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
-                circuit_error_rate_threshold, circuit_min_requests
-            ) VALUES (?1, ?2, ?3, ?4, 600, ?5, ?6, ?7, ?8, ?9)",
-            rusqlite::params![
-                app_type,
-                retries,
-                fb_timeout,
-                idle_timeout,
-                cb_fail,
-                cb_succ,
-                cb_timeout,
-                cb_rate,
-                cb_min
-            ],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        Ok(())
+        // DB-18: same per-app defaults as the schema seeder, for any app type.
+        Database::ensure_proxy_config_row_on_conn(&conn, app_type)
     }
 
-    /// 初始化 proxy_config 表的三行数据
-    ///
-    /// 使用与 schema.rs seed 相同的 per-app 默认值
+    /// 初始化 proxy_config 表的默认行（与 schema.rs seed 共用同一份默认值）
     fn init_proxy_config_rows_blocking(&self) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
-
-        // 使用与 schema.rs seed 相同的 per-app 默认值
-        // claude: 更激进的重试和超时配置
-        conn.execute(
-            "INSERT OR IGNORE INTO proxy_config (
-                app_type, max_retries,
-                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
-                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
-                circuit_error_rate_threshold, circuit_min_requests
-            ) VALUES ('claude', 6, 90, 180, 600, 8, 3, 90, 0.7, 15)",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // codex: 默认配置
-        conn.execute(
-            "INSERT OR IGNORE INTO proxy_config (
-                app_type, max_retries,
-                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
-                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
-                circuit_error_rate_threshold, circuit_min_requests
-            ) VALUES ('codex', 3, 60, 120, 600, 4, 2, 60, 0.6, 10)",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // gemini: 稍高的重试次数
-        conn.execute(
-            "INSERT OR IGNORE INTO proxy_config (
-                app_type, max_retries,
-                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
-                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
-                circuit_error_rate_threshold, circuit_min_requests
-            ) VALUES ('gemini', 5, 60, 120, 600, 4, 2, 60, 0.6, 10)",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // grokbuild: Responses protocol, same timeout defaults as Codex.
-        conn.execute(
-            "INSERT OR IGNORE INTO proxy_config (
-                app_type, max_retries,
-                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
-                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
-                circuit_error_rate_threshold, circuit_min_requests
-            ) VALUES ('grokbuild', 3, 60, 120, 600, 4, 2, 60, 0.6, 10)",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        Ok(())
+        Database::seed_default_proxy_config_rows(&conn)
     }
 
     async fn init_proxy_config_rows(&self) -> Result<(), AppError> {
@@ -541,32 +469,48 @@ impl Database {
         }
     }
 
-    /// 更新代理配置（兼容旧接口，更新所有三行的公共字段）
+    /// 更新代理配置（兼容旧接口）。
+    ///
+    /// DB-37: only the truly global mirror columns (`listen_address`,
+    /// `listen_port`, `enable_logging`) are written to every app row. The
+    /// legacy config is read from the claude row, so its retries/timeouts are
+    /// written back to the claude row only; per-app failover tuning of the
+    /// other apps (set via `update_proxy_config_for_app`) is never clobbered.
     pub async fn update_proxy_config(&self, config: ProxyConfig) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
-        // 更新所有三行的公共字段
-        conn.execute(
+        tx.execute(
             "UPDATE proxy_config SET
                 listen_address = ?1,
                 listen_port = ?2,
-                max_retries = ?3,
-                enable_logging = ?4,
-                streaming_first_byte_timeout = ?5,
-                streaming_idle_timeout = ?6,
-                non_streaming_timeout = ?7,
+                enable_logging = ?3,
                 updated_at = datetime('now')",
             rusqlite::params![
                 config.listen_address,
                 config.listen_port as i32,
-                config.max_retries as i32,
                 if config.enable_logging { 1 } else { 0 },
+            ],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        tx.execute(
+            "UPDATE proxy_config SET
+                max_retries = ?1,
+                streaming_first_byte_timeout = ?2,
+                streaming_idle_timeout = ?3,
+                non_streaming_timeout = ?4
+             WHERE app_type = 'claude'",
+            rusqlite::params![
+                config.max_retries as i32,
                 config.streaming_first_byte_timeout as i32,
                 config.streaming_idle_timeout as i32,
                 config.non_streaming_timeout as i32,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(())
     }
@@ -705,59 +649,53 @@ impl Database {
         failure_threshold: u32,
     ) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
-
         let now = chrono::Utc::now().to_rfc3339();
 
-        // 先查询当前状态
-        let current = conn.query_row(
-            "SELECT consecutive_failures FROM provider_health
-             WHERE provider_id = ?1 AND app_type = ?2",
-            rusqlite::params![provider_id, app_type],
-            |row| Ok(row.get::<_, i64>(0)? as u32),
-        );
-
-        let (is_healthy, consecutive_failures) = if success {
-            // 成功：重置失败计数
-            (1, 0)
-        } else {
-            // 失败：增加失败计数
-            let failures = current.unwrap_or(0) + 1;
-            // 使用传入的阈值而非硬编码
-            let healthy = if failures >= failure_threshold { 0 } else { 1 };
-            (healthy, failures)
-        };
-
-        let (last_success_at, last_failure_at) = if success {
-            (Some(now.clone()), None)
-        } else {
-            (None, Some(now.clone()))
-        };
-
-        // UPSERT
-        conn.execute(
-            "INSERT OR REPLACE INTO provider_health
-             (provider_id, app_type, is_healthy, consecutive_failures,
-              last_success_at, last_failure_at, last_error, updated_at)
-             VALUES (?1, ?2, ?3, ?4,
-                     COALESCE(?5, (SELECT last_success_at FROM provider_health
-                                   WHERE provider_id = ?1 AND app_type = ?2)),
-                     COALESCE(?6, (SELECT last_failure_at FROM provider_health
-                                   WHERE provider_id = ?1 AND app_type = ?2)),
-                     ?7, ?8)",
+        // DB-31: one atomic statement (no read-then-REPLACE): the failure count
+        // is incremented in SQL, and the unhealthy flag follows the threshold.
+        let result = conn.execute(
+            "INSERT INTO provider_health
+                (provider_id, app_type, is_healthy, consecutive_failures,
+                 last_success_at, last_failure_at, last_error, updated_at)
+             VALUES (?1, ?2,
+                     CASE WHEN ?3 THEN 1 WHEN 1 >= ?5 THEN 0 ELSE 1 END,
+                     CASE WHEN ?3 THEN 0 ELSE 1 END,
+                     CASE WHEN ?3 THEN ?6 END,
+                     CASE WHEN ?3 THEN NULL ELSE ?6 END,
+                     ?4, ?6)
+             ON CONFLICT(provider_id, app_type) DO UPDATE SET
+                consecutive_failures = CASE WHEN ?3 THEN 0
+                                            ELSE provider_health.consecutive_failures + 1 END,
+                is_healthy = CASE WHEN ?3 THEN 1
+                                  WHEN provider_health.consecutive_failures + 1 >= ?5 THEN 0
+                                  ELSE 1 END,
+                last_success_at = CASE WHEN ?3 THEN ?6 ELSE provider_health.last_success_at END,
+                last_failure_at = CASE WHEN ?3 THEN provider_health.last_failure_at ELSE ?6 END,
+                last_error = ?4,
+                updated_at = ?6",
             rusqlite::params![
                 provider_id,
                 app_type,
-                is_healthy,
-                consecutive_failures as i64,
-                last_success_at,
-                last_failure_at,
+                success,
                 error_msg,
+                failure_threshold as i64,
                 &now,
             ],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        Ok(())
+        );
+        match result {
+            Ok(_) => Ok(()),
+            // The provider was deleted while a request was in flight: there is
+            // nothing to record health for.
+            Err(rusqlite::Error::SqliteFailure(err, _))
+                if err.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY =>
+            {
+                log::debug!(
+                    "provider {provider_id} ({app_type}) no longer exists; health update skipped"
+                );
+                Ok(())
+            }
+            Err(e) => Err(AppError::Database(e.to_string())),
+        }
     }
 
     /// 重置Provider健康状态
@@ -849,6 +787,9 @@ impl Database {
     ///
     /// 熔断器配置已合并到 proxy_config 表
     /// 此方法保留用于兼容旧代码，建议使用 update_proxy_config_for_app
+    ///
+    /// Still backs the global `update_circuit_breaker_config` command, which
+    /// intentionally applies one breaker config to every app row.
     pub async fn update_circuit_breaker_config(
         &self,
         config: &crate::proxy::circuit_breaker::CircuitBreakerConfig,
@@ -1010,6 +951,93 @@ impl Database {
 mod tests {
     use crate::database::Database;
     use crate::error::AppError;
+
+    /// DB-31: failures count up atomically, success resets, and a deleted
+    /// provider is not an error.
+    #[test]
+    fn provider_health_upsert_counts_failures_and_ignores_deleted_providers() -> Result<(), AppError>
+    {
+        let db = Database::memory()?;
+        {
+            let conn = crate::database::lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO providers (id, app_type, name, settings_config) VALUES ('p', 'claude', 'p', '{}')",
+                [],
+            )?;
+        }
+        let read = |db: &Database| -> (i64, i64) {
+            let conn = db.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT is_healthy, consecutive_failures FROM provider_health WHERE provider_id = 'p'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+        };
+        db.update_provider_health_with_threshold_blocking(
+            "p",
+            "claude",
+            false,
+            Some("e".into()),
+            2,
+        )?;
+        assert_eq!(read(&db), (1, 1));
+        db.update_provider_health_with_threshold_blocking(
+            "p",
+            "claude",
+            false,
+            Some("e".into()),
+            2,
+        )?;
+        assert_eq!(read(&db), (0, 2));
+        db.update_provider_health_with_threshold_blocking("p", "claude", true, None, 2)?;
+        assert_eq!(read(&db), (1, 0));
+
+        db.update_provider_health_with_threshold_blocking("ghost", "claude", false, None, 2)?;
+        Ok(())
+    }
+
+    /// DB-18: any app type gets a proxy_config row with the shared defaults (no
+    /// CHECK constraint, no migration per new app).
+    #[tokio::test]
+    async fn new_app_types_get_a_proxy_config_row() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let cfg = db.get_proxy_config_for_app("openclaw").await?;
+        assert_eq!(cfg.max_retries, 3);
+        db.ensure_proxy_config_row_exists("openclaw")?;
+        let stored = db.get_proxy_config_for_app("openclaw").await?;
+        assert_eq!(stored.app_type, "openclaw");
+        let claude = db.get_proxy_config_for_app("claude").await?;
+        let (retries, ..) = crate::database::schema::proxy_config_defaults("claude");
+        assert_eq!(claude.max_retries as i64, retries);
+        Ok(())
+    }
+
+    /// DB-37: a global (legacy) proxy-config save must not overwrite the other
+    /// apps' per-app retries/timeouts.
+    #[tokio::test]
+    async fn legacy_update_keeps_other_apps_failover_tuning() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let mut codex = db.get_proxy_config_for_app("codex").await?;
+        codex.max_retries = 9;
+        codex.streaming_idle_timeout = 300;
+        db.update_proxy_config_for_app(codex).await?;
+
+        let mut global = db.get_proxy_config().await?;
+        global.listen_port = 16_123;
+        global.max_retries = 2;
+        global.streaming_idle_timeout = 77;
+        db.update_proxy_config(global).await?;
+
+        let codex = db.get_proxy_config_for_app("codex").await?;
+        assert_eq!(codex.max_retries, 9);
+        assert_eq!(codex.streaming_idle_timeout, 300);
+        let claude = db.get_proxy_config_for_app("claude").await?;
+        assert_eq!(claude.max_retries, 2);
+        assert_eq!(claude.streaming_idle_timeout, 77);
+        assert_eq!(db.get_proxy_config().await?.listen_port, 16_123);
+        Ok(())
+    }
 
     #[test]
     fn proxy_access_token_is_created_once_and_persisted() -> Result<(), AppError> {

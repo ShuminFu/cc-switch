@@ -17,11 +17,61 @@ type OmoProviderRow = (
     String,
 );
 
+/// A provider row whose JSON columns could not be parsed (DB-24). Such rows
+/// are skipped by list queries instead of being coerced to `null`/defaults
+/// (which a later save would write back over the original bytes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CorruptProviderRow {
+    pub id: String,
+    pub column: &'static str,
+    pub error: String,
+}
+
+/// Parse a provider row's `settings_config` and `meta` JSON strictly.
+fn parse_provider_json(
+    settings_config: &str,
+    meta: &str,
+) -> Result<(serde_json::Value, ProviderMeta), (&'static str, String)> {
+    // Blank columns carry no data to lose: keep the historical defaults.
+    let settings_config = if settings_config.trim().is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str(settings_config).map_err(|e| ("settings_config", e.to_string()))?
+    };
+    let meta = if meta.trim().is_empty() {
+        ProviderMeta::default()
+    } else {
+        serde_json::from_str(meta).map_err(|e| ("meta", e.to_string()))?
+    };
+    Ok((settings_config, meta))
+}
+
 impl Database {
     pub fn get_all_providers(
         &self,
         app_type: &str,
     ) -> Result<IndexMap<String, Provider>, AppError> {
+        let (providers, corrupt) = self.get_all_providers_checked(app_type)?;
+        for row in &corrupt {
+            log::warn!(
+                "[DB] Skipping provider '{}' ({app_type}): column {} is not valid JSON: {}",
+                row.id,
+                row.column,
+                row.error
+            );
+        }
+        Ok(providers)
+    }
+
+    /// [`Self::get_all_providers`] plus the rows that were skipped because a
+    /// JSON column does not parse (DB-24).
+    ///
+    /// DB-21: endpoints are loaded with ONE query for the whole app and grouped
+    /// in Rust (no per-provider query).
+    pub fn get_all_providers_checked(
+        &self,
+        app_type: &str,
+    ) -> Result<(IndexMap<String, Provider>, Vec<CorruptProviderRow>), AppError> {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn.prepare(
             "SELECT id, name, settings_config, website_url, category, created_at, sort_index, notes, icon, icon_color, meta, in_failover_queue
@@ -44,14 +94,9 @@ impl Database {
                 let meta_str: String = row.get(10)?;
                 let in_failover_queue: bool = row.get(11)?;
 
-                let settings_config =
-                    serde_json::from_str(&settings_config_str).unwrap_or(serde_json::Value::Null);
-                let meta: ProviderMeta = serde_json::from_str(&meta_str).unwrap_or_default();
-
-                Ok((
-                    id,
-                    Provider {
-                        id: "".to_string(), // Placeholder, set below
+                let parsed = parse_provider_json(&settings_config_str, &meta_str).map(
+                    |(settings_config, meta)| Provider {
+                        id: id.clone(),
                         name,
                         settings_config,
                         website_url,
@@ -64,55 +109,76 @@ impl Database {
                         icon_color,
                         in_failover_queue,
                     },
-                ))
+                );
+                Ok((id, parsed))
             })
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let mut providers = IndexMap::new();
+        let mut corrupt = Vec::new();
         for provider_res in provider_iter {
-            let (id, mut provider) = provider_res.map_err(|e| AppError::Database(e.to_string()))?;
-            provider.id = id.clone();
+            let (id, parsed) = provider_res.map_err(|e| AppError::Database(e.to_string()))?;
+            let mut provider = match parsed {
+                Ok(provider) => provider,
+                Err((column, error)) => {
+                    corrupt.push(CorruptProviderRow { id, column, error });
+                    continue;
+                }
+            };
             // DB-02: callers always receive real values, never placeholders.
             provider.settings_config = provider_vault::for_read(
                 app_type,
                 &id,
                 std::mem::take(&mut provider.settings_config),
             );
+            providers.insert(id, provider);
+        }
+        drop(stmt);
 
-            let mut stmt_endpoints = conn.prepare(
-                "SELECT url, added_at FROM provider_endpoints WHERE provider_id = ?1 AND app_type = ?2 ORDER BY added_at ASC, url ASC"
-            ).map_err(|e| AppError::Database(e.to_string()))?;
-
+        let mut endpoints_by_provider: HashMap<
+            String,
+            HashMap<String, crate::settings::CustomEndpoint>,
+        > = HashMap::new();
+        {
+            let mut stmt_endpoints = conn
+                .prepare(
+                    "SELECT provider_id, url, added_at FROM provider_endpoints
+                     WHERE app_type = ?1 ORDER BY added_at ASC, url ASC",
+                )
+                .map_err(|e| AppError::Database(e.to_string()))?;
             let endpoints_iter = stmt_endpoints
-                .query_map(params![id, app_type], |row| {
-                    let url: String = row.get(0)?;
-                    let added_at: Option<i64> = row.get(1)?;
+                .query_map(params![app_type], |row| {
                     Ok((
-                        url,
-                        crate::settings::CustomEndpoint {
-                            url: "".to_string(),
-                            added_at: added_at.unwrap_or(0),
-                            last_used: None,
-                        },
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
                     ))
                 })
                 .map_err(|e| AppError::Database(e.to_string()))?;
-
-            let mut custom_endpoints = HashMap::new();
             for ep_res in endpoints_iter {
-                let (url, mut ep) = ep_res.map_err(|e| AppError::Database(e.to_string()))?;
-                ep.url = url.clone();
-                custom_endpoints.insert(url, ep);
+                let (provider_id, url, added_at) =
+                    ep_res.map_err(|e| AppError::Database(e.to_string()))?;
+                endpoints_by_provider
+                    .entry(provider_id)
+                    .or_default()
+                    .insert(
+                        url.clone(),
+                        crate::settings::CustomEndpoint {
+                            url,
+                            added_at: added_at.unwrap_or(0),
+                            last_used: None,
+                        },
+                    );
             }
-
-            if let Some(meta) = &mut provider.meta {
-                meta.custom_endpoints = custom_endpoints;
-            }
-
-            providers.insert(id, provider);
         }
 
-        Ok(providers)
+        for (id, provider) in providers.iter_mut() {
+            if let Some(meta) = &mut provider.meta {
+                meta.custom_endpoints = endpoints_by_provider.remove(id).unwrap_or_default();
+            }
+        }
+
+        Ok((providers, corrupt))
     }
 
     pub fn get_current_provider(&self, app_type: &str) -> Result<Option<String>, AppError> {
@@ -157,8 +223,17 @@ impl Database {
                 let meta_str: String = row.get(9)?;
                 let in_failover_queue: bool = row.get(10)?;
 
-                let settings_config = serde_json::from_str(&settings_config_str).unwrap_or(serde_json::Value::Null);
-                let meta: ProviderMeta = serde_json::from_str(&meta_str).unwrap_or_default();
+                // DB-24: a corrupt row is an error, never a provider with a
+                // `null` config that a later save would persist.
+                let (settings_config, meta) = parse_provider_json(&settings_config_str, &meta_str)
+                    .map_err(|(column, error)| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            1,
+                            rusqlite::types::Type::Text,
+                            format!("provider '{id}' column {column} is not valid JSON: {error}")
+                                .into(),
+                        )
+                    })?;
 
                 Ok(Provider {
                     id: id.to_string(),
@@ -219,6 +294,18 @@ impl Database {
         let is_update = existing.is_some();
         let (is_current, in_failover_queue) =
             existing.unwrap_or((false, provider.in_failover_queue));
+
+        // DB-24: never overwrite a row whose stored JSON does not parse; the
+        // caller's struct was not loaded from it, and the original bytes may
+        // still be recoverable.
+        if is_update {
+            if let Some((column, error)) = Self::corrupt_json_column(&tx, app_type, &provider.id) {
+                return Err(AppError::Database(format!(
+                    "供应商 '{}' 的 {column} 数据已损坏，拒绝覆盖（请先修复或删除该行）: {error}",
+                    provider.id
+                )));
+            }
+        }
 
         if is_update {
             tx.execute(
@@ -285,7 +372,8 @@ impl Database {
             for (url, endpoint) in endpoints {
                 tx.execute(
                     "INSERT INTO provider_endpoints (provider_id, app_type, url, added_at)
-                     VALUES (?1, ?2, ?3, ?4)",
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(provider_id, app_type, url) DO NOTHING",
                     params![provider.id, app_type, url, endpoint.added_at],
                 )
                 .map_err(|e| AppError::Database(e.to_string()))?;
@@ -298,6 +386,22 @@ impl Database {
             provider_vault::forget_stale(app_type, &provider.id, &previous, Some(&stored_config));
         }
         Ok(())
+    }
+
+    /// The first JSON column of a stored provider row that does not parse.
+    fn corrupt_json_column(
+        conn: &rusqlite::Connection,
+        app_type: &str,
+        id: &str,
+    ) -> Option<(&'static str, String)> {
+        let (settings_config, meta): (String, String) = conn
+            .query_row(
+                "SELECT settings_config, meta FROM providers WHERE id = ?1 AND app_type = ?2",
+                params![id, app_type],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok()?;
+        parse_provider_json(&settings_config, &meta).err()
     }
 
     /// The stored (unresolved) `settings_config` of one row.
@@ -441,7 +545,9 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let added_at = chrono::Utc::now().timestamp_millis();
         conn.execute(
-            "INSERT INTO provider_endpoints (provider_id, app_type, url, added_at) VALUES (?1, ?2, ?3, ?4)",
+            // DB-22: adding an existing URL again is a no-op.
+            "INSERT INTO provider_endpoints (provider_id, app_type, url, added_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(provider_id, app_type, url) DO NOTHING",
             params![provider_id, app_type, url, added_at],
         ).map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
@@ -807,6 +913,83 @@ impl Database {
         self.save_provider(app_type_str, &provider)?;
 
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod row_integrity_tests {
+    use crate::database::{lock_conn, Database};
+    use crate::error::AppError;
+    use crate::provider::Provider;
+    use serde_json::json;
+
+    fn insert_raw(db: &Database, id: &str, settings_config: &str) -> Result<(), AppError> {
+        let conn = lock_conn!(db.conn);
+        conn.execute(
+            "INSERT INTO providers (id, app_type, name, settings_config, meta)
+             VALUES (?1, 'claude', ?1, ?2, '{}')",
+            rusqlite::params![id, settings_config],
+        )?;
+        Ok(())
+    }
+
+    /// DB-24: a corrupt row is skipped (and reported), never coerced to `null`,
+    /// and a save refuses to overwrite it.
+    #[test]
+    fn corrupt_provider_rows_are_quarantined_not_coerced() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        insert_raw(&db, "good", r#"{"env":{}}"#)?;
+        insert_raw(&db, "bad", "{broken")?;
+
+        let providers = db.get_all_providers("claude")?;
+        assert!(providers.contains_key("good"));
+        assert!(!providers.contains_key("bad"));
+
+        let (_, corrupt) = db.get_all_providers_checked("claude")?;
+        assert_eq!(corrupt.len(), 1);
+        assert_eq!(corrupt[0].id, "bad");
+        assert_eq!(corrupt[0].column, "settings_config");
+
+        assert!(db.get_provider_by_id("bad", "claude").is_err());
+
+        let replacement = Provider::with_id("bad".into(), "bad".into(), json!({}), None);
+        assert!(db.save_provider("claude", &replacement).is_err());
+        let conn = lock_conn!(db.conn);
+        let stored: String = conn.query_row(
+            "SELECT settings_config FROM providers WHERE id = 'bad'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(stored, "{broken", "original bytes are kept");
+        Ok(())
+    }
+
+    /// DB-21: endpoints are grouped per provider from one query.
+    #[test]
+    fn endpoints_are_attached_to_their_own_provider() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        insert_raw(&db, "a", "{}")?;
+        insert_raw(&db, "b", "{}")?;
+        db.add_custom_endpoint("claude", "a", "https://a1.example")?;
+        db.add_custom_endpoint("claude", "a", "https://a2.example")?;
+        db.add_custom_endpoint("claude", "b", "https://b1.example")?;
+
+        let providers = db.get_all_providers("claude")?;
+        let urls = |id: &str| {
+            let mut v: Vec<String> = providers[id]
+                .meta
+                .as_ref()
+                .unwrap()
+                .custom_endpoints
+                .keys()
+                .cloned()
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(urls("a"), vec!["https://a1.example", "https://a2.example"]);
+        assert_eq!(urls("b"), vec!["https://b1.example"]);
+        Ok(())
     }
 }
 

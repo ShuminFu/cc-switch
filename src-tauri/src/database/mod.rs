@@ -9,26 +9,36 @@
 //!
 //! ## 架构设计
 //!
+//! See `docs/dev/database.md` for table ownership, sync classification,
+//! timestamp units, retention/backup rules and the schema-change checklist.
+//!
 //! ```text
 //! database/
-//! ├── mod.rs        - Database 结构体 + 初始化
-//! ├── schema.rs     - 表结构定义 + Schema 迁移
-//! ├── backup.rs     - SQL 导入导出 + 快照备份
-//! ├── migration.rs  - JSON → SQLite 数据迁移
-//! └── dao/          - 数据访问对象
-//!     ├── providers.rs
-//!     ├── mcp.rs
-//!     ├── prompts.rs
-//!     ├── skills.rs
-//!     └── settings.rs
+//! ├── mod.rs              - Database 结构体 + 初始化 + 连接配置
+//! ├── schema.rs           - 冻结基线 DDL + 迁移注册表 MIGRATIONS
+//! ├── backup.rs           - SQL 导入导出 + 快照备份 / 恢复
+//! ├── migration.rs        - JSON → SQLite 数据迁移
+//! ├── pricing_seed.rs     - 内置模型定价（model_pricing.json）
+//! ├── sync_rows.rs        - 行版本 / 删除墓碑 / 保留期设置
+//! ├── read_pool.rs        - WAL 只读连接池
+//! ├── usage_writer.rs     - 使用量批量写线程
+//! ├── request_cache.rs    - 代理请求配置快照
+//! └── dao/                - 数据访问对象
+//!     ├── providers.rs, providers_seed.rs
+//!     ├── mcp.rs, prompts.rs, skills.rs, settings.rs
+//!     ├── universal_providers.rs, profiles.rs
+//!     ├── proxy.rs, failover.rs, stream_check.rs
+//!     └── usage_rollup.rs
 //! ```
 
 pub(crate) mod backup;
 mod dao;
 mod migration;
+mod pricing_seed;
 mod read_pool;
 mod request_cache;
 mod schema;
+mod sync_rows;
 mod usage_writer;
 
 #[cfg(test)]
@@ -170,6 +180,8 @@ pub struct Database {
     read_pool: Option<read_pool::ReadPool>,
     usage_writer: usage_writer::UsageWriter,
     request_cache: request_cache::RequestCache,
+    /// Serialises read-modify-write of the universal-provider map (DB-16).
+    universal_providers_lock: Mutex<()>,
 }
 
 fn register_db_change_hook(conn: &Connection, config_generation: Arc<AtomicU64>) {
@@ -203,6 +215,9 @@ impl Database {
         crate::config::prepare_private_file(&db_path)?;
 
         let conn = Connection::open(&db_path).map_err(|e| AppError::Database(e.to_string()))?;
+        // DB-30: reject a database written by a newer build before ANY pragma
+        // or DDL touches it.
+        Self::reject_newer_schema(&conn)?;
 
         if !db_exists {
             // For a brand-new database, configure incremental auto-vacuum
@@ -267,6 +282,18 @@ impl Database {
         Ok((version > SCHEMA_VERSION).then_some(version))
     }
 
+    /// Fail when `conn` holds a schema newer than this build supports (DB-30).
+    /// Runs before anything writes to the file.
+    pub(crate) fn reject_newer_schema(conn: &Connection) -> Result<(), AppError> {
+        let version = Self::get_user_version(conn)?;
+        if version > SCHEMA_VERSION {
+            return Err(AppError::Database(format!(
+                "数据库版本过新（{version}），当前应用仅支持 {SCHEMA_VERSION}，请升级应用后再尝试。"
+            )));
+        }
+        Ok(())
+    }
+
     /// 创建内存数据库（用于测试）
     pub fn memory() -> Result<Self, AppError> {
         let conn = Connection::open_in_memory().map_err(|e| AppError::Database(e.to_string()))?;
@@ -287,6 +314,7 @@ impl Database {
     #[allow(dead_code)]
     pub(crate) fn open_file(db_path: &Path) -> Result<Self, AppError> {
         let conn = Connection::open(db_path).map_err(|e| AppError::Database(e.to_string()))?;
+        Self::reject_newer_schema(&conn)?;
         conn.execute("PRAGMA auto_vacuum = INCREMENTAL;", [])
             .map_err(|e| AppError::Database(e.to_string()))?;
         configure_connection(&conn, true)?;
@@ -307,6 +335,7 @@ impl Database {
             conn,
             read_pool: None,
             request_cache,
+            universal_providers_lock: Mutex::new(()),
         }
     }
 

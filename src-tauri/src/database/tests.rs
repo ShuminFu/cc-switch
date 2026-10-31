@@ -217,6 +217,120 @@ fn schema_migration_rejects_future_version() {
     );
 }
 
+/// DB-13: every timestamp-like column is documented with its unit
+/// (docs/dev/database.md); new ones must be INTEGER (Unix ms for new columns).
+#[test]
+fn timestamp_columns_use_known_units() {
+    // (table, column, unit) of every existing timestamp column.
+    const KNOWN: &[(&str, &str, &str)] = &[
+        ("providers", "created_at", "ms"),
+        ("providers", "sync_updated_at", "ms"),
+        ("provider_endpoints", "added_at", "ms"),
+        ("mcp_servers", "sync_updated_at", "ms"),
+        ("prompts", "created_at", "s"),
+        ("prompts", "updated_at", "s"),
+        ("prompts", "sync_updated_at", "ms"),
+        ("skills", "installed_at", "s"),
+        ("skills", "updated_at", "s"),
+        ("skills", "sync_updated_at", "ms"),
+        ("profiles", "created_at", "s"),
+        ("profiles", "updated_at", "s"),
+        ("profiles", "sync_updated_at", "ms"),
+        ("proxy_request_logs", "created_at", "s"),
+        ("stream_check_logs", "tested_at", "s"),
+        ("session_log_sync", "last_modified", "ns"),
+        ("session_log_sync", "last_synced_at", "s"),
+        ("schema_migrations", "applied_at", "s"),
+        ("sync_tombstones", "deleted_at", "ms"),
+        // Legacy TEXT timestamps (documented; do not add more).
+        ("proxy_config", "created_at", "text:datetime"),
+        ("proxy_config", "updated_at", "text:datetime"),
+        ("provider_health", "last_success_at", "text:rfc3339"),
+        ("provider_health", "last_failure_at", "text:rfc3339"),
+        ("provider_health", "updated_at", "text:rfc3339"),
+        ("proxy_live_backup", "backed_up_at", "text:rfc3339"),
+        ("usage_daily_rollups", "date", "text:local-date"),
+    ];
+    let looks_like_timestamp = |name: &str| {
+        name.ends_with("_at")
+            || name.ends_with("_time")
+            || name == "date"
+            || name == "last_modified"
+            || name.contains("timestamp")
+    };
+    let conn = Connection::open_in_memory().expect("open memory db");
+    Database::create_tables_on_conn(&conn).expect("fresh schema");
+    let tables = query_strings(
+        &conn,
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    );
+    let mut seen = Vec::new();
+    for table in tables.iter().map(|t| t[0].clone()) {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info(\"{table}\")"))
+            .expect("table_info");
+        let cols: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get(1)?, row.get(2)?)))
+            .expect("columns")
+            .collect::<Result<_, _>>()
+            .expect("columns");
+        for (column, ty) in cols {
+            if !looks_like_timestamp(&column) {
+                continue;
+            }
+            let known = KNOWN
+                .iter()
+                .find(|(t, c, _)| *t == table && *c == column)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "timestamp column {table}.{column} ({ty}) is not documented: add it to \
+                         KNOWN here and to docs/dev/database.md (new columns: INTEGER Unix ms)"
+                    )
+                });
+            if known.2.starts_with("text:") {
+                assert!(ty.eq_ignore_ascii_case("TEXT"), "{table}.{column}: {ty}");
+            } else {
+                assert!(
+                    ty.eq_ignore_ascii_case("INTEGER"),
+                    "{table}.{column} must be INTEGER, is {ty}"
+                );
+            }
+            seen.push((table.clone(), column));
+        }
+    }
+    for (t, c, _) in KNOWN {
+        assert!(
+            seen.iter().any(|(st, sc)| st == t && sc == c),
+            "documented column {t}.{c} no longer exists"
+        );
+    }
+}
+
+/// DB-30: opening a database from a newer build leaves the file untouched.
+#[test]
+fn opening_a_newer_database_does_not_modify_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cc-switch.db");
+    {
+        let conn = Connection::open(&path).expect("create");
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+             INSERT INTO settings (key, value) VALUES ('k', 'v');",
+        )
+        .expect("seed");
+        Database::set_user_version(&conn, SCHEMA_VERSION + 1).expect("future version");
+    }
+    let before = std::fs::read(&path).expect("read before");
+    let err = Database::open_file(&path)
+        .err()
+        .expect("newer database is rejected");
+    assert!(err.to_string().contains("数据库版本过新"), "{err}");
+    let conn = Connection::open(&path).expect("reopen");
+    assert!(Database::create_tables_on_conn(&conn).is_err());
+    drop(conn);
+    assert_eq!(std::fs::read(&path).expect("read after"), before);
+}
+
 #[test]
 fn schema_migration_adds_missing_columns_for_providers() {
     let conn = Connection::open_in_memory().expect("open memory db");
@@ -717,6 +831,55 @@ fn migration_from_v3_8_schema_v1_to_current_schema_v3() {
     assert!(pricing_rows > 0, "model_pricing should be seeded");
 }
 
+/// DB-23: re-running the JSON migration over an existing provider updates it in
+/// place instead of REPLACE-deleting it (which cascaded to provider_health and
+/// provider_endpoints).
+#[test]
+fn json_migration_upserts_providers_without_cascading_children() {
+    let db = Database::memory().expect("memory db");
+    let mut manager = ProviderManager::default();
+    manager.providers.insert(
+        "p1".to_string(),
+        crate::provider::Provider::with_id(
+            "p1".to_string(),
+            "Original".to_string(),
+            json!({}),
+            None,
+        ),
+    );
+    let mut apps = HashMap::new();
+    apps.insert("claude".to_string(), manager);
+    let config = MultiAppConfig {
+        version: 2,
+        apps,
+        mcp: Default::default(),
+        prompts: Default::default(),
+        skills: Default::default(),
+        common_config_snippets: Default::default(),
+        claude_common_config_snippet: None,
+    };
+    db.migrate_from_json(&config).expect("first migration");
+    {
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO provider_health (provider_id, app_type, is_healthy, updated_at)
+             VALUES ('p1', 'claude', 0, '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    }
+    db.migrate_from_json(&config).expect("second migration");
+    let conn = db.conn.lock().unwrap();
+    let health: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM provider_health WHERE provider_id = 'p1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(health, 1, "provider_health survives the re-migration");
+}
+
 #[test]
 fn schema_dry_run_does_not_write_to_disk() {
     // Create minimal valid config for migration
@@ -791,6 +954,68 @@ fn dry_run_validates_schema_compatibility() {
     );
 }
 
+/// DB-19: a user-edited price survives a seed-version bump; built-in rows are
+/// refreshed; an up-to-date database is not written by seeding.
+#[test]
+fn user_edited_pricing_survives_seed_bumps() {
+    let db = Database::memory().expect("create memory db");
+    db.upsert_model_pricing(&crate::services::usage_stats::ModelPricingInfo {
+        model_id: "glm-5.1".to_string(),
+        display_name: "My GLM".to_string(),
+        input_cost_per_million: "7".to_string(),
+        output_cost_per_million: "7".to_string(),
+        cache_read_cost_per_million: "0".to_string(),
+        cache_creation_cost_per_million: "0".to_string(),
+    })
+    .expect("user edit");
+    {
+        let conn = db.conn.lock().unwrap();
+        // Simulate an older applied seed with a stale built-in row.
+        conn.execute_batch(
+            "UPDATE settings SET value = '0' WHERE key = 'model_pricing_seed_version';
+             UPDATE model_pricing SET seed_version = 0, input_cost_per_million = '1.68'
+             WHERE model_id = 'deepseek-v4-pro';",
+        )
+        .unwrap();
+    }
+    db.ensure_model_pricing_seeded().expect("seed");
+    {
+        let conn = db.conn.lock().unwrap();
+        let glm: (String, String, String) = conn
+            .query_row(
+                "SELECT display_name, input_cost_per_million, source FROM model_pricing WHERE model_id = 'glm-5.1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(glm, ("My GLM".into(), "7".into(), "user".into()));
+        let deepseek: String = conn
+            .query_row(
+                "SELECT input_cost_per_million FROM model_pricing WHERE model_id = 'deepseek-v4-pro'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(deepseek, "0.435");
+    }
+
+    // Up to date: seeding is a read-only no-op.
+    let before: i64 = db
+        .conn
+        .lock()
+        .unwrap()
+        .query_row("SELECT total_changes()", [], |r| r.get(0))
+        .unwrap();
+    db.ensure_model_pricing_seeded().expect("seed again");
+    let after: i64 = db
+        .conn
+        .lock()
+        .unwrap()
+        .query_row("SELECT total_changes()", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(before, after, "no writes when the seed is current");
+}
+
 #[test]
 fn schema_model_pricing_is_seeded_on_init() {
     let db = Database::memory().expect("create memory db");
@@ -850,6 +1075,8 @@ fn schema_model_pricing_is_seeded_on_init() {
     );
 }
 
+/// DB-19: upgrading a v19 database (no `source` column) refreshes rows that
+/// still hold a previous built-in price and keeps user-edited prices.
 #[test]
 fn model_pricing_seed_repairs_known_outdated_builtin_prices() {
     let db = Database::memory().expect("create memory db");
@@ -876,8 +1103,17 @@ fn model_pricing_seed_repairs_known_outdated_builtin_prices() {
             [],
         )
         .expect("set custom GLM price");
+        // Back to the v19 shape: no source/seed_version, no applied seed.
+        conn.execute_batch(
+            "ALTER TABLE model_pricing DROP COLUMN source;
+             ALTER TABLE model_pricing DROP COLUMN seed_version;
+             DELETE FROM settings WHERE key = 'model_pricing_seed_version';
+             PRAGMA user_version = 19;",
+        )
+        .expect("downgrade to v19");
     }
 
+    db.apply_schema_migrations().expect("migrate to current");
     db.ensure_model_pricing_seeded()
         .expect("ensure pricing seeded");
 
@@ -1197,6 +1433,80 @@ mod backup_restore {
         assert_eq!(live_backup, "live-original");
     }
 
+    fn insert_usage_rows(db: &Database, request_id: &str) {
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model,
+                input_tokens, output_tokens, total_cost_usd, latency_ms, status_code, created_at)
+             VALUES (?1, 'p-backup', 'claude', 'm', 1, 1, '0.01', 1, 200, 1000)",
+            [request_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO usage_daily_rollups (date, app_type, provider_id, model, request_count,
+                success_count, input_tokens, output_tokens, cache_read_tokens,
+                cache_creation_tokens, total_cost_usd, avg_latency_ms)
+             VALUES ('2026-03-01', 'claude', 'p-backup', 'm', 1, 1, 1, 1, 0, 0, '0.01', 1)",
+            [],
+        )
+        .unwrap();
+    }
+
+    fn count(db: &Database, sql: &str) -> i64 {
+        let conn = db.conn.lock().unwrap();
+        conn.query_row(sql, [], |row| row.get(0)).unwrap()
+    }
+
+    #[test]
+    fn restore_keeps_usage_recorded_after_the_backup_by_default() {
+        let home = TestHome::new(10);
+        let db = &home.db;
+        insert_provider(db, "p-backup");
+        let backup = home.backup(BackupKind::Manual);
+        insert_usage_rows(db, "req-after-backup");
+
+        home.restore(&file_name(&backup)).expect("restore");
+        assert_eq!(
+            count(
+                db,
+                "SELECT COUNT(*) FROM proxy_request_logs WHERE request_id = 'req-after-backup'"
+            ),
+            1,
+            "logs recorded after the backup survive the restore (DB-42)"
+        );
+        assert_eq!(count(db, "SELECT COUNT(*) FROM usage_daily_rollups"), 1);
+    }
+
+    #[test]
+    fn restore_without_usage_preservation_takes_the_backups_usage() {
+        let home = TestHome::new(10);
+        let db = &home.db;
+        insert_provider(db, "p-backup");
+        let backup = home.backup(BackupKind::Manual);
+        insert_usage_rows(db, "req-after-backup");
+
+        db.restore_from_backup_in_with(home.dir.path(), home.retain, &file_name(&backup), false)
+            .expect("restore");
+        assert_eq!(count(db, "SELECT COUNT(*) FROM proxy_request_logs"), 0);
+        assert_eq!(count(db, "SELECT COUNT(*) FROM usage_daily_rollups"), 0);
+    }
+
+    #[test]
+    fn backup_files_are_written_in_rollback_journal_mode() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let live = Database::open_file(&dir.path().join("cc-switch.db")).expect("open file db");
+        insert_provider(&live, "p1");
+        let path = live
+            .backup_database_file_in(dir.path(), 5, BackupKind::Manual, None)
+            .expect("backup")
+            .expect("backup path");
+        let conn = rusqlite::Connection::open(&path).expect("open backup");
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode.to_ascii_lowercase(), "delete");
+    }
+
     #[test]
     fn rotation_never_deletes_manual_named_or_other_kinds() {
         let home = TestHome::new(3);
@@ -1495,6 +1805,53 @@ fn drop_columns(conn: &Connection, table: &str, columns: &[&str]) {
 /// `create_tables` stay in place, as they did in real installations).
 fn undo_migration(conn: &Connection, version: i32) {
     match version {
+        22 => {
+            for table in ["providers", "mcp_servers", "prompts", "skills", "profiles"] {
+                for kind in ["insert", "update", "delete"] {
+                    conn.execute(&format!("DROP TRIGGER trg_sync_{table}_{kind}"), [])
+                        .expect("undo v22 trigger");
+                }
+                drop_columns(conn, table, &["sync_rev", "sync_updated_at"]);
+            }
+            conn.execute_batch(
+                "DROP TABLE sync_tombstones;
+                 DELETE FROM schema_migrations WHERE version = 22;",
+            )
+            .expect("undo v22");
+        }
+        21 => {
+            let sql: String = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE name = 'proxy_config'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("proxy_config sql");
+            let old = sql.replacen("proxy_config", "proxy_config_v20", 1).replace(
+                "app_type TEXT PRIMARY KEY NOT NULL,",
+                "app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),",
+            );
+            assert_ne!(old, sql);
+            conn.execute_batch(&format!(
+                "{old};
+                 INSERT INTO proxy_config_v20 SELECT * FROM proxy_config;
+                 DROP TABLE proxy_config;
+                 ALTER TABLE proxy_config_v20 RENAME TO proxy_config;
+                 DELETE FROM schema_migrations WHERE version = 21;"
+            ))
+            .expect("undo v21");
+        }
+        20 => {
+            drop_columns(conn, "model_pricing", &["source", "seed_version"]);
+            conn.execute("DELETE FROM schema_migrations WHERE version = 20", [])
+                .expect("undo v20 ledger row");
+        }
+        19 => conn
+            .execute_batch(
+                "DROP INDEX idx_provider_endpoints_unique;
+                 DELETE FROM schema_migrations WHERE version = 19;",
+            )
+            .expect("undo v19"),
         18 => {
             drop_columns(conn, "session_log_sync", &["byte_offset", "prefix_hash"]);
             conn.execute("DELETE FROM schema_migrations WHERE version = 18", [])
@@ -1848,7 +2205,8 @@ fn baseline_schema_checksum_is_pinned() {
     // dedup triggers whose SQL lives in services::usage_stats). The baseline is shared by
     // fresh databases and the pre-v17 upgrade path, so it must never change: add a
     // migration instead. The hash covers the fresh schema, i.e. the baseline plus
-    // later migrations (v18 added session_log_sync.byte_offset / prefix_hash).
+    // later migrations (v18 added session_log_sync.byte_offset / prefix_hash; v19-v22
+    // added the endpoint unique index, pricing source, CHECK-free proxy_config and row versions).
     let conn = Connection::open_in_memory().expect("open memory db");
     Database::create_tables_on_conn(&conn).expect("create fresh schema");
     let objects = query_strings(
@@ -1864,7 +2222,7 @@ fn baseline_schema_checksum_is_pinned() {
     let checksum = format!("{:x}", Sha256::digest(text.as_bytes()));
     assert_eq!(
         checksum,
-        "fdaeff6ec45e56ed983d89cd27688965b0536e90ce61ddc240b8664795da2da5",
+        "aff743d9d734c2dc8fb9278898d4c0699c2325aea9cef9366036f38f7f2ae9f4",
         "baseline schema changed; it is frozen at v{}:\n{text}",
         schema::BASELINE_SCHEMA_VERSION
     );

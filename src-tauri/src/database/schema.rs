@@ -190,6 +190,34 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         breaks_sync: false,
         up: Database::migrate_v17_to_v18,
     },
+    Migration {
+        version: 19,
+        name: "provider_endpoints_unique",
+        checksum: "0b019d74ffdd4e0e7479cbbf0bf5216e3a32efdafab0d876298fbefa66d6ecb3",
+        breaks_sync: false,
+        up: Database::migrate_v18_to_v19,
+    },
+    Migration {
+        version: 20,
+        name: "model_pricing_source_and_seed_version",
+        checksum: "a3491e9f89021afbfdebe05559c7d71b4ea6f4261c32b3c608560a2532655258",
+        breaks_sync: false,
+        up: Database::migrate_v19_to_v20,
+    },
+    Migration {
+        version: 21,
+        name: "proxy_config_drop_app_type_check",
+        checksum: "af5637ceea4d4e3df859aa425345c085a470ca449f36f6b576a5c30e3126c3cb",
+        breaks_sync: false,
+        up: Database::migrate_v20_to_v21,
+    },
+    Migration {
+        version: 22,
+        name: "sync_row_versions_and_tombstones",
+        checksum: "cb3cfb8330ea92aaa0c515ad8aacfb166922549a4786da319211ffdb6d7ddd82",
+        breaks_sync: false,
+        up: Database::migrate_v21_to_v22,
+    },
 ];
 
 /// 注册表中最新的 schema 版本（即 `SCHEMA_VERSION`）。
@@ -432,12 +460,33 @@ const BASELINE_TABLE_SQL: &[&str] = &[
 /// circuit_success_threshold, circuit_timeout_seconds, circuit_error_rate_threshold,
 /// circuit_min_requests)
 type ProxyConfigDefaults = (&'static str, i64, i64, i64, i64, i64, i64, i64, f64, i64);
-const DEFAULT_PROXY_CONFIG_ROWS: &[ProxyConfigDefaults] = &[
+/// DB-18: the ONE source of per-app proxy defaults (seeder, migrations and the
+/// DAO fallbacks all read it through [`proxy_config_defaults`]).
+pub(crate) const DEFAULT_PROXY_CONFIG_ROWS: &[ProxyConfigDefaults] = &[
     ("claude", 6, 90, 180, 600, 8, 3, 90, 0.7, 15),
     ("codex", 3, 60, 120, 600, 4, 2, 60, 0.6, 10),
     ("gemini", 5, 60, 120, 600, 4, 2, 60, 0.6, 10),
     ("grokbuild", 3, 60, 120, 600, 4, 2, 60, 0.6, 10),
 ];
+
+/// Defaults for apps without their own row in [`DEFAULT_PROXY_CONFIG_ROWS`].
+const GENERIC_PROXY_CONFIG_DEFAULTS: ProxyConfigDefaults = ("", 3, 60, 120, 600, 4, 2, 60, 0.6, 10);
+
+/// Per-app proxy defaults: `(max_retries, streaming_first_byte_timeout,
+/// streaming_idle_timeout, non_streaming_timeout, circuit_failure_threshold,
+/// circuit_success_threshold, circuit_timeout_seconds,
+/// circuit_error_rate_threshold, circuit_min_requests)`.
+pub(crate) fn proxy_config_defaults(
+    app_type: &str,
+) -> (i64, i64, i64, i64, i64, i64, i64, f64, i64) {
+    let row = DEFAULT_PROXY_CONFIG_ROWS
+        .iter()
+        .find(|row| row.0 == app_type)
+        .unwrap_or(&GENERIC_PROXY_CONFIG_DEFAULTS);
+    (
+        row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9,
+    )
+}
 
 /// v17 之前每次启动都会尝试补到 proxy_config 上的列（兼容 v3.9.0-2 等早期结构）。
 const LEGACY_PROXY_CONFIG_COLUMNS: &[(&str, &str)] = &[
@@ -473,10 +522,19 @@ impl Database {
     ///   应用自有的派生对象（`trg_request_logs_dedup_*` 触发器）：SQL 导出不含触发器，
     ///   SQL 导入/备份恢复会先删除所有触发器，再调用本函数恢复应用自有的触发器。
     pub(crate) fn create_tables_on_conn(conn: &Connection) -> Result<(), AppError> {
+        // DB-30: never touch a database from a newer build (import/restore paths
+        // reach this before the migration step's own version check).
+        Self::reject_newer_schema(conn)?;
         if Self::is_brand_new_database(conn)? {
             return Self::in_savepoint(conn, "create_schema", || Self::create_fresh_schema(conn));
         }
         Self::create_request_logs_dedup_triggers_if_supported(conn)?;
+        // DB-20: the device-local tombstone table is not part of SQL exports and
+        // the triggers are dropped on import; recreate both (no-op otherwise).
+        if Self::get_user_version(conn)? >= super::sync_rows::SYNC_ROWS_SCHEMA_VERSION {
+            super::sync_rows::ensure_tombstone_table(conn)?;
+            super::sync_rows::create_row_version_triggers(conn)?;
+        }
         Ok(())
     }
 
@@ -558,9 +616,40 @@ impl Database {
         Ok(())
     }
 
+    /// Insert the default `proxy_config` row of one app (any app type: the
+    /// table no longer restricts `app_type`, DB-18). Existing rows are kept.
+    pub(crate) fn ensure_proxy_config_row_on_conn(
+        conn: &Connection,
+        app_type: &str,
+    ) -> Result<(), AppError> {
+        let (retries, first_byte, idle, non_streaming, cb_fail, cb_ok, cb_timeout, cb_rate, cb_min) =
+            proxy_config_defaults(app_type);
+        conn.execute(
+            "INSERT OR IGNORE INTO proxy_config (app_type, max_retries,
+            streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
+            circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
+            circuit_error_rate_threshold, circuit_min_requests)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                app_type,
+                retries,
+                first_byte,
+                idle,
+                non_streaming,
+                cb_fail,
+                cb_ok,
+                cb_timeout,
+                cb_rate,
+                cb_min
+            ],
+        )
+        .map_err(|e| AppError::Database(format!("初始化 {app_type} 代理配置失败: {e}")))?;
+        Ok(())
+    }
+
     /// 补齐每个应用的默认代理配置行（`INSERT OR IGNORE`，不覆盖已有行）。
     /// 旧版单例结构（无 app_type 列）由迁移转换后再补。
-    fn seed_default_proxy_config_rows(conn: &Connection) -> Result<(), AppError> {
+    pub(crate) fn seed_default_proxy_config_rows(conn: &Connection) -> Result<(), AppError> {
         if !Self::has_column(conn, "proxy_config", "app_type")? {
             return Ok(());
         }
@@ -1880,1236 +1969,110 @@ impl Database {
         Ok(())
     }
 
-    /// 插入默认模型定价数据
-    /// 格式: (model_id, display_name, input, output, cache_read, cache_creation)
-    /// 注意: model_id 使用短横线格式（如 claude-haiku-4-5），与 API 返回的模型名称标准化后一致
-    fn seed_model_pricing(conn: &Connection) -> Result<(), AppError> {
-        let pricing_data = [
-            // Claude Fable 5（Opus 之上的新档）
-            (
-                "claude-fable-5",
-                "Claude Fable 5",
-                "10",
-                "50",
-                "1.00",
-                "12.50",
-            ),
-            (
-                "claude-mythos-5",
-                "Claude Mythos 5",
-                "10",
-                "50",
-                "1.00",
-                "12.50",
-            ),
-            // Claude 4.8 系列
-            (
-                "claude-opus-4-8",
-                "Claude Opus 4.8",
-                "5",
-                "25",
-                "0.50",
-                "6.25",
-            ),
-            // Claude Sonnet 5（list 价，与 Sonnet 4.6 一致；促销 $2/$10 至 2026-08-31 不入表）
-            (
-                "claude-sonnet-5",
-                "Claude Sonnet 5",
-                "3",
-                "15",
-                "0.30",
-                "3.75",
-            ),
-            // Claude 4.7 系列
-            (
-                "claude-opus-4-7",
-                "Claude Opus 4.7",
-                "5",
-                "25",
-                "0.50",
-                "6.25",
-            ),
-            // Claude 4.6 系列
-            (
-                "claude-opus-4-6-20260206",
-                "Claude Opus 4.6",
-                "5",
-                "25",
-                "0.50",
-                "6.25",
-            ),
-            (
-                "claude-sonnet-4-6-20260217",
-                "Claude Sonnet 4.6",
-                "3",
-                "15",
-                "0.30",
-                "3.75",
-            ),
-            // Claude 4.5 系列
-            (
-                "claude-opus-4-5-20251101",
-                "Claude Opus 4.5",
-                "5",
-                "25",
-                "0.50",
-                "6.25",
-            ),
-            (
-                "claude-sonnet-4-5-20250929",
-                "Claude Sonnet 4.5",
-                "3",
-                "15",
-                "0.30",
-                "3.75",
-            ),
-            (
-                "claude-haiku-4-5-20251001",
-                "Claude Haiku 4.5",
-                "1",
-                "5",
-                "0.10",
-                "1.25",
-            ),
-            // Claude 4 系列 (Legacy Models)
-            (
-                "claude-opus-4-20250514",
-                "Claude Opus 4",
-                "15",
-                "75",
-                "1.50",
-                "18.75",
-            ),
-            (
-                "claude-opus-4-1-20250805",
-                "Claude Opus 4.1",
-                "15",
-                "75",
-                "1.50",
-                "18.75",
-            ),
-            (
-                "claude-sonnet-4-20250514",
-                "Claude Sonnet 4",
-                "3",
-                "15",
-                "0.30",
-                "3.75",
-            ),
-            // Claude 3.5 系列
-            (
-                "claude-3-5-haiku-20241022",
-                "Claude 3.5 Haiku",
-                "0.80",
-                "4",
-                "0.08",
-                "1",
-            ),
-            (
-                "claude-3-5-sonnet-20241022",
-                "Claude 3.5 Sonnet",
-                "3",
-                "15",
-                "0.30",
-                "3.75",
-            ),
-            // GPT-5.6 系列（Sol / Terra / Luna，2026-06 发布）
-            // 5.6 家族起 cache write 收 1.25× 输入价（此前 GPT 模型写缓存免费，勿回填旧系列）
-            ("gpt-5.6-sol", "GPT-5.6 Sol", "5", "30", "0.50", "6.25"),
-            (
-                "gpt-5.6-terra",
-                "GPT-5.6 Terra",
-                "2.50",
-                "15",
-                "0.25",
-                "3.125",
-            ),
-            ("gpt-5.6-luna", "GPT-5.6 Luna", "1", "6", "0.10", "1.25"),
-            // 裸名 gpt-5.6 是 sol 的官方别名；effort 后缀对齐 gpt-5.5 系列的记账形态
-            ("gpt-5.6", "GPT-5.6 Sol", "5", "30", "0.50", "6.25"),
-            ("gpt-5.6-low", "GPT-5.6 Sol", "5", "30", "0.50", "6.25"),
-            ("gpt-5.6-medium", "GPT-5.6 Sol", "5", "30", "0.50", "6.25"),
-            ("gpt-5.6-high", "GPT-5.6 Sol", "5", "30", "0.50", "6.25"),
-            ("gpt-5.6-xhigh", "GPT-5.6 Sol", "5", "30", "0.50", "6.25"),
-            ("gpt-5.6-minimal", "GPT-5.6 Sol", "5", "30", "0.50", "6.25"),
-            // GPT-5.5 系列
-            ("gpt-5.5", "GPT-5.5", "5", "30", "0.50", "0"),
-            ("gpt-5.5-low", "GPT-5.5", "5", "30", "0.50", "0"),
-            ("gpt-5.5-medium", "GPT-5.5", "5", "30", "0.50", "0"),
-            ("gpt-5.5-high", "GPT-5.5", "5", "30", "0.50", "0"),
-            ("gpt-5.5-xhigh", "GPT-5.5", "5", "30", "0.50", "0"),
-            ("gpt-5.5-minimal", "GPT-5.5", "5", "30", "0.50", "0"),
-            // GPT-5.4 系列
-            ("gpt-5.4", "GPT-5.4", "2.50", "15", "0.25", "0"),
-            ("gpt-5.4-mini", "GPT-5.4 Mini", "0.75", "4.50", "0.075", "0"),
-            ("gpt-5.4-nano", "GPT-5.4 Nano", "0.20", "1.25", "0.02", "0"),
-            // GPT-5.2 系列
-            ("gpt-5.2", "GPT-5.2", "1.75", "14", "0.175", "0"),
-            ("gpt-5.2-low", "GPT-5.2", "1.75", "14", "0.175", "0"),
-            ("gpt-5.2-medium", "GPT-5.2", "1.75", "14", "0.175", "0"),
-            ("gpt-5.2-high", "GPT-5.2", "1.75", "14", "0.175", "0"),
-            ("gpt-5.2-xhigh", "GPT-5.2", "1.75", "14", "0.175", "0"),
-            ("gpt-5.2-codex", "GPT-5.2 Codex", "1.75", "14", "0.175", "0"),
-            (
-                "gpt-5.2-codex-low",
-                "GPT-5.2 Codex",
-                "1.75",
-                "14",
-                "0.175",
-                "0",
-            ),
-            (
-                "gpt-5.2-codex-medium",
-                "GPT-5.2 Codex",
-                "1.75",
-                "14",
-                "0.175",
-                "0",
-            ),
-            (
-                "gpt-5.2-codex-high",
-                "GPT-5.2 Codex",
-                "1.75",
-                "14",
-                "0.175",
-                "0",
-            ),
-            (
-                "gpt-5.2-codex-xhigh",
-                "GPT-5.2 Codex",
-                "1.75",
-                "14",
-                "0.175",
-                "0",
-            ),
-            // GPT-5.3 Codex 系列
-            ("gpt-5.3-codex", "GPT-5.3 Codex", "1.75", "14", "0.175", "0"),
-            (
-                "gpt-5.3-codex-low",
-                "GPT-5.3 Codex",
-                "1.75",
-                "14",
-                "0.175",
-                "0",
-            ),
-            (
-                "gpt-5.3-codex-medium",
-                "GPT-5.3 Codex",
-                "1.75",
-                "14",
-                "0.175",
-                "0",
-            ),
-            (
-                "gpt-5.3-codex-high",
-                "GPT-5.3 Codex",
-                "1.75",
-                "14",
-                "0.175",
-                "0",
-            ),
-            (
-                "gpt-5.3-codex-xhigh",
-                "GPT-5.3 Codex",
-                "1.75",
-                "14",
-                "0.175",
-                "0",
-            ),
-            // GPT-5.1 系列
-            ("gpt-5.1", "GPT-5.1", "1.25", "10", "0.125", "0"),
-            ("gpt-5.1-low", "GPT-5.1", "1.25", "10", "0.125", "0"),
-            ("gpt-5.1-medium", "GPT-5.1", "1.25", "10", "0.125", "0"),
-            ("gpt-5.1-high", "GPT-5.1", "1.25", "10", "0.125", "0"),
-            ("gpt-5.1-minimal", "GPT-5.1", "1.25", "10", "0.125", "0"),
-            ("gpt-5.1-codex", "GPT-5.1 Codex", "1.25", "10", "0.125", "0"),
-            (
-                "gpt-5.1-codex-mini",
-                "GPT-5.1 Codex",
-                "1.25",
-                "10",
-                "0.125",
-                "0",
-            ),
-            (
-                "gpt-5.1-codex-max",
-                "GPT-5.1 Codex",
-                "1.25",
-                "10",
-                "0.125",
-                "0",
-            ),
-            (
-                "gpt-5.1-codex-max-high",
-                "GPT-5.1 Codex",
-                "1.25",
-                "10",
-                "0.125",
-                "0",
-            ),
-            (
-                "gpt-5.1-codex-max-xhigh",
-                "GPT-5.1 Codex",
-                "1.25",
-                "10",
-                "0.125",
-                "0",
-            ),
-            // GPT-5 系列
-            ("gpt-5", "GPT-5", "1.25", "10", "0.125", "0"),
-            ("gpt-5-low", "GPT-5", "1.25", "10", "0.125", "0"),
-            ("gpt-5-medium", "GPT-5", "1.25", "10", "0.125", "0"),
-            ("gpt-5-high", "GPT-5", "1.25", "10", "0.125", "0"),
-            ("gpt-5-minimal", "GPT-5", "1.25", "10", "0.125", "0"),
-            ("gpt-5-codex", "GPT-5 Codex", "1.25", "10", "0.125", "0"),
-            ("gpt-5-codex-low", "GPT-5 Codex", "1.25", "10", "0.125", "0"),
-            (
-                "gpt-5-codex-medium",
-                "GPT-5 Codex",
-                "1.25",
-                "10",
-                "0.125",
-                "0",
-            ),
-            (
-                "gpt-5-codex-high",
-                "GPT-5 Codex",
-                "1.25",
-                "10",
-                "0.125",
-                "0",
-            ),
-            (
-                "gpt-5-codex-mini",
-                "GPT-5 Codex",
-                "1.25",
-                "10",
-                "0.125",
-                "0",
-            ),
-            (
-                "gpt-5-codex-mini-medium",
-                "GPT-5 Codex",
-                "1.25",
-                "10",
-                "0.125",
-                "0",
-            ),
-            (
-                "gpt-5-codex-mini-high",
-                "GPT-5 Codex",
-                "1.25",
-                "10",
-                "0.125",
-                "0",
-            ),
-            // OpenAI Reasoning 系列
-            ("o3", "OpenAI o3", "2", "8", "0.50", "0"),
-            ("o4-mini", "OpenAI o4-mini", "1.10", "4.40", "0.275", "0"),
-            // GPT-4.1 系列
-            ("gpt-4.1", "GPT-4.1", "2", "8", "0.50", "0"),
-            ("gpt-4.1-mini", "GPT-4.1 Mini", "0.40", "1.60", "0.10", "0"),
-            ("gpt-4.1-nano", "GPT-4.1 Nano", "0.10", "0.40", "0.025", "0"),
-            // Gemini 3.5 系列
-            (
-                "gemini-3.5-flash",
-                "Gemini 3.5 Flash",
-                "1.50",
-                "9.00",
-                "0.15",
-                "0",
-            ),
-            // Gemini 3.1 系列
-            (
-                "gemini-3.1-pro-preview",
-                "Gemini 3.1 Pro Preview",
-                "2",
-                "12",
-                "0.20",
-                "0",
-            ),
-            (
-                "gemini-3.1-flash-lite",
-                "Gemini 3.1 Flash Lite",
-                "0.25",
-                "1.50",
-                "0.025",
-                "0",
-            ),
-            (
-                "gemini-3.1-flash-lite-preview",
-                "Gemini 3.1 Flash Lite Preview",
-                "0.25",
-                "1.50",
-                "0.025",
-                "0",
-            ),
-            // Gemini 3 系列
-            (
-                "gemini-3-pro-preview",
-                "Gemini 3 Pro Preview",
-                "2",
-                "12",
-                "0.2",
-                "0",
-            ),
-            (
-                "gemini-3-flash-preview",
-                "Gemini 3 Flash Preview",
-                "0.5",
-                "3",
-                "0.05",
-                "0",
-            ),
-            // Gemini 2.5 系列
-            (
-                "gemini-2.5-pro",
-                "Gemini 2.5 Pro",
-                "1.25",
-                "10",
-                "0.125",
-                "0",
-            ),
-            (
-                "gemini-2.5-flash",
-                "Gemini 2.5 Flash",
-                "0.3",
-                "2.5",
-                "0.03",
-                "0",
-            ),
-            (
-                "gemini-2.5-flash-lite",
-                "Gemini 2.5 Flash Lite",
-                "0.10",
-                "0.40",
-                "0.01",
-                "0",
-            ),
-            // Gemini 2.0 系列
-            (
-                "gemini-2.0-flash",
-                "Gemini 2.0 Flash",
-                "0.10",
-                "0.40",
-                "0.025",
-                "0",
-            ),
-            // StepFun 系列
-            (
-                "step-3.7-flash",
-                "Step 3.7 Flash",
-                "0.19",
-                "1.13",
-                "0.04",
-                "0",
-            ),
-            (
-                "step-3.5-flash",
-                "Step 3.5 Flash",
-                "0.10",
-                "0.30",
-                "0.02",
-                "0",
-            ),
-            (
-                "step-3.5-flash-2603",
-                "Step 3.5 Flash 2603",
-                "0.10",
-                "0.30",
-                "0.02",
-                "0",
-            ),
-            // ====== 国产模型 (USD/1M tokens) ======
-            // Doubao (字节跳动)
-            // Seed 2.1 系列（2026-06 火山引擎官方 list 价，CNY 按 ~7.14 折算）：
-            //   pro   输入 6 元 / 输出 30 元 / 命中 1.2 元
-            //   turbo 输入 3 元 / 输出 15 元 / 命中 0.6 元
-            // 「缓存存储 0.017 元/M/小时」是按时长计费的存储费，与本表 cache_creation（按 token 写入价）口径不同，置 0。
-            (
-                "doubao-seed-2-1-pro",
-                "Doubao Seed 2.1 Pro",
-                "0.84",
-                "4.2",
-                "0.17",
-                "0",
-            ),
-            (
-                "doubao-seed-2-1-turbo",
-                "Doubao Seed 2.1 Turbo",
-                "0.42",
-                "2.1",
-                "0.08",
-                "0",
-            ),
-            (
-                "doubao-seed-code",
-                "Doubao Seed Code",
-                "0.17",
-                "1.11",
-                "0.02",
-                "0",
-            ),
-            (
-                "doubao-seed-2-0-pro",
-                "Doubao Seed 2.0 Pro",
-                "0.47",
-                "2.37",
-                "0.09",
-                "0",
-            ),
-            (
-                "doubao-seed-2-0-code",
-                "Doubao Seed 2.0 Code",
-                "0.47",
-                "2.37",
-                "0.09",
-                "0",
-            ),
-            (
-                "doubao-seed-2-0-code-preview-latest",
-                "Doubao Seed 2.0 Code Preview",
-                "0.47",
-                "2.37",
-                "0.09",
-                "0",
-            ),
-            (
-                "doubao-seed-2-0-lite",
-                "Doubao Seed 2.0 Lite",
-                "0.08",
-                "0.50",
-                "0.017",
-                "0",
-            ),
-            (
-                "doubao-seed-2-0-mini",
-                "Doubao Seed 2.0 Mini",
-                "0.03",
-                "0.31",
-                "0.0056",
-                "0",
-            ),
-            // DeepSeek 系列
-            (
-                "deepseek-v3.2",
-                "DeepSeek V3.2",
-                "0.28",
-                "0.42",
-                "0.028",
-                "0",
-            ),
-            (
-                "deepseek-v3.1",
-                "DeepSeek V3.1",
-                "0.55",
-                "1.67",
-                "0.055",
-                "0",
-            ),
-            ("deepseek-v3", "DeepSeek V3", "0.28", "1.11", "0.028", "0"),
-            (
-                "deepseek-chat",
-                "DeepSeek Chat",
-                "0.27",
-                "1.10",
-                "0.07",
-                "0",
-            ),
-            (
-                "deepseek-reasoner",
-                "DeepSeek Reasoner",
-                "0.55",
-                "2.19",
-                "0.14",
-                "0",
-            ),
-            // DeepSeek V4 系列（官方 CNY 按 1 USD ≈ 7.14 折算）
-            (
-                "deepseek-v4-flash",
-                "DeepSeek V4 Flash",
-                "0.14",
-                "0.28",
-                "0.0028",
-                "0",
-            ),
-            (
-                "deepseek-v4-pro",
-                "DeepSeek V4 Pro",
-                "0.435",
-                "0.87",
-                "0.003625",
-                "0",
-            ),
-            // Kimi (月之暗面)
-            (
-                "kimi-k2-thinking",
-                "Kimi K2 Thinking",
-                "0.55",
-                "2.20",
-                "0.10",
-                "0",
-            ),
-            ("kimi-k2-0905", "Kimi K2", "0.55", "2.20", "0.10", "0"),
-            (
-                "kimi-k2-turbo",
-                "Kimi K2 Turbo",
-                "1.11",
-                "8.06",
-                "0.14",
-                "0",
-            ),
-            ("kimi-k2.5", "Kimi K2.5", "0.60", "3.00", "0.10", "0"),
-            ("kimi-k2.6", "Kimi K2.6", "0.95", "4.00", "0.16", "0"),
-            (
-                "kimi-k2.7-code",
-                "Kimi K2.7 Code",
-                "0.95",
-                "4.00",
-                "0.19",
-                "0",
-            ),
-            // 腾讯混元 (Tencent Hunyuan)（官方 CNY 1/4/0.25 按 1 USD ≈ 7.14 折算；Hy3 阶梯计价取最低档）
-            ("hunyuan-hy3", "Hunyuan Hy3", "0.14", "0.56", "0.035", "0"),
-            ("hy3", "Hunyuan Hy3", "0.14", "0.56", "0.035", "0"),
-            // MiniMax 系列
-            ("minimax-m2.1", "MiniMax M2.1", "0.27", "0.95", "0.03", "0"),
-            (
-                "minimax-m2.1-lightning",
-                "MiniMax M2.1 Lightning",
-                "0.27",
-                "2.33",
-                "0.03",
-                "0",
-            ),
-            ("minimax-m2", "MiniMax M2", "0.27", "0.95", "0.03", "0"),
-            ("minimax-m2.5", "MiniMax M2.5", "0.15", "0.95", "0.03", "0"),
-            (
-                "minimax-m2.5-lightning",
-                "MiniMax M2.5 Lightning",
-                "0.30",
-                "2.40",
-                "0.03",
-                "0",
-            ),
-            (
-                "minimax-m2.7",
-                "MiniMax M2.7",
-                "0.30",
-                "1.20",
-                "0.06",
-                "0.375",
-            ),
-            (
-                "minimax-m2.7-highspeed",
-                "MiniMax M2.7 Highspeed",
-                "0.60",
-                "2.40",
-                "0.06",
-                "0.375",
-            ),
-            ("minimax-m3", "MiniMax M3", "0.60", "2.40", "0.12", "0"),
-            // GLM (智谱)
-            ("glm-4.7", "GLM-4.7", "0.6", "2.2", "0.11", "0"),
-            ("glm-4.6", "GLM-4.6", "0.6", "2.2", "0.11", "0"),
-            ("glm-5", "GLM-5", "1", "3.2", "0.2", "0"),
-            ("glm-5.1", "GLM-5.1", "1.4", "4.4", "0.26", "0"),
-            ("glm-5.2", "GLM-5.2", "1.4", "4.4", "0.26", "0"),
-            // MiMo (小米)
-            (
-                "mimo-v2-flash",
-                "MiMo V2 Flash",
-                "0.09",
-                "0.29",
-                "0.009",
-                "0",
-            ),
-            ("mimo-v2-pro", "MiMo V2 Pro", "0.435", "0.87", "0.0036", "0"),
-            ("mimo-v2.5", "MiMo V2.5", "0.14", "0.29", "0.0028", "0"),
-            (
-                "mimo-v2.5-pro",
-                "MiMo V2.5 Pro",
-                "0.435",
-                "0.87",
-                "0.0036",
-                "0",
-            ),
-            // Qwen 系列 (阿里巴巴)
-            ("qwen3.7-max", "Qwen3.7 Max", "2.50", "7.50", "0.25", "0"),
-            ("qwen3.7-plus", "Qwen3.7 Plus", "0.40", "1.60", "0.08", "0"),
-            (
-                "qwen3.6-plus",
-                "Qwen3.6 Plus",
-                "0.325",
-                "1.95",
-                "0.065",
-                "0",
-            ),
-            ("qwen3.5-plus", "Qwen3.5 Plus", "0.26", "1.56", "0.052", "0"),
-            ("qwen3-max", "Qwen3 Max", "0.78", "3.90", "0", "0"),
-            (
-                "qwen3-235b-a22b",
-                "Qwen3 235B-A22B",
-                "0.70",
-                "8.40",
-                "0",
-                "0",
-            ),
-            (
-                "qwen3-coder-plus",
-                "Qwen3 Coder Plus",
-                "0.65",
-                "3.25",
-                "0.13",
-                "0",
-            ),
-            (
-                "qwen3-coder-480b",
-                "Qwen3 Coder 480B",
-                "0.65",
-                "3.25",
-                "0",
-                "0",
-            ),
-            (
-                "qwen3-coder-480b-a35b-instruct",
-                "Qwen3 Coder 480B-A35B Instruct",
-                "0.65",
-                "3.25",
-                "0",
-                "0",
-            ),
-            (
-                "qwen3-coder-flash",
-                "Qwen3 Coder Flash",
-                "0.195",
-                "0.975",
-                "0.039",
-                "0",
-            ),
-            (
-                "qwen3-coder-next",
-                "Qwen3 Coder Next",
-                "0.12",
-                "0.75",
-                "0",
-                "0",
-            ),
-            ("qwq-plus", "QwQ Plus", "0.80", "2.40", "0", "0"),
-            ("qwq-32b", "QwQ 32B", "0.20", "0.60", "0", "0"),
-            ("qwen3-32b", "Qwen3 32B", "0.16", "0.64", "0", "0"),
-            // Grok 系列 (xAI)
-            ("grok-4.3", "Grok 4.3", "1.25", "2.50", "0.20", "0"),
-            (
-                "grok-4.20-0309-reasoning",
-                "Grok 4.20 Reasoning",
-                "1.25",
-                "2.50",
-                "0.20",
-                "0",
-            ),
-            (
-                "grok-4.20-0309-non-reasoning",
-                "Grok 4.20",
-                "1.25",
-                "2.50",
-                "0.20",
-                "0",
-            ),
-            (
-                "grok-4-1-fast-reasoning",
-                "Grok 4.1 Fast Reasoning",
-                "0.20",
-                "0.50",
-                "0.05",
-                "0",
-            ),
-            (
-                "grok-4-1-fast-non-reasoning",
-                "Grok 4.1 Fast",
-                "0.20",
-                "0.50",
-                "0.05",
-                "0",
-            ),
-            ("grok-4", "Grok 4", "3", "15", "0.75", "0"),
-            (
-                "grok-code-fast-1",
-                "Grok Build 0.1 (Code Fast Alias)",
-                "1",
-                "2",
-                "0.20",
-                "0",
-            ),
-            ("grok-build-0.1", "Grok Build 0.1", "1", "2", "0.20", "0"),
-            ("grok-3", "Grok 3", "3", "15", "0.75", "0"),
-            ("grok-3-mini", "Grok 3 Mini", "0.25", "0.50", "0.075", "0"),
-            // Mistral 系列
-            (
-                "mistral-medium-3.5",
-                "Mistral Medium 3.5",
-                "1.50",
-                "7.50",
-                "0",
-                "0",
-            ),
-            (
-                "mistral-small-4",
-                "Mistral Small 4",
-                "0.10",
-                "0.30",
-                "0.01",
-                "0",
-            ),
-            (
-                "devstral-small-2-2512",
-                "Devstral Small 2",
-                "0.10",
-                "0.30",
-                "0.01",
-                "0",
-            ),
-            (
-                "magistral-small",
-                "Magistral Small",
-                "0.50",
-                "1.50",
-                "0",
-                "0",
-            ),
-            ("codestral-2508", "Codestral", "0.30", "0.90", "0.03", "0"),
-            (
-                "devstral-small-1.1",
-                "Devstral Small 1.1",
-                "0.07",
-                "0.28",
-                "0.01",
-                "0",
-            ),
-            ("devstral-2-2512", "Devstral 2", "0.40", "2", "0.04", "0"),
-            (
-                "devstral-medium",
-                "Devstral Medium",
-                "0.40",
-                "2",
-                "0.04",
-                "0",
-            ),
-            (
-                "mistral-large-3-2512",
-                "Mistral Large 3",
-                "0.50",
-                "1.50",
-                "0.05",
-                "0",
-            ),
-            (
-                "mistral-medium-3.1",
-                "Mistral Medium 3.1",
-                "0.40",
-                "2",
-                "0.04",
-                "0",
-            ),
-            (
-                "mistral-small-3.2-24b",
-                "Mistral Small 3.2",
-                "0.075",
-                "0.20",
-                "0.01",
-                "0",
-            ),
-            ("magistral-medium", "Magistral Medium", "2", "5", "0", "0"),
-            // Cohere 系列
-            ("command-a", "Cohere Command A", "2.50", "10", "0", "0"),
-            (
-                "command-r-plus",
-                "Cohere Command R+",
-                "2.50",
-                "10",
-                "0",
-                "0",
-            ),
-            ("command-r", "Cohere Command R", "0.15", "0.60", "0", "0"),
-            // OpenAI 补充
-            ("o3-pro", "OpenAI o3-pro", "20", "80", "0", "0"),
-            ("o3-mini", "OpenAI o3-mini", "0.55", "2.20", "0.55", "0"),
-            ("o1", "OpenAI o1", "15", "60", "7.50", "0"),
-            ("o1-mini", "OpenAI o1-mini", "0.55", "2.20", "0.55", "0"),
-            ("codex-mini", "Codex Mini", "0.75", "3", "0.025", "0"),
-            ("gpt-5-mini", "GPT-5 Mini", "0.25", "2", "0.025", "0"),
-            ("gpt-5-nano", "GPT-5 Nano", "0.05", "0.40", "0.005", "0"),
-        ];
-
-        let mut stmt = conn
-            .prepare(
-                "INSERT OR IGNORE INTO model_pricing (
-                    model_id, display_name, input_cost_per_million, output_cost_per_million,
-                    cache_read_cost_per_million, cache_creation_cost_per_million
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            )
-            .map_err(|e| AppError::Database(format!("准备模型定价语句失败: {e}")))?;
-        for (model_id, display_name, input, output, cache_read, cache_creation) in pricing_data {
-            stmt.execute(rusqlite::params![
-                model_id,
-                display_name,
-                input,
-                output,
-                cache_read,
-                cache_creation
-            ])
-            .map_err(|e| AppError::Database(format!("插入模型定价失败: {e}")))?;
+    /// v18 → v19 (DB-22, DB-21): collapse duplicate `provider_endpoints` rows
+    /// (keeping the oldest) and enforce `UNIQUE(provider_id, app_type, url)`;
+    /// the unique index also serves the per-provider endpoint lookup.
+    fn migrate_v18_to_v19(conn: &Connection) -> Result<(), AppError> {
+        if !Self::table_exists(conn, "provider_endpoints")? {
+            return Ok(());
         }
-
-        log::info!("已插入 {} 条默认模型定价数据", pricing_data.len());
+        conn.execute(
+            "DELETE FROM provider_endpoints
+             WHERE id NOT IN (
+                 SELECT MIN(id) FROM provider_endpoints GROUP BY provider_id, app_type, url
+             )",
+            [],
+        )
+        .map_err(db_err("合并重复的 provider_endpoints 失败"))?;
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_endpoints_unique
+             ON provider_endpoints(provider_id, app_type, url)",
+            [],
+        )
+        .map_err(db_err("创建 provider_endpoints 唯一索引失败"))?;
         Ok(())
     }
 
-    fn repair_current_model_pricing(conn: &Connection) -> Result<(), AppError> {
-        let pricing_fixes = [
-            // 2026-07-12 GPT-5.6 家族 cache write=1.25× 输入价（OpenAI 5.6 起的新规），
-            // 修正早期 seed 的 0 值；只匹配未被用户改过的行
-            (
-                "gpt-5.6-sol",
-                "GPT-5.6 Sol",
-                "5",
-                "30",
-                "0.50",
-                "6.25",
-                "5",
-                "30",
-                "0.50",
-                "0",
-            ),
-            (
-                "gpt-5.6-terra",
-                "GPT-5.6 Terra",
-                "2.50",
-                "15",
-                "0.25",
-                "3.125",
-                "2.50",
-                "15",
-                "0.25",
-                "0",
-            ),
-            (
-                "gpt-5.6-luna",
-                "GPT-5.6 Luna",
-                "1",
-                "6",
-                "0.10",
-                "1.25",
-                "1",
-                "6",
-                "0.10",
-                "0",
-            ),
-            // 2026-06-10 全量核价（厂商官方 list 价；CNY 按 ~7.14 折算）
-            // GLM 4.6/4.7：旧值是中转/OpenRouter 折扣价，统一到 Z.ai 官方（与 glm-5/5.1 一致）
-            (
-                "glm-4.7", "GLM-4.7", "0.6", "2.2", "0.11", "0", "0.39", "1.75", "0.04", "0",
-            ),
-            (
-                "glm-4.6", "GLM-4.6", "0.6", "2.2", "0.11", "0", "0.28", "1.11", "0.03", "0",
-            ),
-            // Grok 4.20：xAI 已降价 2/6 → 1.25/2.50
-            (
-                "grok-4.20-0309-reasoning",
-                "Grok 4.20 Reasoning",
-                "1.25",
-                "2.50",
-                "0.20",
-                "0",
-                "2",
-                "6",
-                "0.20",
-                "0",
-            ),
-            (
-                "grok-4.20-0309-non-reasoning",
-                "Grok 4.20",
-                "1.25",
-                "2.50",
-                "0.20",
-                "0",
-                "2",
-                "6",
-                "0.20",
-                "0",
-            ),
-            // Kimi K2.5 官方 output 3.00
-            (
-                "kimi-k2.5",
-                "Kimi K2.5",
-                "0.60",
-                "3.00",
-                "0.10",
-                "0",
-                "0.60",
-                "2.50",
-                "0.10",
-                "0",
-            ),
-            // MiniMax M2.5 input 0.15
-            (
-                "minimax-m2.5",
-                "MiniMax M2.5",
-                "0.15",
-                "0.95",
-                "0.03",
-                "0",
-                "0.12",
-                "0.95",
-                "0.03",
-                "0",
-            ),
-            // Mistral Devstral 2 output 0.90 → 2（与同表 devstral-medium 一致）
-            (
-                "devstral-2-2512",
-                "Devstral 2",
-                "0.40",
-                "2",
-                "0.04",
-                "0",
-                "0.40",
-                "0.90",
-                "0.04",
-                "0",
-            ),
-            // Doubao Seed 2.0：lite 旧价贵 3-4 倍 + 全系补 cache 命中价
-            (
-                "doubao-seed-2-0-lite",
-                "Doubao Seed 2.0 Lite",
-                "0.08",
-                "0.50",
-                "0.017",
-                "0",
-                "0.25",
-                "2",
-                "0",
-                "0",
-            ),
-            (
-                "doubao-seed-2-0-pro",
-                "Doubao Seed 2.0 Pro",
-                "0.47",
-                "2.37",
-                "0.09",
-                "0",
-                "0.47",
-                "2.37",
-                "0",
-                "0",
-            ),
-            (
-                "doubao-seed-2-0-code",
-                "Doubao Seed 2.0 Code",
-                "0.47",
-                "2.37",
-                "0.09",
-                "0",
-                "0.47",
-                "2.37",
-                "0",
-                "0",
-            ),
-            (
-                "doubao-seed-2-0-code-preview-latest",
-                "Doubao Seed 2.0 Code Preview",
-                "0.47",
-                "2.37",
-                "0.09",
-                "0",
-                "0.47",
-                "2.37",
-                "0",
-                "0",
-            ),
-            (
-                "doubao-seed-2-0-mini",
-                "Doubao Seed 2.0 Mini",
-                "0.03",
-                "0.31",
-                "0.0056",
-                "0",
-                "0.03",
-                "0.31",
-                "0",
-                "0",
-            ),
-            // MiMo：5/27 永久降价，旧值是旧价
-            (
-                "mimo-v2-pro",
-                "MiMo V2 Pro",
-                "0.435",
-                "0.87",
-                "0.0036",
-                "0",
-                "1",
-                "3",
-                "0",
-                "0",
-            ),
-            (
-                "mimo-v2.5",
-                "MiMo V2.5",
-                "0.14",
-                "0.29",
-                "0.0028",
-                "0",
-                "0.09",
-                "0.29",
-                "0.009",
-                "0",
-            ),
-            (
-                "mimo-v2.5-pro",
-                "MiMo V2.5 Pro",
-                "0.435",
-                "0.87",
-                "0.0036",
-                "0",
-                "1",
-                "3",
-                "0",
-                "0",
-            ),
-            // Qwen：官方"隐式缓存 = 输入 20%"补 cache 命中价
-            (
-                "qwen3.6-plus",
-                "Qwen3.6 Plus",
-                "0.325",
-                "1.95",
-                "0.065",
-                "0",
-                "0.325",
-                "1.95",
-                "0",
-                "0",
-            ),
-            (
-                "qwen3.5-plus",
-                "Qwen3.5 Plus",
-                "0.26",
-                "1.56",
-                "0.052",
-                "0",
-                "0.26",
-                "1.56",
-                "0",
-                "0",
-            ),
-            (
-                "qwen3-coder-plus",
-                "Qwen3 Coder Plus",
-                "0.65",
-                "3.25",
-                "0.13",
-                "0",
-                "0.65",
-                "3.25",
-                "0",
-                "0",
-            ),
-            (
-                "qwen3-coder-flash",
-                "Qwen3 Coder Flash",
-                "0.195",
-                "0.975",
-                "0.039",
-                "0",
-                "0.195",
-                "0.975",
-                "0",
-                "0",
-            ),
-            (
-                "deepseek-v4-flash",
-                "DeepSeek V4 Flash",
-                "0.14",
-                "0.28",
-                "0.0028",
-                "0",
-                "0.14",
-                "0.28",
-                "0.028",
-                "0",
-            ),
-            (
-                "deepseek-v4-pro",
-                "DeepSeek V4 Pro",
-                "0.435",
-                "0.87",
-                "0.003625",
-                "0",
-                "1.68",
-                "3.36",
-                "0.14",
-                "0",
-            ),
-            (
-                "glm-5", "GLM-5", "1", "3.2", "0.2", "0", "0.72", "2.30", "0", "0",
-            ),
-            (
-                "glm-5.1", "GLM-5.1", "1.4", "4.4", "0.26", "0", "0.95", "3.15", "0", "0",
-            ),
-            (
-                "grok-code-fast-1",
-                "Grok Build 0.1 (Code Fast Alias)",
-                "1",
-                "2",
-                "0.20",
-                "0",
-                "0.20",
-                "1.50",
-                "0.02",
-                "0",
-            ),
-        ];
+    /// v21 → v22 (DB-20, first increment): per-row `sync_rev` /
+    /// `sync_updated_at` (Unix ms) on the synced entity tables and a local
+    /// `sync_tombstones` table recording deletions, maintained by the app's
+    /// own triggers ([`super::sync_rows`]). The sync wire format is unchanged:
+    /// the new columns travel inside the existing table dumps (older clients
+    /// import them as unknown-but-harmless columns) and the tombstone table is
+    /// device-local and not exported.
+    fn migrate_v21_to_v22(conn: &Connection) -> Result<(), AppError> {
+        super::sync_rows::add_row_version_columns(conn)?;
+        super::sync_rows::ensure_tombstone_table(conn)?;
+        super::sync_rows::create_row_version_triggers(conn)
+    }
 
-        for (
-            model_id,
-            display_name,
-            input,
-            output,
-            cache_read,
-            cache_creation,
-            old_input,
-            old_output,
-            old_cache_read,
-            old_cache_creation,
-        ) in pricing_fixes
+    /// v20 → v21 (DB-18): rebuild `proxy_config` without the
+    /// `CHECK (app_type IN (...))` constraint, so a new proxied app needs no
+    /// table rebuild; `AppType` is validated in Rust.
+    fn migrate_v20_to_v21(conn: &Connection) -> Result<(), AppError> {
+        if !Self::table_exists(conn, "proxy_config")?
+            || !Self::has_column(conn, "proxy_config", "app_type")?
         {
-            conn.execute(
-                "UPDATE model_pricing SET
-                    display_name = ?2,
-                    input_cost_per_million = ?3,
-                    output_cost_per_million = ?4,
-                    cache_read_cost_per_million = ?5,
-                    cache_creation_cost_per_million = ?6
-                 WHERE model_id = ?1
-                   AND input_cost_per_million = ?7
-                   AND output_cost_per_million = ?8
-                   AND cache_read_cost_per_million = ?9
-                   AND cache_creation_cost_per_million = ?10",
-                rusqlite::params![
-                    model_id,
-                    display_name,
-                    input,
-                    output,
-                    cache_read,
-                    cache_creation,
-                    old_input,
-                    old_output,
-                    old_cache_read,
-                    old_cache_creation
-                ],
-            )
-            .map_err(|e| AppError::Database(format!("修复模型 {model_id} 定价失败: {e}")))?;
+            return Ok(());
         }
-
+        let columns = "app_type, proxy_enabled, listen_address, listen_port, enable_logging, \
+            enabled, auto_failover_enabled, max_retries, streaming_first_byte_timeout, \
+            streaming_idle_timeout, non_streaming_timeout, circuit_failure_threshold, \
+            circuit_success_threshold, circuit_timeout_seconds, circuit_error_rate_threshold, \
+            circuit_min_requests, default_cost_multiplier, pricing_model_source, \
+            live_takeover_active, created_at, updated_at";
+        conn.execute_batch(&format!(
+            "CREATE TABLE proxy_config_v21 (
+                app_type TEXT PRIMARY KEY NOT NULL,
+                proxy_enabled INTEGER NOT NULL DEFAULT 0, listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
+                listen_port INTEGER NOT NULL DEFAULT 15721, enable_logging INTEGER NOT NULL DEFAULT 1,
+                enabled INTEGER NOT NULL DEFAULT 0, auto_failover_enabled INTEGER NOT NULL DEFAULT 0,
+                max_retries INTEGER NOT NULL DEFAULT 3, streaming_first_byte_timeout INTEGER NOT NULL DEFAULT 60,
+                streaming_idle_timeout INTEGER NOT NULL DEFAULT 120, non_streaming_timeout INTEGER NOT NULL DEFAULT 600,
+                circuit_failure_threshold INTEGER NOT NULL DEFAULT 4, circuit_success_threshold INTEGER NOT NULL DEFAULT 2,
+                circuit_timeout_seconds INTEGER NOT NULL DEFAULT 60, circuit_error_rate_threshold REAL NOT NULL DEFAULT 0.6,
+                circuit_min_requests INTEGER NOT NULL DEFAULT 10,
+                default_cost_multiplier TEXT NOT NULL DEFAULT '1',
+                pricing_model_source TEXT NOT NULL DEFAULT 'response',
+                live_takeover_active INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            INSERT INTO proxy_config_v21 ({columns}) SELECT {columns} FROM proxy_config;
+            DROP TABLE proxy_config;
+            ALTER TABLE proxy_config_v21 RENAME TO proxy_config;"
+        ))
+        .map_err(db_err("重建 proxy_config 失败"))?;
         Ok(())
+    }
+
+    /// v19 → v20 (DB-19): `model_pricing.source` (`builtin` | `user`) and
+    /// `seed_version`. Rows still holding a current or previous built-in value
+    /// become `builtin` (refreshed by the next seeding); everything else is
+    /// treated as the user's and never overwritten again.
+    fn migrate_v19_to_v20(conn: &Connection) -> Result<(), AppError> {
+        if !Self::table_exists(conn, "model_pricing")? {
+            return Ok(());
+        }
+        Self::add_column_if_missing(
+            conn,
+            "model_pricing",
+            "source",
+            "TEXT NOT NULL DEFAULT 'user'",
+        )?;
+        Self::add_column_if_missing(
+            conn,
+            "model_pricing",
+            "seed_version",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        super::pricing_seed::classify_existing_rows(conn)
+    }
+
+    /// Insert the built-in models that are missing (historical migrations call
+    /// this before `model_pricing.source` exists). The price list itself lives
+    /// in `model_pricing.json` (DB-19), see [`super::pricing_seed`].
+    fn seed_model_pricing(conn: &Connection) -> Result<(), AppError> {
+        super::pricing_seed::insert_missing_builtin_rows_legacy(conn)
     }
 
     /// 确保模型定价表具备默认数据
@@ -3119,26 +2082,20 @@ impl Database {
     }
 
     fn ensure_model_pricing_seeded_on_conn(conn: &Connection) -> Result<(), AppError> {
-        // 每次启动都执行 INSERT OR IGNORE，增量追加新模型；仅修复仍等于旧内置值的定价。
-        // 数百条语句放进同一个 SAVEPOINT：只提交一次，而不是逐条 autocommit（DB-09）。
-        conn.execute("SAVEPOINT seed_model_pricing;", [])
-            .map_err(|e| AppError::Database(format!("开启定价种子 savepoint 失败: {e}")))?;
-        let result =
-            Self::seed_model_pricing(conn).and_then(|_| Self::repair_current_model_pricing(conn));
-        match result {
-            Ok(()) => conn
-                .execute("RELEASE seed_model_pricing;", [])
-                .map(|_| ())
-                .map_err(|e| AppError::Database(format!("提交定价种子失败: {e}"))),
-            Err(e) => {
-                conn.execute("ROLLBACK TO seed_model_pricing;", []).ok();
-                conn.execute("RELEASE seed_model_pricing;", []).ok();
-                Err(e)
-            }
+        // DB-19/DB-34: gated on the bundled seed version, so an up-to-date
+        // database issues no writes (startup and every pricing-page open).
+        if !Self::has_column(conn, "model_pricing", "source")?
+            || !super::pricing_seed::needs_seeding(conn)?
+        {
+            return Ok(());
         }
+        // All rows in one SAVEPOINT: one commit, never a half-seeded table.
+        Self::in_savepoint(conn, "seed_model_pricing", || {
+            let changed = super::pricing_seed::seed_builtin_pricing(conn)?;
+            log::info!("内置模型定价已更新（{changed} 行）");
+            Ok(())
+        })
     }
-
-    // --- 辅助方法 ---
 
     pub(crate) fn get_user_version(conn: &Connection) -> Result<i32, AppError> {
         conn.query_row("PRAGMA user_version;", [], |row| row.get(0))
@@ -3505,7 +2462,7 @@ mod tests {
                 SCHEMA_VERSION,
                 crate::services::sync_protocol::DB_COMPAT_VERSION
             ),
-            (18, 6),
+            (22, 6),
             "SCHEMA_VERSION changed without reviewing DB_COMPAT_VERSION (or vice versa)"
         );
         assert_eq!(
@@ -3686,6 +2643,34 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(triggers, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_v18_to_v19_collapses_duplicate_endpoints() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        Database::create_tables_on_conn(&conn)?;
+        conn.execute_batch(
+            "DROP INDEX idx_provider_endpoints_unique;
+             INSERT INTO providers (id, app_type, name, settings_config) VALUES ('p', 'claude', 'p', '{}');
+             INSERT INTO provider_endpoints (provider_id, app_type, url, added_at) VALUES ('p', 'claude', 'https://a', 1);
+             INSERT INTO provider_endpoints (provider_id, app_type, url, added_at) VALUES ('p', 'claude', 'https://a', 2);
+             INSERT INTO provider_endpoints (provider_id, app_type, url, added_at) VALUES ('p', 'claude', 'https://b', 3);",
+        )?;
+        Database::set_user_version(&conn, 18)?;
+        Database::apply_schema_migrations_on_conn(&conn)?;
+
+        let rows: Vec<(String, i64)> = conn
+            .prepare("SELECT url, added_at FROM provider_endpoints ORDER BY url")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        assert_eq!(rows, vec![("https://a".into(), 1), ("https://b".into(), 3)]);
+        assert!(conn
+            .execute(
+                "INSERT INTO provider_endpoints (provider_id, app_type, url) VALUES ('p', 'claude', 'https://a')",
+                [],
+            )
+            .is_err());
         Ok(())
     }
 
