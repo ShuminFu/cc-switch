@@ -74,6 +74,7 @@ pub struct UpstreamTarget {
 }
 
 /// Rewrite the client endpoint for the chosen bridge and build the upstream URL.
+#[allow(clippy::too_many_arguments)]
 pub fn resolve_upstream_target(
     adapter: &dyn ProviderAdapter,
     provider: &Provider,

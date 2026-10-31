@@ -2710,7 +2710,9 @@ mod tests {
         );
         let error = validate_codex_official_authorization(&headers)
             .expect_err("stale placeholder must be rejected");
-        assert!(matches!(error, ProxyError::AuthError(message) if message.contains("restart Codex")));
+        assert!(
+            matches!(error, ProxyError::AuthError(message) if message.contains("restart Codex"))
+        );
     }
 
     #[test]
