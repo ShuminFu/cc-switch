@@ -19,6 +19,7 @@ import { FirstRunWizard } from "@/components/onboarding";
 import OpenClawHealthBanner from "@/components/openclaw/OpenClawHealthBanner";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
 import { EnvConflictBanner } from "@/app/EnvConflictBanner";
+import { ManagedPolicyBanner } from "@/components/policy/ManagedPolicyBanner";
 import {
   NavigationProvider,
   VIEW_PARENT,
@@ -133,6 +134,7 @@ function AppShell() {
         settingsLoaded={Boolean(settingsData)}
       />
       <EnvConflictBanner activeApp={activeApp} />
+      <ManagedPolicyBanner />
 
       <PageHeaderSlotsProvider value={slots}>
         <header

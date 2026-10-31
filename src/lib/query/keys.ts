@@ -168,6 +168,11 @@ export const queryKeys = {
     all: ["profiles"] as const,
   },
 
+  /** Managed (team) policy file state, PRODUCT-24. */
+  policy: {
+    status: ["managedPolicyStatus"] as const,
+  },
+
   proxy: {
     status: ["proxyStatus"] as const,
     takeoverStatus: ["proxyTakeoverStatus"] as const,

@@ -14,6 +14,7 @@ mod config;
 mod database;
 mod deeplink;
 mod error;
+mod features;
 mod gemini_config;
 mod gemini_mcp;
 mod grok_config;
@@ -977,6 +978,7 @@ pub fn run() {
             // Deep link import
             commands::parse_deeplink,
             commands::deeplink_frontend_ready,
+            features::policy::get_managed_policy_status,
             commands::merge_deeplink_config,
             commands::import_from_deeplink,
             commands::import_from_deeplink_unified,

@@ -52,6 +52,9 @@ const secretsVaultStatus = (enabled: boolean) => ({
 });
 
 export const handlers = [
+  http.post(`${TAURI_ENDPOINT}/get_managed_policy_status`, () =>
+    success({ state: "none", signed: false, unknownFeatures: [] }),
+  ),
   http.post(`${TAURI_ENDPOINT}/get_migration_result`, () => success(false)),
   http.post(`${TAURI_ENDPOINT}/get_skills_migration_result`, () =>
     success(null),

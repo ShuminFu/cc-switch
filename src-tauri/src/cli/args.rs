@@ -66,6 +66,8 @@ pub enum Command {
     Export { file: PathBuf },
     /// Import a SQL backup file (same as Settings → Import in the GUI)
     Import { file: PathBuf },
+    /// Show the managed (team) policy that applies to this machine
+    Policy,
 }
 
 #[derive(Debug, Subcommand)]
