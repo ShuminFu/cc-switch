@@ -11,6 +11,8 @@ mod codex_history_migration;
 mod codex_state_db;
 mod commands;
 mod config;
+#[cfg(test)]
+mod config_props;
 mod database;
 mod deeplink;
 mod error;
@@ -37,6 +39,8 @@ mod services;
 mod session_manager;
 mod settings;
 mod store;
+#[cfg(test)]
+mod test_support;
 
 mod tray;
 mod usage_events;

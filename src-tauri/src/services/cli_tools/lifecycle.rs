@@ -1391,7 +1391,7 @@ pub(crate) fn extend_mise_node_search_paths(paths: &mut Vec<std::path::PathBuf>,
 /// 单探兜底 (`scan_cli_version`) 与全量枚举 (`enumerate_tool_installations`) 共用，
 /// 确保两条路径看到的是同一组安装位置。
 pub(crate) fn build_tool_search_paths(tool: &str) -> Vec<std::path::PathBuf> {
-    let home = dirs::home_dir().unwrap_or_default();
+    let home = crate::config::get_home_dir();
 
     // 常见的安装路径（原生安装优先）
     let mut search_paths: Vec<std::path::PathBuf> = Vec::new();

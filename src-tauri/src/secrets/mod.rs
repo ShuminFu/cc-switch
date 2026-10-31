@@ -213,9 +213,7 @@ fn select_backend() -> Box<dyn SecretBackend> {
     }
     // Tests (unit tests, and integration tests that isolate HOME) must never
     // read or write the developer's real keychain.
-    let isolated_home = std::env::var("CC_SWITCH_TEST_HOME")
-        .map(|v| !v.trim().is_empty())
-        .unwrap_or(false);
+    let isolated_home = crate::config::test_home_override().is_some();
     if cfg!(test) || isolated_home {
         return Box::new(MemoryBackend::new());
     }

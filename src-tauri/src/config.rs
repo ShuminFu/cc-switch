@@ -18,19 +18,97 @@ use crate::error::AppError;
 /// ## 测试隔离
 ///
 /// 为了让 Windows CI/本地测试能稳定隔离真实用户数据，可通过 `CC_SWITCH_TEST_HOME`
-/// 显式覆盖 home dir（仅用于测试/调试场景）。
+/// 显式覆盖 home dir（仅用于测试/调试场景）。该覆盖只在 `cfg(test)` 或
+/// `test-hooks` feature 下生效（TEST-37）：发布构建忽略此环境变量。
 pub fn get_home_dir() -> PathBuf {
-    if let Ok(home) = std::env::var("CC_SWITCH_TEST_HOME") {
-        let trimmed = home.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
+    #[cfg(test)]
+    if let Some(home) = thread_test_home() {
+        return home;
+    }
+    if let Some(home) = test_home_override() {
+        return home;
     }
 
+    #[allow(clippy::disallowed_methods)] // the one sanctioned call site (TEST-38)
     dirs::home_dir().unwrap_or_else(|| {
         log::warn!("无法获取用户主目录，回退到当前目录");
         PathBuf::from(".")
     })
+}
+
+/// The `CC_SWITCH_TEST_HOME` override, if active.
+///
+/// TEST-37: the override is a test seam, so it is honoured only in unit tests
+/// and in builds with the `test-hooks` feature (enabled for integration tests
+/// through the self-referencing dev-dependency in Cargo.toml). A release build
+/// always returns `None`, so a stray env var cannot redirect the shipped app.
+#[cfg(any(test, feature = "test-hooks"))]
+pub fn test_home_override() -> Option<PathBuf> {
+    let home = std::env::var("CC_SWITCH_TEST_HOME").ok()?;
+    let trimmed = home.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    WARNED.call_once(|| log::warn!("CC_SWITCH_TEST_HOME override active: home dir = {trimmed}"));
+    Some(PathBuf::from(trimmed))
+}
+
+// TEST-09: a per-thread test home. Unit tests that call
+// `crate::test_support::isolated_home()` get their own home directory without
+// touching process-wide state (env vars, the settings cache), so they need no
+// `#[serial]`. Only visible to code running on the test's own thread (not to
+// tasks a multi-threaded tokio runtime moves elsewhere).
+#[cfg(test)]
+thread_local! {
+    static THREAD_TEST_HOME: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn thread_test_home() -> Option<PathBuf> {
+    THREAD_TEST_HOME.with(|home| home.borrow().clone())
+}
+
+#[cfg(test)]
+pub(crate) fn set_thread_test_home(home: Option<PathBuf>) -> Option<PathBuf> {
+    THREAD_TEST_HOME.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), home))
+}
+
+/// True while the current test thread runs with an isolated home: path
+/// resolution then ignores process-wide overrides (settings dirs, tool env
+/// vars) that concurrently running tests may change. Always false outside
+/// unit tests.
+#[inline]
+pub(crate) fn thread_isolated() -> bool {
+    #[cfg(test)]
+    {
+        thread_test_home().is_some()
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
+}
+
+/// Release builds ignore `CC_SWITCH_TEST_HOME` (TEST-37).
+#[cfg(not(any(test, feature = "test-hooks")))]
+#[inline]
+pub fn test_home_override() -> Option<PathBuf> {
+    None
+}
+
+/// Expand a leading `~`, `~/` or `~\\` against [`get_home_dir`], so override
+/// directories configured as `~/...` resolve under the test home in tests
+/// (TEST-38) instead of the real profile.
+pub fn expand_tilde(raw: &str) -> PathBuf {
+    if raw == "~" {
+        return get_home_dir();
+    }
+    if let Some(stripped) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\")) {
+        return get_home_dir().join(stripped);
+    }
+    PathBuf::from(raw)
 }
 
 /// 获取 Claude Code 配置目录路径
@@ -343,6 +421,7 @@ pub fn ensure_private_dir(dir: &Path) -> Result<(), AppError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        #[allow(clippy::disallowed_methods)] // compares against the real profile dir
         let is_home = dirs::home_dir().is_some_and(|home| home == dir);
         if !is_home {
             if let Ok(meta) = fs::metadata(dir) {
@@ -718,6 +797,18 @@ pub(crate) fn backup_file_into_dir(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // TEST-38: `~` expansion of override dirs resolves through the home seam,
+    // so a test home (CC_SWITCH_TEST_HOME) also covers `~/...` overrides.
+    #[test]
+    fn expand_tilde_resolves_against_home_seam() {
+        let home = get_home_dir();
+        assert_eq!(expand_tilde("~"), home);
+        assert_eq!(expand_tilde("~/a/b"), home.join("a/b"));
+        assert_eq!(expand_tilde("~\\c"), home.join("c"));
+        assert_eq!(expand_tilde("/abs/~/x"), PathBuf::from("/abs/~/x"));
+        assert_eq!(expand_tilde("~user"), PathBuf::from("~user"));
+    }
 
     #[test]
     fn derive_mcp_path_from_override_uses_config_dir_for_custom_path() {

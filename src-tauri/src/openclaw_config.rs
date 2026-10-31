@@ -734,37 +734,17 @@ pub fn set_tools_config(tools: &OpenClawToolsConfig) -> Result<OpenClawWriteOutc
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
-    use std::sync::{Mutex, OnceLock};
 
-    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-    }
-
+    /// Seeds `~/.openclaw/openclaw.json` in a thread-local test home (TEST-09):
+    /// no env vars or shared settings are touched, so no `#[serial]` needed.
     fn with_test_paths<T>(source: &str, test: impl FnOnce(&Path) -> T) -> T {
-        let _guard = test_guard();
-        let temp = tempfile::tempdir().unwrap();
-        let openclaw_dir = temp.path().join(".openclaw");
+        let home = crate::test_support::isolated_home();
+        let openclaw_dir = home.path().join(".openclaw");
         fs::create_dir_all(&openclaw_dir).unwrap();
         let config_path = openclaw_dir.join("openclaw.json");
         fs::write(&config_path, source).unwrap();
-        let old_test_home = std::env::var_os("CC_SWITCH_TEST_HOME");
-        let old_home = std::env::var_os("HOME");
-        std::env::set_var("CC_SWITCH_TEST_HOME", temp.path());
-        std::env::set_var("HOME", temp.path());
-        let result = test(&config_path);
-        match old_test_home {
-            Some(value) => std::env::set_var("CC_SWITCH_TEST_HOME", value),
-            None => std::env::remove_var("CC_SWITCH_TEST_HOME"),
-        }
-        match old_home {
-            Some(value) => std::env::set_var("HOME", value),
-            None => std::env::remove_var("HOME"),
-        }
-        result
+        assert_eq!(get_openclaw_config_path(), config_path);
+        test(&config_path)
     }
 
     #[test]
@@ -787,7 +767,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn default_model_write_preserves_top_level_comments() {
         let source = r#"{
   // top-level comment
@@ -816,7 +795,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn default_model_noop_write_skips_backup() {
         let source = r#"{
   models: {
@@ -851,7 +829,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn save_detects_external_conflict() {
         let source = r#"{
   models: {
@@ -874,7 +851,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn remove_last_provider_writes_empty_providers_without_panic() {
         let source = r#"{
   models: {

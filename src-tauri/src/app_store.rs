@@ -116,21 +116,7 @@ pub fn set_app_config_dir_to_store(
 
 /// 解析路径，支持 ~ 开头的相对路径
 pub(crate) fn resolve_path(raw: &str) -> PathBuf {
-    if raw == "~" {
-        if let Some(home) = dirs::home_dir() {
-            return home;
-        }
-    } else if let Some(stripped) = raw.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    } else if let Some(stripped) = raw.strip_prefix("~\\") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    }
-
-    PathBuf::from(raw)
+    crate::config::expand_tilde(raw)
 }
 
 /// 从旧的 settings.json 迁移 app_config_dir 到 Store

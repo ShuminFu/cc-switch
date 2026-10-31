@@ -159,7 +159,7 @@ async fn get_default_cost_multiplier_internal(
     db.get_default_cost_multiplier(app_type).await
 }
 
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub async fn get_default_cost_multiplier_test_hook(
     state: &AppState,
     app_type: &str,
@@ -188,7 +188,7 @@ async fn set_default_cost_multiplier_internal(
     db.set_default_cost_multiplier(app_type, value).await
 }
 
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub async fn set_default_cost_multiplier_test_hook(
     state: &AppState,
     app_type: &str,
@@ -218,7 +218,7 @@ async fn get_pricing_model_source_internal(
     db.get_pricing_model_source(app_type).await
 }
 
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub async fn get_pricing_model_source_test_hook(
     state: &AppState,
     app_type: &str,
@@ -247,7 +247,7 @@ async fn set_pricing_model_source_internal(
     db.set_pricing_model_source(app_type, value).await
 }
 
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub async fn set_pricing_model_source_test_hook(
     state: &AppState,
     app_type: &str,
