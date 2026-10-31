@@ -29,13 +29,18 @@ vi.mock("@/components/common/FullScreenPanel", () => ({
     isOpen,
     children,
     footer,
+    onClose,
   }: {
     isOpen: boolean;
     children: React.ReactNode;
     footer?: React.ReactNode;
+    onClose?: () => void;
   }) =>
     isOpen ? (
       <div>
+        <button type="button" onClick={onClose}>
+          panel-back
+        </button>
         <div>{children}</div>
         <div>{footer}</div>
       </div>
@@ -88,6 +93,7 @@ vi.mock("@/components/providers/forms/ProviderForm", () => ({
       <output data-testid="settings-config">
         {JSON.stringify(initialData.settingsConfig ?? {})}
       </output>
+      <input aria-label="name-input" defaultValue={initialData.name} />
       <output data-testid="is-proxy-takeover">
         {isProxyTakeover ? "true" : "false"}
       </output>
@@ -307,5 +313,47 @@ describe("EditProviderDialog", () => {
     expect(
       JSON.parse(screen.getByTestId("settings-config").textContent ?? "{}"),
     ).toEqual(provider.settingsConfig);
+  });
+
+  it("asks before discarding an edited form and closes a pristine one directly (FE-PROV-24)", async () => {
+    const provider: Provider = {
+      id: "p1",
+      name: "P1",
+      settingsConfig: { env: {} },
+    };
+    apiMocks.getCurrent.mockResolvedValue("other");
+    const onOpenChange = vi.fn();
+    render(
+      <EditProviderDialog
+        open
+        provider={provider}
+        onOpenChange={onOpenChange}
+        onSubmit={vi.fn()}
+        appId="claude"
+      />,
+    );
+    const input = await screen.findByLabelText("name-input");
+
+    // Pristine: closes at once.
+    fireEvent.click(screen.getByRole("button", { name: "panel-back" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    onOpenChange.mockClear();
+
+    // Edited: confirm first, cancel keeps the dialog open.
+    fireEvent.keyDown(input, { key: "x" });
+    fireEvent.change(input, { target: { value: "P1 edited" } });
+    fireEvent.click(screen.getByRole("button", { name: "panel-back" }));
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText("common.unsavedChangesTitle"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "panel-back" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "common.discard" }),
+    );
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
