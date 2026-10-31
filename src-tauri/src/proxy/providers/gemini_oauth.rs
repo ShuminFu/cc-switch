@@ -93,8 +93,8 @@ impl GeminiOAuthManager {
         }
         let now = now_ms();
         let stored_expiry = expiry_date_ms(raw_key);
-        let stored_fresh = !creds.needs_refresh()
-            && stored_expiry.is_none_or(|exp| exp - now > REFRESH_BUFFER_MS);
+        let stored_fresh =
+            !creds.needs_refresh() && stored_expiry.is_none_or(|exp| exp - now > REFRESH_BUFFER_MS);
         if stored_fresh {
             return Ok(None);
         }
@@ -131,7 +131,9 @@ impl GeminiOAuthManager {
                 let still_valid = !creds.access_token.is_empty()
                     && stored_expiry.is_some_and(|exp| exp > now_ms());
                 if still_valid {
-                    log::warn!("[Gemini OAuth] refresh failed ({err}); using the stored access token");
+                    log::warn!(
+                        "[Gemini OAuth] refresh failed ({err}); using the stored access token"
+                    );
                     Ok(creds.access_token.clone())
                 } else {
                     Err(err)
@@ -184,10 +186,9 @@ impl GeminiOAuthManager {
                 "Gemini OAuth refresh failed: HTTP {status}"
             )));
         }
-        let body: TokenResponse = response
-            .json()
-            .await
-            .map_err(|e| ProxyError::AuthError(format!("Gemini OAuth refresh: bad response: {e}")))?;
+        let body: TokenResponse = response.json().await.map_err(|e| {
+            ProxyError::AuthError(format!("Gemini OAuth refresh: bad response: {e}"))
+        })?;
         if body.access_token.trim().is_empty() {
             return Err(ProxyError::AuthError(
                 "Gemini OAuth refresh returned an empty access_token".to_string(),
@@ -270,12 +271,19 @@ mod tests {
         .await;
         let manager = GeminiOAuthManager::new(url);
         let key = creds_json("ya29.old", now_ms() - 1_000, "rt-expired");
-        assert_eq!(manager.resolve(&key).await.unwrap().as_deref(), Some("ya29.new"));
-        assert_eq!(manager.resolve(&key).await.unwrap().as_deref(), Some("ya29.new"));
+        assert_eq!(
+            manager.resolve(&key).await.unwrap().as_deref(),
+            Some("ya29.new")
+        );
+        assert_eq!(
+            manager.resolve(&key).await.unwrap().as_deref(),
+            Some("ya29.new")
+        );
         assert_eq!(hits.load(Ordering::SeqCst), 1);
 
         // Refresh-only JSON (no access token yet) is refreshed too.
-        let refresh_only = r#"{"refresh_token":"rt-expired","client_id":"cid","client_secret":"cs"}"#;
+        let refresh_only =
+            r#"{"refresh_token":"rt-expired","client_id":"cid","client_secret":"cs"}"#;
         assert_eq!(
             manager.resolve(refresh_only).await.unwrap().as_deref(),
             Some("ya29.new")
@@ -284,7 +292,12 @@ mod tests {
 
     #[tokio::test]
     async fn rejected_refresh_token_requires_reauth() {
-        let (url, _) = mock_server(400, r#"{"error":"invalid_grant"}"#, std::time::Duration::ZERO).await;
+        let (url, _) = mock_server(
+            400,
+            r#"{"error":"invalid_grant"}"#,
+            std::time::Duration::ZERO,
+        )
+        .await;
         let manager = GeminiOAuthManager::new(url);
         let key = creds_json("", 0, "rt-revoked");
         let err = manager.resolve(&key).await.unwrap_err();
@@ -297,7 +310,10 @@ mod tests {
         let manager = GeminiOAuthManager::new(url);
         // Inside the refresh buffer but not expired yet.
         let key = creds_json("ya29.soon", now_ms() + 20_000, "rt-soon");
-        assert_eq!(manager.resolve(&key).await.unwrap().as_deref(), Some("ya29.soon"));
+        assert_eq!(
+            manager.resolve(&key).await.unwrap().as_deref(),
+            Some("ya29.soon")
+        );
     }
 
     #[tokio::test]

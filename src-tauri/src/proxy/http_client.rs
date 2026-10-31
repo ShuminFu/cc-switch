@@ -504,6 +504,36 @@ mod tests {
     use super::*;
     use std::sync::{Mutex, OnceLock};
 
+    /// SEC-26: every log statement in the global-proxy code paths that mentions
+    /// a proxy URL goes through `mask_url` (credentials may be embedded as
+    /// `user:pass@`). Scans the sources so a future raw `{url}` log fails here.
+    #[test]
+    fn proxy_url_log_statements_are_masked() {
+        let sources = [
+            ("http_client.rs", include_str!("http_client.rs")),
+            (
+                "commands/global_proxy.rs",
+                include_str!("../commands/global_proxy.rs"),
+            ),
+        ];
+        for (name, source) in sources {
+            let source = source.split("#[cfg(test)]").next().unwrap_or(source);
+            let mut rest = source;
+            while let Some(start) = rest.find("log::") {
+                let tail = &rest[start..];
+                let end = tail.find(");").map(|i| i + 2).unwrap_or(tail.len());
+                let stmt = &tail[..end];
+                rest = &tail[end..];
+                let mentions_proxy_url =
+                    stmt.replace("test_url", "").contains("url") && !stmt.contains("url.len()");
+                assert!(
+                    !mentions_proxy_url || stmt.contains("mask_url"),
+                    "{name}: unmasked proxy URL in log statement: {stmt}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn body_shape_has_no_message_content() {
         let body = serde_json::json!({
