@@ -1,11 +1,9 @@
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { useTranslation } from "react-i18next";
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { Save, Download, Loader2, Package } from "lucide-react";
 import JsonEditor from "@/components/JsonEditor";
+import { CommonConfigModal } from "./CommonConfigModal";
 
 interface CommonConfigEditorProps {
   value: string;
@@ -249,91 +247,27 @@ export function CommonConfigEditor({
         />
       </div>
 
-      <FullScreenPanel
+      <CommonConfigModal
         isOpen={isModalOpen}
+        onClose={onModalClose}
         title={t("claudeConfig.editCommonConfigTitle", {
           defaultValue: "Edit Common Config Snippet",
         })}
-        onClose={onModalClose}
-        footer={
-          <>
-            {onExtract && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={onExtract}
-                disabled={isExtracting}
-                className="gap-2"
-              >
-                {isExtracting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
-                )}
-                {t("claudeConfig.extractFromCurrent", {
-                  defaultValue: "Extract from Editor",
-                })}
-              </Button>
-            )}
-            <Button type="button" variant="outline" onClick={onModalClose}>
-              {t("common.cancel")}
-            </Button>
-            <Button type="button" onClick={onModalClose} className="gap-2">
-              <Save className="w-4 h-4" />
-              {t("common.save")}
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/30 p-3 space-y-1.5">
-            <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
-              {t("commonConfig.guideTitle")}
-            </p>
-            <p className="text-xs text-blue-700/80 dark:text-blue-400/80">
-              {t("commonConfig.guidePurpose")}
-            </p>
-            <p className="text-xs text-blue-700/80 dark:text-blue-400/80">
-              {t("commonConfig.guideUsage")}
-            </p>
-            <p className="text-xs text-blue-700/80 dark:text-blue-400/80">
-              {t("commonConfig.guideReExtract")}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {t("commonConfig.guideReassurance")}
-            </p>
-          </div>
-          {(!commonConfigSnippet ||
-            commonConfigSnippet.trim() === "" ||
-            commonConfigSnippet.trim() === "{}") && (
-            <div className="flex flex-col items-center justify-center py-6 text-center text-muted-foreground">
-              <Package className="h-8 w-8 mb-2 opacity-40" />
-              <p className="text-sm font-medium">
-                {t("commonConfig.emptyTitle")}
-              </p>
-              <p className="text-xs mt-1">{t("commonConfig.emptyHint")}</p>
-            </div>
-          )}
-          <JsonEditor
-            value={commonConfigSnippet}
-            onChange={onCommonConfigSnippetChange}
-            placeholder={`{
+        value={commonConfigSnippet}
+        onChange={onCommonConfigSnippetChange}
+        language="json"
+        placeholder={`{
   "env": {
     "ANTHROPIC_BASE_URL": "https://your-api-endpoint.com"
   }
 }`}
-            darkMode={isDarkMode}
-            rows={16}
-            showValidation={true}
-            language="json"
-          />
-          {commonConfigError && (
-            <p className="text-sm text-red-500 dark:text-red-400">
-              {commonConfigError}
-            </p>
-          )}
-        </div>
-      </FullScreenPanel>
+        error={commonConfigError}
+        onExtract={onExtract}
+        isExtracting={isExtracting}
+        extractLabel={t("claudeConfig.extractFromCurrent", {
+          defaultValue: "Extract from Editor",
+        })}
+      />
     </>
   );
 }

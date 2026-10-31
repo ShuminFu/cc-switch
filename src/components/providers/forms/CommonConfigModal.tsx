@@ -1,59 +1,101 @@
-import { useDarkMode } from "@/hooks/useDarkMode";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Save, Download, Loader2, Package } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useDarkMode } from "@/hooks/useDarkMode";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { Button } from "@/components/ui/button";
 import JsonEditor from "@/components/JsonEditor";
 
-interface CodexCommonConfigModalProps {
+type EditorLanguage = "json" | "toml" | "dotenv";
+
+interface CommonConfigModalBaseProps {
   isOpen: boolean;
   onClose: () => void;
+  title: string;
+  /** Format-specific hint shown under the guide. */
+  hint?: ReactNode;
   value: string;
-  onSave: (value: string) => boolean | Promise<boolean>;
+  language: EditorLanguage;
+  placeholder: string;
   error?: string;
   onExtract?: () => void;
   isExtracting?: boolean;
+  extractLabel?: string;
 }
 
 /**
- * CodexCommonConfigModal - Common Codex configuration editor modal
- * Allows editing of common TOML configuration shared across providers
+ * Draft mode: edits stay local until Save; `onSave` returns whether the
+ * snippet was accepted (the modal closes only then).
  */
-export const CodexCommonConfigModal: React.FC<CodexCommonConfigModalProps> = ({
-  isOpen,
-  onClose,
-  value,
-  onSave,
-  error,
-  onExtract,
-  isExtracting,
-}) => {
+interface DraftModeProps extends CommonConfigModalBaseProps {
+  onSave: (value: string) => boolean | Promise<boolean>;
+  onChange?: never;
+}
+
+/** Live mode: every edit is applied at once; Save only closes. */
+interface LiveModeProps extends CommonConfigModalBaseProps {
+  onChange: (value: string) => void;
+  onSave?: never;
+}
+
+export type CommonConfigModalProps = DraftModeProps | LiveModeProps;
+
+const isEmptySnippet = (value: string) => {
+  const trimmed = value.trim();
+  return trimmed === "" || trimmed === "{}";
+};
+
+/**
+ * The one editor for an app's common-config snippet (Claude JSON, Codex TOML,
+ * Gemini env JSON), replacing three copied modals (FE-PROV-18).
+ */
+export function CommonConfigModal(props: CommonConfigModalProps) {
+  const {
+    isOpen,
+    onClose,
+    title,
+    hint,
+    value,
+    language,
+    placeholder,
+    error,
+    onExtract,
+    isExtracting,
+    extractLabel,
+  } = props;
   const { t } = useTranslation();
   const isDarkMode = useDarkMode();
+  const isLive = typeof props.onChange === "function";
   const [draftValue, setDraftValue] = useState(value);
 
   useEffect(() => {
-    if (isOpen) {
-      setDraftValue(value);
-    }
+    if (isOpen) setDraftValue(value);
   }, [isOpen, value]);
 
+  const shown = isLive ? value : draftValue;
+
+  const handleChange = (next: string) => {
+    if (props.onChange) props.onChange(next);
+    else setDraftValue(next);
+  };
+
   const handleClose = () => {
-    setDraftValue(value);
+    if (!isLive) setDraftValue(value);
     onClose();
   };
 
   const handleSave = async () => {
-    if (await onSave(draftValue)) {
-      onClose();
+    if (props.onSave) {
+      if (await props.onSave(draftValue)) onClose();
+      return;
     }
+    onClose();
   };
 
   return (
     <FullScreenPanel
       isOpen={isOpen}
-      title={t("codexConfig.editCommonConfigTitle")}
+      title={title}
       onClose={handleClose}
       footer={
         <>
@@ -70,9 +112,10 @@ export const CodexCommonConfigModal: React.FC<CodexCommonConfigModalProps> = ({
               ) : (
                 <Download className="w-4 h-4" />
               )}
-              {t("codexConfig.extractFromCurrent", {
-                defaultValue: "Extract from Editor",
-              })}
+              {extractLabel ??
+                t("codexConfig.extractFromCurrent", {
+                  defaultValue: "Extract from Editor",
+                })}
             </Button>
           )}
           <Button type="button" variant="outline" onClick={handleClose}>
@@ -103,10 +146,8 @@ export const CodexCommonConfigModal: React.FC<CodexCommonConfigModalProps> = ({
             {t("commonConfig.guideReassurance")}
           </p>
         </div>
-        <p className="text-xs text-muted-foreground">
-          {t("codexConfig.commonConfigHint")}
-        </p>
-        {(!draftValue || draftValue.trim() === "") && (
+        {hint}
+        {isEmptySnippet(shown) && (
           <div className="flex flex-col items-center justify-center py-6 text-center text-muted-foreground">
             <Package className="h-8 w-8 mb-2 opacity-40" />
             <p className="text-sm font-medium">
@@ -117,15 +158,13 @@ export const CodexCommonConfigModal: React.FC<CodexCommonConfigModalProps> = ({
         )}
 
         <JsonEditor
-          value={draftValue}
-          onChange={setDraftValue}
-          placeholder={`# Common Codex config
-
-# Add your common TOML configuration here`}
+          value={shown}
+          onChange={handleChange}
+          placeholder={placeholder}
           darkMode={isDarkMode}
           rows={16}
           showValidation={true}
-          language="toml"
+          language={language}
         />
 
         {error && (
@@ -134,4 +173,4 @@ export const CodexCommonConfigModal: React.FC<CodexCommonConfigModalProps> = ({
       </div>
     </FullScreenPanel>
   );
-};
+}
