@@ -12,5 +12,6 @@ pub mod file_dialog;
 pub mod log_retention;
 pub mod policy;
 pub mod redact;
+pub mod session_cost;
 pub mod session_export;
 pub mod share_bundle;

@@ -998,6 +998,8 @@ pub fn run() {
             features::share_bundle::export_share_bundle,
             features::share_bundle::preview_share_bundle,
             features::share_bundle::apply_share_bundle,
+            features::session_cost::get_session_usage,
+            features::session_cost::get_usage_by_project,
             commands::merge_deeplink_config,
             commands::import_from_deeplink,
             commands::import_from_deeplink_unified,

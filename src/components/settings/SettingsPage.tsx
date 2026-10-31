@@ -63,6 +63,7 @@ import { useTranslation } from "react-i18next";
 import type { SettingsFormState } from "@/hooks/useSettings";
 import { RequestLogRetentionPanel } from "@/components/log-retention/RequestLogRetentionPanel";
 import { WorkbenchAccordionItems } from "@/components/workbench/WorkbenchAccordionItems";
+import { ProjectUsagePanel } from "@/components/workbench/ProjectUsagePanel";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -556,6 +557,9 @@ export function SettingsPage({
                     handleAutoSave({ usageDashboardRefreshIntervalMs })
                   }
                 />
+                <div className="mt-6">
+                  <ProjectUsagePanel />
+                </div>
               </TabsContent>
             </div>
 
