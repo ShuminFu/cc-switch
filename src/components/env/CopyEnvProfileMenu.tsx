@@ -16,7 +16,7 @@ import { extractErrorMessage } from "@/utils/errorUtils";
 import type { EnvShell } from "@/types/env";
 
 /** Apps whose providers `render_provider_env_profile` can export (SVC-35). */
-export const ENV_PROFILE_APPS: readonly string[] = [
+const ENV_PROFILE_APPS: readonly string[] = [
   "claude",
   "codex",
   "gemini",

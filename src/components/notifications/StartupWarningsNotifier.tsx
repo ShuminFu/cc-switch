@@ -8,7 +8,7 @@ import { useTauriEvent } from "@/hooks/useTauriEvent";
 const DISMISSED_KEY = "startup_warnings_dismissed";
 
 /** Stable identity of a warning, used for de-duplication and dismissal. */
-export const startupWarningId = (w: StartupWarning) =>
+const startupWarningId = (w: StartupWarning) =>
   [w.kind, w.appType ?? "", w.path ?? ""].join("|");
 
 const readDismissed = (): Set<string> => {
@@ -31,7 +31,7 @@ const rememberDismissed = (id: string) => {
 };
 
 /** Localized title and description for one startup warning kind. */
-export function describeStartupWarning(
+function describeStartupWarning(
   t: TFunction,
   w: StartupWarning,
 ): { title: string; description: string } {
