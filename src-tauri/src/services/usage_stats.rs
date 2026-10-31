@@ -2261,13 +2261,15 @@ fn query_model_pricing_exact(
     conn: &Connection,
     model_id: &str,
 ) -> Result<Option<PricingRowWithCurrency>, AppError> {
-    conn.query_row(
+    // PERF-31: the usage writer looks prices up for every logged request.
+    conn.prepare_cached(
         "SELECT input_cost_per_million, output_cost_per_million,
                 cache_read_cost_per_million, cache_creation_cost_per_million, currency
          FROM model_pricing
          WHERE model_id = ?1",
-        [model_id],
-        |row| {
+    )
+    .and_then(|mut stmt| {
+        stmt.query_row([model_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -2275,9 +2277,9 @@ fn query_model_pricing_exact(
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
             ))
-        },
-    )
-    .optional()
+        })
+        .optional()
+    })
     .map_err(|e| AppError::Database(format!("查询模型定价失败: {e}")))
 }
 

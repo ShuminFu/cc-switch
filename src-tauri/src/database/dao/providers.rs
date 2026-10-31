@@ -73,7 +73,7 @@ impl Database {
         app_type: &str,
     ) -> Result<(IndexMap<String, Provider>, Vec<CorruptProviderRow>), AppError> {
         let conn = lock_conn!(self.conn);
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, name, settings_config, website_url, category, created_at, sort_index, notes, icon, icon_color, meta, in_failover_queue
              FROM providers WHERE app_type = ?1
              ORDER BY COALESCE(sort_index, 999999), created_at ASC, id ASC"
@@ -141,7 +141,7 @@ impl Database {
         > = HashMap::new();
         {
             let mut stmt_endpoints = conn
-                .prepare(
+                .prepare_cached(
                     "SELECT provider_id, url, added_at FROM provider_endpoints
                      WHERE app_type = ?1 ORDER BY added_at ASC, url ASC",
                 )

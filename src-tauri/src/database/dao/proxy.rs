@@ -294,30 +294,32 @@ impl Database {
         let app_type_owned = app_type.to_string();
         let result = {
             let conn = lock_conn!(self.conn);
-            conn.query_row(
-                "SELECT app_type, enabled, auto_failover_enabled,
+            // PERF-31: cached statement (no re-parse/plan per call).
+            let mut stmt = conn
+                .prepare_cached(
+                    "SELECT app_type, enabled, auto_failover_enabled,
                         max_retries, streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
                         circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
                         circuit_error_rate_threshold, circuit_min_requests
                  FROM proxy_config WHERE app_type = ?1",
-                [app_type],
-                |row| {
-                    Ok(AppProxyConfig {
-                        app_type: row.get(0)?,
-                        enabled: row.get::<_, i32>(1)? != 0,
-                        auto_failover_enabled: row.get::<_, i32>(2)? != 0,
-                        max_retries: row.get::<_, i32>(3)? as u32,
-                        streaming_first_byte_timeout: row.get::<_, i32>(4)? as u32,
-                        streaming_idle_timeout: row.get::<_, i32>(5)? as u32,
-                        non_streaming_timeout: row.get::<_, i32>(6)? as u32,
-                        circuit_failure_threshold: row.get::<_, i32>(7)? as u32,
-                        circuit_success_threshold: row.get::<_, i32>(8)? as u32,
-                        circuit_timeout_seconds: row.get::<_, i32>(9)? as u32,
-                        circuit_error_rate_threshold: row.get(10)?,
-                        circuit_min_requests: row.get::<_, i32>(11)? as u32,
-                    })
-                },
-            )
+                )
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            stmt.query_row([app_type], |row| {
+                Ok(AppProxyConfig {
+                    app_type: row.get(0)?,
+                    enabled: row.get::<_, i32>(1)? != 0,
+                    auto_failover_enabled: row.get::<_, i32>(2)? != 0,
+                    max_retries: row.get::<_, i32>(3)? as u32,
+                    streaming_first_byte_timeout: row.get::<_, i32>(4)? as u32,
+                    streaming_idle_timeout: row.get::<_, i32>(5)? as u32,
+                    non_streaming_timeout: row.get::<_, i32>(6)? as u32,
+                    circuit_failure_threshold: row.get::<_, i32>(7)? as u32,
+                    circuit_success_threshold: row.get::<_, i32>(8)? as u32,
+                    circuit_timeout_seconds: row.get::<_, i32>(9)? as u32,
+                    circuit_error_rate_threshold: row.get(10)?,
+                    circuit_min_requests: row.get::<_, i32>(11)? as u32,
+                })
+            })
         };
         // conn 已在 block 结束时释放
 
@@ -987,6 +989,59 @@ mod tests {
         let claude = db.get_proxy_config_for_app("claude").await?;
         let (retries, ..) = crate::database::schema::proxy_config_defaults("claude");
         assert_eq!(claude.max_retries as i64, retries);
+        Ok(())
+    }
+
+    /// PERF-31: cached statements stay valid across schema changes (SQLite
+    /// re-prepares them) and keep returning the current rows.
+    #[tokio::test]
+    async fn cached_statements_follow_schema_and_data_changes() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        assert_eq!(
+            db.get_proxy_config_for_app("claude").await?.app_type,
+            "claude"
+        );
+        db.set_setting("rectifier_config", "{}")?;
+        {
+            let conn = crate::database::lock_conn!(db.conn);
+            conn.execute_batch(
+                "ALTER TABLE proxy_config ADD COLUMN perf31_probe INTEGER;
+                 ALTER TABLE settings ADD COLUMN perf31_probe INTEGER;
+                 UPDATE proxy_config SET max_retries = 7 WHERE app_type = 'claude';",
+            )?;
+        }
+        assert_eq!(db.get_proxy_config_for_app("claude").await?.max_retries, 7);
+        db.set_setting("rectifier_config", r#"{"a":1}"#)?;
+        assert_eq!(
+            db.get_setting("rectifier_config")?.as_deref(),
+            Some(r#"{"a":1}"#)
+        );
+        Ok(())
+    }
+
+    /// PERF-31 micro-bench: `cargo test --lib bench_cached_proxy_config -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "timing benchmark, run manually"]
+    fn bench_cached_proxy_config_lookup() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let sql = "SELECT app_type, enabled, auto_failover_enabled,
+                        max_retries, streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
+                        circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
+                        circuit_error_rate_threshold, circuit_min_requests
+                 FROM proxy_config WHERE app_type = ?1";
+        let started = std::time::Instant::now();
+        for _ in 0..10_000 {
+            let conn = crate::database::lock_conn!(db.conn);
+            let mut stmt = conn.prepare(sql)?;
+            let _: String = stmt.query_row(["claude"], |row| row.get(0))?;
+        }
+        let uncached = started.elapsed();
+        let started = std::time::Instant::now();
+        for _ in 0..10_000 {
+            db.get_proxy_config_for_app_blocking("claude")?;
+        }
+        let cached = started.elapsed();
+        println!("10k get_proxy_config_for_app: uncached {uncached:?}, cached {cached:?}");
         Ok(())
     }
 

@@ -82,6 +82,9 @@ pub(crate) const SYNC_DB_COMPAT_VERSION: u32 = schema::SYNC_DB_COMPAT_VERSION;
 
 /// 主库连接的 busy_timeout：其它进程/连接（备份、外部工具）短暂持有写锁时等待而不是立即报错。
 pub(crate) const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+/// Prepared-statement cache per connection (PERF-31): enough for the DAO's hot
+/// statements (settings, per-app proxy config, providers, pricing lookups).
+pub(crate) const DB_STATEMENT_CACHE_CAPACITY: usize = 64;
 /// 页缓存大小（负数 = KiB），约 16 MiB。
 const DB_CACHE_SIZE_KIB: i64 = 16_000;
 /// WAL 文件在检查点后截断到的上限，避免长时间运行后 -wal 文件无限增长。
@@ -101,11 +104,13 @@ fn wal_disabled_by_env() -> bool {
 ///   WAL 下 `synchronous=NORMAL` 仍保证崩溃一致性（断电只可能丢最后几个事务）。
 ///   若 WAL 不可用（或被环境变量禁用）则保持回滚日志 + `synchronous=FULL`，不降低持久性。
 /// - 内存库：journal_mode 固定为 memory，只应用其余设置。
-/// - 所有连接：`foreign_keys=ON`、`busy_timeout`、`cache_size`、`temp_store=MEMORY`。
+/// - 所有连接：`foreign_keys=ON`、`busy_timeout`、`cache_size`、`temp_store=MEMORY`，
+///   以及 [`DB_STATEMENT_CACHE_CAPACITY`] 条预编译语句缓存（PERF-31）。
 pub(crate) fn configure_connection(conn: &Connection, file_backed: bool) -> Result<(), AppError> {
     let db_err = |e: rusqlite::Error| AppError::Database(format!("配置数据库连接失败: {e}"));
 
     conn.busy_timeout(DB_BUSY_TIMEOUT).map_err(db_err)?;
+    conn.set_prepared_statement_cache_capacity(DB_STATEMENT_CACHE_CAPACITY);
     conn.execute_batch(&format!(
         "PRAGMA foreign_keys = ON;
          PRAGMA cache_size = -{DB_CACHE_SIZE_KIB};
