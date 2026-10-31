@@ -819,7 +819,7 @@ describe("WebdavSyncSection", () => {
       downloadError = undefined;
 
       const baseInvoke = invokeMock.getMockImplementation()!;
-      invokeMock.mockImplementation(async (command: string, args?: any) => {
+      invokeMock.mockImplementation(async (command: string, args?: unknown) => {
         if (
           command === "webdav_sync_download" ||
           command === "s3_sync_download"
