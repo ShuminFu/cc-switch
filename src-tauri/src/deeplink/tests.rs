@@ -1140,6 +1140,10 @@ fn test_skill_repo_and_branch_are_validated() {
         "ccswitch://v1/import?resource=skill&repo=owner/repo&branch=../../",
         "ccswitch://v1/import?resource=skill&repo=owner/repo&branch=-x",
         "ccswitch://v1/import?resource=skill&repo=owner/repo&branch=a%3Bb",
+        // SEC-24
+        "ccswitch://v1/import?resource=skill&repo=owner/na%3Fme",
+        "ccswitch://v1/import?resource=skill&repo=a/b%23c",
+        "ccswitch://v1/import?resource=skill&repo=a/b/c",
     ] {
         assert!(parse_deeplink_url(bad).is_err(), "{bad}");
     }
@@ -1148,6 +1152,33 @@ fn test_skill_repo_and_branch_are_validated() {
     )
     .unwrap();
     assert_eq!(ok.branch.as_deref(), Some("release/2.0"));
+}
+
+#[test]
+fn test_skill_import_revalidates_repo_and_branch() {
+    use crate::deeplink::import_skill_from_deeplink;
+    let state = crate::store::AppState::new(std::sync::Arc::new(
+        crate::database::Database::memory().expect("memory db"),
+    ));
+    let base = parse_deeplink_url("ccswitch://v1/import?resource=skill&repo=owner/repo").unwrap();
+    for (repo, branch) in [
+        ("owner/na?me", None),
+        ("../x", None),
+        ("a/b#c", None),
+        ("owner/repo", Some("../../evil")),
+    ] {
+        let mut request = base.clone();
+        request.repo = Some(repo.to_string());
+        request.branch = branch.map(str::to_string);
+        assert!(
+            import_skill_from_deeplink(&state, request).is_err(),
+            "{repo} {branch:?}"
+        );
+    }
+    assert_eq!(
+        import_skill_from_deeplink(&state, base).unwrap(),
+        "owner/repo"
+    );
 }
 
 #[test]
