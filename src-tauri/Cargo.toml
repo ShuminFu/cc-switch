@@ -95,7 +95,7 @@ tempfile = "3"
 url = "2.5"
 auto-launch = "0.5"
 base64 = "0.22"
-rusqlite = { version = "0.31", features = ["bundled", "backup", "hooks"] }
+rusqlite = { version = "0.41", features = ["bundled", "backup", "hooks", "fallible_uint"] }
 indexmap = { version = "2", features = ["serde"] }
 rust_decimal = "1.33"
 uuid = { version = "1.11", features = ["v4"] }

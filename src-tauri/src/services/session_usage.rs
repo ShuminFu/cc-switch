@@ -740,17 +740,22 @@ mod tests {
         let commits = Arc::new(AtomicUsize::new(0));
         {
             let counter = Arc::clone(&commits);
-            let conn = db.conn.lock().unwrap();
+            let mut conn = db.conn.lock().unwrap();
             conn.commit_hook(Some(move || {
                 counter.fetch_add(1, Ordering::SeqCst);
                 false
-            }));
+            }))
+            .unwrap();
         }
 
         let started = std::time::Instant::now();
         let (imported, _) = sync_single_file(&db, &file)?;
         let elapsed = started.elapsed();
-        db.conn.lock().unwrap().commit_hook(None::<fn() -> bool>);
+        db.conn
+            .lock()
+            .unwrap()
+            .commit_hook(None::<fn() -> bool>)
+            .unwrap();
 
         assert_eq!(imported as usize, LINES);
         assert_eq!(
