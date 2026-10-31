@@ -14,13 +14,11 @@ use crate::settings::{update_s3_sync_status, S3SyncSettings};
 use super::sync_transport::{self, PutResult, SyncTransport, TransportKeys, UploadOutcome};
 
 use super::sync_protocol::{
-    evaluate_upload_precondition, is_insecure_remote_url, persist_sync_success_best_effort,
-    remote_encryption_info, sync_status_from_baseline, validate_manifest_compat, warn_if_insecure,
-    RemoteLayout, RemoteManifestView, SyncBaseline, SyncManifest, DB_COMPAT_VERSION,
-    MAX_MANIFEST_BYTES, PROTOCOL_VERSION, REMOTE_MANIFEST,
+    is_insecure_remote_url, persist_sync_success_best_effort, sync_status_from_baseline,
+    warn_if_insecure, SyncBaseline, DB_COMPAT_VERSION, PROTOCOL_VERSION,
 };
 #[cfg(test)]
-use super::sync_protocol::{sha256_hex, REMOTE_DB_SQL, REMOTE_SKILLS_ZIP};
+use super::sync_protocol::{sha256_hex, REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP};
 
 // ─── Sync lock ───────────────────────────────────────────────
 
@@ -108,53 +106,30 @@ pub async fn download(
     Ok(serde_json::json!({ "status": "downloaded", "insecureTransport": insecure }))
 }
 
+/// Dry-run a download (SVC-27): what the remote snapshot would change
+/// locally, without applying it. `None` when the remote has no snapshot.
+/// Not exposed as a command yet (the IPC layer is owned separately).
+#[allow(dead_code)]
+pub(crate) async fn preview(
+    db: &crate::database::Database,
+    settings: &S3SyncSettings,
+) -> Result<Option<sync_transport::SyncPreview>, AppError> {
+    validate_settings(settings)?;
+    sync_transport::preview(&S3Transport::new(settings), db).await
+}
+
 /// Fetch remote manifest info without downloading artifacts.
 pub async fn fetch_remote_info(settings: &S3SyncSettings) -> Result<Option<Value>, AppError> {
     validate_settings(settings)?;
-    let creds = creds_for(settings);
-    let manifest_key = s3_key(settings, REMOTE_MANIFEST);
-
-    let Some((bytes, etag)) = s3::get_object(&creds, &manifest_key, MAX_MANIFEST_BYTES).await?
-    else {
+    let transport = S3Transport::new(settings);
+    let Some(snapshot) = sync_transport::fetch_manifest(&transport).await? else {
         return Ok(None);
     };
-
-    let manifest: SyncManifest = serde_json::from_slice(&bytes).map_err(|e| AppError::Json {
-        path: REMOTE_MANIFEST.to_string(),
-        source: e,
-    })?;
-
-    let compatible = validate_manifest_compat(&manifest, RemoteLayout::Current).is_ok();
-    let remote_changed = evaluate_upload_precondition(
+    Ok(Some(sync_transport::remote_info(
+        &transport,
         &settings.status,
-        Some(&RemoteManifestView {
-            bytes: &bytes,
-            etag: etag.as_deref(),
-            manifest: None,
-        }),
-        false,
-    )
-    .is_err();
-    let encryption = remote_encryption_info(&manifest);
-
-    let payload = serde_json::json!({
-        "remoteChangedSinceLastSync": remote_changed,
-        "insecureTransport": is_insecure_remote_url(&settings.endpoint),
-        "encrypted": encryption.encrypted,
-        "passphraseMatches": encryption.passphrase_matches,
-        "deviceName": manifest.device_name,
-        "createdAt": manifest.created_at,
-        "snapshotId": manifest.snapshot_id,
-        "version": manifest.version,
-        "protocolVersion": manifest.version,
-        "dbCompatVersion": manifest.db_compat_version,
-        "compatible": compatible,
-        "artifacts": manifest.artifacts.keys().collect::<Vec<_>>(),
-        "layout": RemoteLayout::Current.as_str(),
-        "remotePath": s3_dir_display(settings),
-    });
-
-    Ok(Some(payload))
+        &snapshot,
+    )))
 }
 
 // ─── Sync status persistence ─────────────────────────────────
@@ -225,6 +200,12 @@ impl SyncTransport for S3Transport<'_> {
     }
     fn supports_conditional_put(&self) -> bool {
         s3::supports_conditional_put(&self.creds)
+    }
+    fn remote_path(&self) -> String {
+        s3_dir_display(self.settings)
+    }
+    fn insecure(&self) -> bool {
+        is_insecure_remote_url(&self.settings.endpoint)
     }
 }
 

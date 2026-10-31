@@ -50,6 +50,28 @@ impl ProxyService {
     /// - 开启：自动启动代理服务，仅接管当前 app 的 Live 配置
     /// - 关闭：仅恢复当前 app 的 Live 配置；若无其它接管，则自动停止代理服务
     pub async fn set_takeover_for_app(&self, app_type: &str, enabled: bool) -> Result<(), String> {
+        // SVC-23: one traced operation per takeover toggle.
+        let op = crate::services::operation_log::Operation::start_async(
+            "takeover",
+            &[
+                ("app", app_type),
+                ("enabled", if enabled { "true" } else { "false" }),
+            ],
+        );
+        let result = tracing::Instrument::instrument(
+            self.set_takeover_for_app_inner(app_type, enabled),
+            op.span(),
+        )
+        .await;
+        op.finish(&result);
+        result
+    }
+
+    async fn set_takeover_for_app_inner(
+        &self,
+        app_type: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
         let app = AppType::from_str(app_type).map_err(|e| format!("无效的应用类型: {e}"))?;
         let app_type_str = app.as_str();
         let _guard = self.switch_locks.lock_for_app(app_type_str).await;
