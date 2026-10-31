@@ -80,7 +80,13 @@ fn assert_not_allowed(result: Result<String, serde_json::Value>, cmd: &str) {
     );
 }
 
-const LOCAL_URL: &str = "tauri://localhost";
+/// 本地资源的 origin：Tauri 在 Windows（wry/WebView2 变通）上用 `http://tauri.localhost`，
+/// 其余桌面平台用 `tauri://localhost`（见 tauri `AppManager::tauri_protocol_url`）。
+const LOCAL_URL: &str = if cfg!(windows) {
+    "http://tauri.localhost"
+} else {
+    "tauri://localhost"
+};
 
 #[test]
 fn granted_commands_are_callable_from_the_main_window() {
