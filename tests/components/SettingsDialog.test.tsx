@@ -16,10 +16,6 @@ vi.mock("sonner", () => ({
 }));
 
 const tMock = vi.fn((key: string) => key);
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: tMock }),
-}));
-
 vi.mock("@/hooks/useProxyStatus", () => ({
   useProxyStatus: () => ({
     status: null,
@@ -340,27 +336,25 @@ describe("SettingsPage Component", () => {
       minimizeToTrayOnClose: false,
     });
 
-    fireEvent.click(screen.getByText("settings.tabAdvanced"));
-    fireEvent.click(screen.getByText("settings.advanced.cloudSync.title"));
+    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Cloud Sync"));
     expect(screen.getByText("webdav-sync-section:none")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("settings.advanced.data.title"));
+    fireEvent.click(screen.getByText("Data Management"));
 
     // 有文件时，点击导入按钮先确认（FE-UI-55），确认后执行 importConfig
-    fireEvent.click(screen.getByRole("button", { name: /settings\.import/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Import/ }));
     expect(importExportMock.importConfig).not.toHaveBeenCalled();
     const confirmButtons = screen.getAllByRole("button", {
-      name: "settings.import",
+      name: "Import",
     });
     fireEvent.click(confirmButtons[confirmButtons.length - 1]);
     expect(importExportMock.importConfig).toHaveBeenCalled();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "settings.exportConfig" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Export SQL Backup" }));
     expect(importExportMock.exportConfig).toHaveBeenCalled();
 
     // 清除选择按钮
-    fireEvent.click(screen.getByRole("button", { name: "common.clear" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(importExportMock.clearSelection).toHaveBeenCalled();
   });
 
@@ -389,7 +383,7 @@ describe("SettingsPage Component", () => {
     expect(scrollContainer).not.toBeNull();
 
     scrollContainer!.scrollTop = 640;
-    fireEvent.click(screen.getByText("settings.tabAdvanced"));
+    fireEvent.click(screen.getByText("Advanced"));
 
     expect(scrollContainer!.scrollTop).toBe(0);
   });
@@ -413,24 +407,20 @@ describe("SettingsPage Component", () => {
   it("disables Save when the Advanced tab has nothing to save (FE-UI-07)", () => {
     settingsMock = createSettingsMock({ hasUnsavedAdvancedChanges: false });
     renderSettingsPage();
-    fireEvent.click(screen.getByText("settings.tabAdvanced"));
+    fireEvent.click(screen.getByText("Advanced"));
 
-    expect(screen.getByRole("button", { name: /common\.save/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Save/ })).toBeDisabled();
     expect(screen.queryByTestId("unsaved-changes")).toBeNull();
   });
 
   it("flags unsaved Advanced edits and can discard them (FE-UI-07)", () => {
     settingsMock = createSettingsMock({ hasUnsavedAdvancedChanges: true });
     renderSettingsPage();
-    fireEvent.click(screen.getByText("settings.tabAdvanced"));
+    fireEvent.click(screen.getByText("Advanced"));
 
     expect(screen.getByTestId("unsaved-changes")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /common\.save/ }),
-    ).not.toBeDisabled();
-    fireEvent.click(
-      screen.getByRole("button", { name: "settings.discardChanges" }),
-    );
+    expect(screen.getByRole("button", { name: /Save/ })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(settingsMock.resetSettings).toHaveBeenCalledTimes(1);
   });
 
@@ -441,8 +431,8 @@ describe("SettingsPage Component", () => {
     renderSettingsPage({ onOpenChange });
 
     // 保存按钮在 advanced tab 中
-    fireEvent.click(screen.getByText("settings.tabAdvanced"));
-    fireEvent.click(screen.getByRole("button", { name: /common\.save/ }));
+    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }));
 
     await waitFor(() => {
       expect(settingsMock.saveSettings).toHaveBeenCalledTimes(1);
@@ -461,15 +451,13 @@ describe("SettingsPage Component", () => {
 
     renderSettingsPage();
 
-    expect(
-      await screen.findByText("settings.restartRequired"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Restart Required")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("settings.restartNow"));
+    fireEvent.click(screen.getByText("Restart Now"));
 
     await waitFor(() => {
       expect(toastSuccessMock).toHaveBeenCalledWith(
-        "settings.devModeRestartHint",
+        "Dev Mode: Automatic restart not supported, please manually restart the application.",
         expect.objectContaining({ closeButton: true }),
       );
     });
@@ -481,11 +469,9 @@ describe("SettingsPage Component", () => {
 
     renderSettingsPage({ onOpenChange });
 
-    expect(
-      await screen.findByText("settings.restartRequired"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Restart Required")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("settings.restartLater"));
+    fireEvent.click(screen.getByText("Restart Later"));
 
     await waitFor(() => {
       expect(onOpenChange).toHaveBeenCalledWith(false);
@@ -500,8 +486,8 @@ describe("SettingsPage Component", () => {
   it("should trigger directory management callbacks inside advanced tab", () => {
     renderSettingsPage();
 
-    fireEvent.click(screen.getByText("settings.tabAdvanced"));
-    fireEvent.click(screen.getByText("settings.advanced.configDir.title"));
+    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Configuration Directory"));
 
     fireEvent.click(screen.getByText("browse-directory"));
     expect(settingsMock.browseDirectory).toHaveBeenCalledWith("claude");

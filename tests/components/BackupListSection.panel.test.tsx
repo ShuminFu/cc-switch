@@ -9,14 +9,6 @@ import { mockInvoke } from "../msw/invokeRecorder";
 const toastMock = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast: toastMock }));
 
-const stableT = vi.hoisted(
-  () => (key: string, options?: { defaultValue?: string }) =>
-    options?.defaultValue ?? key,
-);
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: stableT }),
-}));
-
 const renderWithQuery = (ui: ReactElement) =>
   render(
     <QueryClientProvider client={createTestQueryClient()}>

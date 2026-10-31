@@ -6,13 +6,6 @@ import { createTestQueryClient } from "../utils/testQueryClient";
 import { mockInvoke } from "../msw/invokeRecorder";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: { defaultValue?: string }) =>
-      options?.defaultValue ?? key,
-  }),
-}));
-
 const renderToggle = () =>
   render(
     <QueryClientProvider client={createTestQueryClient()}>

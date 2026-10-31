@@ -30,16 +30,6 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
-// A stable `t` like the real i18next one, so effects keyed on it run once.
-const stableT = vi.hoisted(
-  () => (key: string, options?: Record<string, unknown>) =>
-    (options?.defaultValue as string) ?? key,
-);
-
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: stableT }),
-}));
-
 vi.mock("@/components/common/FullScreenPanel", () => ({
   FullScreenPanel: ({ isOpen, children, footer, onClose }: any) =>
     isOpen ? (
@@ -83,9 +73,9 @@ describe("WorkspaceFileEditor", () => {
       <WorkspaceFileEditor filename="AGENTS.md" isOpen onClose={vi.fn()} />,
     );
 
-    const save = await screen.findByRole("button", { name: "common.save" });
+    const save = await screen.findByRole("button", { name: "Save" });
     await waitFor(() => expect(api.readFile).toHaveBeenCalled());
-    await screen.findByText("workspace.loadFailed");
+    await screen.findByText("Failed to load");
     expect(save).toBeDisabled();
     expect(screen.queryByTestId("editor")).not.toBeInTheDocument();
 
@@ -107,7 +97,7 @@ describe("WorkspaceFileEditor", () => {
 
     const editor = (await screen.findByTestId("editor")) as HTMLTextAreaElement;
     expect(editor.value).toBe("hello");
-    const save = screen.getByRole("button", { name: "common.save" });
+    const save = screen.getByRole("button", { name: "Save" });
     expect(save).not.toBeDisabled();
     fireEvent.click(save);
     await waitFor(() =>
@@ -129,15 +119,13 @@ describe("DailyMemoryPanel create today", () => {
     render(<DailyMemoryPanel isOpen onClose={vi.fn()} />);
     await waitFor(() => expect(api.listDailyMemoryFiles).toHaveBeenCalled());
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /workspace.dailyMemory.createToday/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Add Memory/ }));
 
     const editor = (await screen.findByTestId("editor")) as HTMLTextAreaElement;
     await waitFor(() => expect(editor.value).toBe("existing note"));
     expect(api.readDailyMemoryFile).toHaveBeenCalledWith(todayFilename());
 
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(api.writeDailyMemoryFile).toHaveBeenCalledWith(
         todayFilename(),
@@ -157,9 +145,7 @@ describe("DailyMemoryPanel create today", () => {
     render(<DailyMemoryPanel isOpen onClose={vi.fn()} />);
     await waitFor(() => expect(api.listDailyMemoryFiles).toHaveBeenCalled());
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /workspace.dailyMemory.createToday/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Add Memory/ }));
 
     const editor = (await screen.findByTestId("editor")) as HTMLTextAreaElement;
     expect(editor.value).toBe("");
@@ -197,10 +183,10 @@ describe("DailyMemoryPanel search", () => {
       render(<DailyMemoryPanel isOpen onClose={vi.fn()} />);
       await waitFor(() => expect(api.listDailyMemoryFiles).toHaveBeenCalled());
       fireEvent.click(
-        screen.getByTitle("workspace.dailyMemory.searchScopeHint"),
+        screen.getByTitle("Full-text search across all daily memories. ⌘F"),
       );
       const input = await screen.findByPlaceholderText(
-        "workspace.dailyMemory.searchPlaceholder",
+        "Search full content...",
       );
 
       fireEvent.change(input, { target: { value: "ab" } });
@@ -231,10 +217,8 @@ describe("DailyMemoryPanel search", () => {
   it("delete is a separate, labelled button (FE-UI-11)", async () => {
     render(<DailyMemoryPanel isOpen onClose={vi.fn()} />);
     await screen.findByText("2026-01-01");
-    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
-    expect(
-      await screen.findByText("workspace.dailyMemory.confirmDeleteTitle"),
-    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText("Delete Daily Memory")).toBeInTheDocument();
     // Opening the delete confirm did not open the file.
     expect(api.readDailyMemoryFile).not.toHaveBeenCalled();
   });

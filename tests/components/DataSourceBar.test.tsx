@@ -15,13 +15,6 @@ const toast = vi.hoisted(() => ({
 
 vi.mock("@/lib/api/usage", () => ({ usageApi: usageApiMock }));
 vi.mock("sonner", () => ({ toast }));
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: { defaultValue?: string }) =>
-      options?.defaultValue ?? key,
-  }),
-}));
-
 const renderBar = () => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -54,8 +47,10 @@ describe("DataSourceBar", () => {
     });
     const { invalidate } = renderBar();
 
-    await waitFor(() => expect(screen.getByText("proxy")).toBeInTheDocument());
-    expect(screen.getByText("session_log")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText("Routing")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("Session Log")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Sync/ }));
     await waitFor(() =>

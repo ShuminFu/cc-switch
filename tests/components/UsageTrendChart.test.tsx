@@ -36,15 +36,6 @@ vi.mock("@/lib/query/usage", () => ({
   useUsageTrends: () => ({ data: trendsState.data, isLoading: false }),
 }));
 
-const stableT = vi.hoisted(() => (key: string) => key);
-const stableI18n = vi.hoisted(() => ({
-  resolvedLanguage: "en",
-  language: "en",
-}));
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: stableT, i18n: stableI18n }),
-}));
-
 import { UsageTrendChart } from "@/components/usage/UsageTrendChart";
 
 const stat = (date: string, input: number, cost = "0.5"): DailyStats => ({

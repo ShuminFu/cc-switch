@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import i18n from "i18next";
 
 import { CloudSyncPanel } from "@/components/settings/cloudSync/CloudSyncPanel";
 import { s3Adapter } from "@/components/settings/cloudSync/s3Adapter";
@@ -13,6 +14,10 @@ import { detectSyncConflict } from "@/lib/errors/syncConflict";
 import { BackendError } from "@/lib/errors/appError";
 import type { S3SyncSettings, WebDavSyncSettings } from "@/types";
 
+// Resolve keys through the real English bundle loaded in setupTests (TEST-13).
+const tr = (key: string, options?: Record<string, unknown>) =>
+  i18n.t(key, options);
+
 const toast = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
@@ -21,10 +26,6 @@ const toast = vi.hoisted(() => ({
 }));
 
 vi.mock("sonner", () => ({ toast }));
-
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
-}));
 
 vi.mock("@/components/ui/button", () => ({
   Button: ({ children, ...props }: any) => (
@@ -136,8 +137,8 @@ const cases: BackendCase[] = [
       status: {},
     },
     prefix: "settings.webdavSync",
-    secretPlaceholder: "settings.webdavSync.passwordPlaceholder",
-    editPlaceholder: "settings.webdavSync.usernamePlaceholder",
+    secretPlaceholder: "App password",
+    editPlaceholder: "Email or username",
     scopeField: "username",
     calls: {
       test: "webdavTestConnection",
@@ -162,8 +163,8 @@ const cases: BackendCase[] = [
       status: {},
     },
     prefix: "settings.s3Sync",
-    secretPlaceholder: "settings.s3Sync.secretAccessKeyPlaceholder",
-    editPlaceholder: "settings.s3Sync.bucketPlaceholder",
+    secretPlaceholder: "Leave unchanged to keep the existing secret",
+    editPlaceholder: "e.g. my-cc-switch-bucket",
     scopeField: "bucket",
     calls: {
       test: "s3TestConnection",
@@ -224,20 +225,20 @@ describe.each(cases)("CloudSyncPanel parity: $name", (c) => {
 
   it("saves with an empty untouched secret and auto-tests preserving it", async () => {
     renderPanel();
-    click(`${c.prefix}.save`);
+    click(tr(`${c.prefix}.save`));
     await waitFor(() => expect(api[c.calls.test]).toHaveBeenCalled());
     const [saved, touched] = api[c.calls.save].mock.calls[0];
     expect(Object.values(saved)).toContain("");
     expect(touched).toBe(false);
     expect(api[c.calls.test]).toHaveBeenCalledWith(expect.anything(), true);
     expect(toast.success).toHaveBeenCalledWith(
-      `${c.prefix}.saveAndTestSuccess`,
+      tr(`${c.prefix}.saveAndTestSuccess`),
     );
   });
 
   it("keeps the typed secret for the single redacted refetch after a save", async () => {
     const view = renderPanel();
-    click(`${c.prefix}.save`);
+    click(tr(`${c.prefix}.save`));
     await waitFor(() => expect(api[c.calls.save]).toHaveBeenCalled());
 
     const redacted = { ...c.config, password: "", secretAccessKey: "" };
@@ -253,20 +254,20 @@ describe.each(cases)("CloudSyncPanel parity: $name", (c) => {
     fireEvent.change(screen.getByPlaceholderText(c.editPlaceholder), {
       target: { value: "changed" },
     });
-    click(`${c.prefix}.upload`);
-    expect(toast.error).toHaveBeenCalledWith(`${c.prefix}.unsavedChanges`);
+    click(tr(`${c.prefix}.upload`));
+    expect(toast.error).toHaveBeenCalledWith(tr(`${c.prefix}.unsavedChanges`));
     expect(api[c.calls.fetch]).not.toHaveBeenCalled();
   });
 
   it("uploads without force after the preview is confirmed", async () => {
     renderPanel();
-    click(`${c.prefix}.upload`);
+    click(tr(`${c.prefix}.upload`));
     await waitFor(() => expect(api[c.calls.fetch]).toHaveBeenCalled());
-    click(`${c.prefix}.confirmUpload.confirm`);
+    click(tr(`${c.prefix}.confirmUpload.confirm`));
     await waitFor(() =>
       expect(api[c.calls.upload]).toHaveBeenCalledWith({ force: false }),
     );
-    expect(toast.success).toHaveBeenCalledWith(`${c.prefix}.uploadSuccess`);
+    expect(toast.success).toHaveBeenCalledWith(tr(`${c.prefix}.uploadSuccess`));
   });
 
   it("asks before overwriting a remote that changed, then forces the upload", async () => {
@@ -276,26 +277,30 @@ describe.each(cases)("CloudSyncPanel parity: $name", (c) => {
     });
     api[c.calls.upload].mockRejectedValueOnce(REMOTE_CHANGED);
     renderPanel();
-    click(`${c.prefix}.upload`);
+    click(tr(`${c.prefix}.upload`));
     await waitFor(() => expect(api[c.calls.fetch]).toHaveBeenCalled());
     expect(
-      screen.getByText("settings.cloudSync.remoteChangedNotice"),
+      screen.getByText(
+        "Another device uploaded since this device last synced. You will be asked before that data is overwritten.",
+      ),
     ).toBeInTheDocument();
 
-    click(`${c.prefix}.confirmUpload.confirm`);
+    click(tr(`${c.prefix}.confirmUpload.confirm`));
     await waitFor(() =>
       expect(
-        screen.getByText("settings.cloudSync.conflict.remoteChanged"),
+        screen.getByText(
+          "The cloud data was updated by another device since this device last synced. Uploading now replaces that data with this device's data. To keep it, cancel and download first.",
+        ),
       ).toBeInTheDocument(),
     );
     expect(toast.error).not.toHaveBeenCalled();
 
-    click("settings.cloudSync.conflict.overwriteRemote");
+    click("Overwrite cloud data");
     await waitFor(() =>
       expect(api[c.calls.upload]).toHaveBeenLastCalledWith({ force: true }),
     );
     expect(api[c.calls.upload]).toHaveBeenCalledTimes(2);
-    expect(toast.success).toHaveBeenCalledWith(`${c.prefix}.uploadSuccess`);
+    expect(toast.success).toHaveBeenCalledWith(tr(`${c.prefix}.uploadSuccess`));
   });
 
   it("asks before a download overwrites changed local data", async () => {
@@ -303,60 +308,68 @@ describe.each(cases)("CloudSyncPanel parity: $name", (c) => {
       new BackendError(LOCAL_CHANGED),
     );
     renderPanel();
-    click(`${c.prefix}.download`);
+    click(tr(`${c.prefix}.download`));
     await waitFor(() => expect(api[c.calls.fetch]).toHaveBeenCalled());
-    click(`${c.prefix}.confirmDownload.confirm`);
+    click(tr(`${c.prefix}.confirmDownload.confirm`));
     await waitFor(() =>
       expect(
-        screen.getByText("settings.cloudSync.conflict.localChanged"),
+        screen.getByText(
+          "Local data changed since the last sync. Downloading now replaces those local changes with the cloud data. To keep them, cancel and upload first.",
+        ),
       ).toBeInTheDocument(),
     );
 
     // Cancelling keeps local data: no forced retry.
-    click("common.cancel");
+    click("Cancel");
     expect(api[c.calls.download]).toHaveBeenCalledTimes(1);
     expect(
-      screen.queryByText("settings.cloudSync.conflict.localChanged"),
+      screen.queryByText(
+        "Local data changed since the last sync. Downloading now replaces those local changes with the cloud data. To keep them, cancel and upload first.",
+      ),
     ).not.toBeInTheDocument();
   });
 
   it("forces the download after the user chooses to overwrite local data", async () => {
     api[c.calls.download].mockRejectedValueOnce(LOCAL_CHANGED);
     renderPanel();
-    click(`${c.prefix}.download`);
+    click(tr(`${c.prefix}.download`));
     await waitFor(() => expect(api[c.calls.fetch]).toHaveBeenCalled());
-    click(`${c.prefix}.confirmDownload.confirm`);
+    click(tr(`${c.prefix}.confirmDownload.confirm`));
     await waitFor(() =>
-      screen.getByText("settings.cloudSync.conflict.localChanged"),
+      screen.getByText(
+        "Local data changed since the last sync. Downloading now replaces those local changes with the cloud data. To keep them, cancel and upload first.",
+      ),
     );
-    click("settings.cloudSync.conflict.overwriteLocal");
+    click("Overwrite local data");
     await waitFor(() =>
       expect(api[c.calls.download]).toHaveBeenLastCalledWith({ force: true }),
     );
-    expect(toast.success).toHaveBeenCalledWith(`${c.prefix}.downloadSuccess`);
+    expect(toast.success).toHaveBeenCalledWith(
+      tr(`${c.prefix}.downloadSuccess`),
+    );
   });
 
   it("reports other transfer errors without a conflict dialog", async () => {
     api[c.calls.download].mockRejectedValueOnce(new Error("boom"));
     renderPanel();
-    click(`${c.prefix}.download`);
+    click(tr(`${c.prefix}.download`));
     await waitFor(() => expect(api[c.calls.fetch]).toHaveBeenCalled());
-    click(`${c.prefix}.confirmDownload.confirm`);
+    click(tr(`${c.prefix}.confirmDownload.confirm`));
     await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith(`${c.prefix}.downloadFailed`),
+      expect(toast.error).toHaveBeenCalledWith(
+        tr(`${c.prefix}.downloadFailed`, { error: "boom" }),
+      ),
     );
-    expect(
-      screen.queryByText("settings.cloudSync.conflict.title"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Sync conflict")).not.toBeInTheDocument();
   });
 
   it("blocks download of an incompatible remote snapshot", async () => {
     api[c.calls.fetch].mockResolvedValue({ ...remoteInfo, compatible: false });
     renderPanel();
-    click(`${c.prefix}.download`);
+    click(tr(`${c.prefix}.download`));
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        `${c.prefix}.incompatibleVersion`,
+        expect.stringContaining("Remote data is incompatible"),
       ),
     );
     expect(api[c.calls.download]).not.toHaveBeenCalled();
@@ -365,10 +378,10 @@ describe.each(cases)("CloudSyncPanel parity: $name", (c) => {
   it("shows the legacy-layout notice in the download preview", async () => {
     api[c.calls.fetch].mockResolvedValue({ ...remoteInfo, layout: "legacy" });
     renderPanel();
-    click(`${c.prefix}.download`);
+    click(tr(`${c.prefix}.download`));
     await waitFor(() =>
       expect(
-        screen.getByText(c.adapter.messages.confirmDownload.legacyNotice),
+        screen.getByText(tr(c.adapter.messages.confirmDownload.legacyNotice)),
       ).toBeInTheDocument(),
     );
   });
@@ -379,10 +392,10 @@ describe.each(cases)("CloudSyncPanel parity: $name", (c) => {
       insecureTransport: true,
     });
     renderPanel();
-    click(`${c.prefix}.test`);
+    click(tr(`${c.prefix}.test`));
     await waitFor(() =>
       expect(toast.warning).toHaveBeenCalledWith(
-        "settings.cloudSync.insecureTransport",
+        "This endpoint uses plain HTTP: credentials and synced data are sent unencrypted. Use HTTPS unless this is a trusted local network.",
       ),
     );
   });
@@ -390,10 +403,10 @@ describe.each(cases)("CloudSyncPanel parity: $name", (c) => {
   it("asks for confirmation before enabling auto sync the first time", async () => {
     renderPanel(c.config, { autoSyncConfirmed: false });
     const toggle = () =>
-      screen.getByRole("switch", { name: `${c.prefix}.autoSync` });
+      screen.getByRole("switch", { name: tr(`${c.prefix}.autoSync`) });
     fireEvent.click(toggle());
     expect(toggle()).toHaveAttribute("aria-checked", "false");
-    click("confirm.autoSync.confirm");
+    click("I understand, enable");
     await waitFor(() =>
       expect(toggle()).toHaveAttribute("aria-checked", "true"),
     );

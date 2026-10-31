@@ -12,14 +12,6 @@ const toastMock = vi.hoisted(() => ({
   info: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast: toastMock }));
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: { defaultValue?: string }) =>
-      options?.defaultValue ?? key,
-    i18n: { language: "en" },
-  }),
-}));
-
 describe("SkillCard (FE-UI-33)", () => {
   it("shows installed skills as installed instead of an Uninstall that only toasts", () => {
     render(
@@ -37,10 +29,8 @@ describe("SkillCard (FE-UI-33)", () => {
         onInstall={vi.fn()}
       />,
     );
-    expect(screen.queryByText("skills.uninstall")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /skills.installed/ }),
-    ).toBeDisabled();
+    expect(screen.queryByText("Uninstall")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Installed/ })).toBeDisabled();
   });
 });
 
@@ -75,21 +65,21 @@ describe("Update all skills (FE-UI-33)", () => {
     );
 
     await screen.findByText("a");
-    fireEvent.click(screen.getByText("skills.checkUpdates"));
-    const updateAll = await screen.findByText("skills.updateAll");
+    fireEvent.click(screen.getByText("Check Updates"));
+    const updateAll = await screen.findByText("Update All (3)");
     await waitFor(() => expect(updateAll.closest("button")).toBeEnabled());
     fireEvent.click(updateAll);
 
     await waitFor(() =>
       expect(toastMock.error).toHaveBeenCalledWith(
-        "skills.updateFailed",
+        "Failed to update",
         expect.objectContaining({
           description: expect.stringContaining("fail b"),
         }),
       ),
     );
     const failureToasts = toastMock.error.mock.calls.filter(
-      ([title]) => title === "skills.updateFailed",
+      ([title]) => title === "Failed to update",
     );
     expect(failureToasts).toHaveLength(1);
     expect(failureToasts[0][1].description).toContain("fail c");

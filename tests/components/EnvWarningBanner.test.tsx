@@ -12,13 +12,6 @@ const toastMock = vi.hoisted(() => ({
 }));
 vi.mock("sonner", () => ({ toast: toastMock }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: { defaultValue?: string }) =>
-      options?.defaultValue ?? key,
-  }),
-}));
-
 const conflict: EnvConflict = {
   varName: "ANTHROPIC_API_KEY",
   varValue: "sk-ant-abcdef123456",
@@ -50,7 +43,7 @@ describe("EnvWarningBanner", () => {
         onDeleted={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByText("env.actions.expand"));
+    fireEvent.click(screen.getByText("View Details"));
 
     expect(document.body.textContent).not.toContain("abcdef123456");
     fireEvent.click(screen.getByRole("button", { name: "Show value" }));
@@ -70,10 +63,10 @@ describe("EnvWarningBanner", () => {
         onDeleted={onDeleted}
       />,
     );
-    fireEvent.click(screen.getByText("env.actions.expand"));
+    fireEvent.click(screen.getByText("View Details"));
     fireEvent.click(screen.getByLabelText("ANTHROPIC_API_KEY"));
-    fireEvent.click(screen.getByText("env.actions.deleteSelected"));
-    fireEvent.click(await screen.findByText("env.confirm.confirm"));
+    fireEvent.click(screen.getByText("Delete Selected (1)"));
+    fireEvent.click(await screen.findByText("Confirm Delete"));
 
     await waitFor(() => expect(toastMock.success).toHaveBeenCalled());
     const options = toastMock.success.mock.calls[0][1] as {

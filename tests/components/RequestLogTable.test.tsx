@@ -5,21 +5,6 @@ import type { UsageRangeSelection } from "@/types/usage";
 
 const useRequestLogsMock = vi.hoisted(() => vi.fn());
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
-      key: string,
-      options?: {
-        defaultValue?: string;
-      },
-    ) => options?.defaultValue ?? key,
-    i18n: {
-      resolvedLanguage: "en",
-      language: "en",
-    },
-  }),
-}));
-
 vi.mock("@/lib/query/usage", () => ({
   useRequestLogs: (args: unknown) => useRequestLogsMock(args),
 }));

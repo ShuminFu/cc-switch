@@ -26,11 +26,6 @@ vi.mock("sonner", () => ({
   toast: { error: toastErrorMock, success: vi.fn() },
 }));
 
-const stableT = vi.hoisted(() => (key: string) => key);
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: stableT }),
-}));
-
 const platform = vi.hoisted(() => ({
   isMac: vi.fn(() => false),
   isWindows: vi.fn(() => false),
@@ -207,18 +202,18 @@ describe("config panels when loading fails (FE-UI-10)", () => {
     });
     render(<ConnectivityCheckConfigPanel />);
 
-    const timeout = await screen.findByLabelText("streamCheck.timeout");
+    const timeout = await screen.findByLabelText("Timeout (seconds)");
     expect(timeout).toHaveValue(10);
     fireEvent.change(timeout, { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: /common.save/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }));
 
     expect(
-      await screen.findByText("streamCheck.rangeError"),
+      await screen.findByText(/Enter a whole number between/),
     ).toBeInTheDocument();
     expect(api.callsTo("save_stream_check_config")).toHaveLength(0);
 
     fireEvent.change(timeout, { target: { value: "12" } });
-    fireEvent.click(screen.getByRole("button", { name: /common.save/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }));
     await waitFor(() =>
       expect(api.callsTo("save_stream_check_config")).toHaveLength(1),
     );
@@ -237,17 +232,13 @@ describe("TerminalSettings", () => {
 
   it("falls back to the platform default terminal when no value is saved", () => {
     render(<TerminalSettings onChange={vi.fn()} />);
-    expect(screen.getByRole("combobox")).toHaveTextContent(
-      "settings.terminal.options.linux.gnomeTerminal",
-    );
+    expect(screen.getByRole("combobox")).toHaveTextContent("GNOME Terminal");
   });
 
   it("shows the saved terminal for the current platform", () => {
     platform.isLinux.mockReturnValue(false);
     platform.isWindows.mockReturnValue(true);
     render(<TerminalSettings value="wt" onChange={vi.fn()} />);
-    expect(screen.getByRole("combobox")).toHaveTextContent(
-      "settings.terminal.options.windows.wt",
-    );
+    expect(screen.getByRole("combobox")).toHaveTextContent("Windows Terminal");
   });
 });

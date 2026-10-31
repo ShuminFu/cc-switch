@@ -18,18 +18,6 @@ import { mockInvoke } from "../msw/invokeRecorder";
 const toastMock = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast: toastMock }));
 
-// Stable `t` that honours both `t(key, "default")` and `{ defaultValue }`.
-const stableT = vi.hoisted(
-  () => (key: string, options?: unknown) =>
-    typeof options === "string"
-      ? key
-      : ((options as { defaultValue?: string } | undefined)?.defaultValue ??
-        key),
-);
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: stableT }),
-}));
-
 vi.mock("@/components/MarkdownEditor", () => ({
   default: ({ value, onChange }: any) => (
     <textarea
@@ -159,7 +147,9 @@ describe("FailoverQueueManager", () => {
     });
     renderWithQuery(<FailoverQueueManager appType="claude" />);
     expect(
-      await screen.findByText("proxy.failoverQueue.empty"),
+      await screen.findByText(
+        "Failover queue is empty. Add providers to enable automatic failover.",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -173,7 +163,11 @@ describe("FailoverQueueManager", () => {
     });
     renderWithQuery(<FailoverQueueManager appType="claude" />);
     expect(await screen.findByText(/database locked/)).toBeInTheDocument();
-    expect(screen.queryByText("proxy.failoverQueue.empty")).toBeNull();
+    expect(
+      screen.queryByText(
+        "Failover queue is empty. Add providers to enable automatic failover.",
+      ),
+    ).toBeNull();
   });
 
   it("removes a provider with the IPC argument names the backend expects", async () => {
@@ -186,9 +180,7 @@ describe("FailoverQueueManager", () => {
     renderWithQuery(<FailoverQueueManager appType="codex" />);
 
     await screen.findByText("Primary");
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "common.delete" })[1],
-    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
 
     await waitFor(() =>
       expect(api.callsTo("remove_from_failover_queue")).toHaveLength(1),
@@ -232,7 +224,7 @@ describe("FailoverQueueManager", () => {
     await screen.findByText("Primary");
     expect(screen.getByRole("switch")).toBeDisabled();
     for (const button of screen.getAllByRole("button", {
-      name: "common.delete",
+      name: "Delete",
     })) {
       expect(button).toBeDisabled();
     }
@@ -294,7 +286,7 @@ describe("PromptPanel", () => {
   it("shows the empty state when there are no prompts", async () => {
     mockInvoke({ get_prompts: {}, get_current_prompt_file_content: null });
     renderWithQuery(<PromptPanel open onOpenChange={vi.fn()} appId="codex" />);
-    expect(await screen.findByText("prompts.empty")).toBeInTheDocument();
+    expect(await screen.findByText("No prompts yet")).toBeInTheDocument();
   });
 
   it("enabling a prompt is exclusive and calls enable_prompt", async () => {
@@ -338,12 +330,10 @@ describe("PromptPanel", () => {
     renderWithQuery(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
 
     await screen.findByText("Beta");
-    fireEvent.click(screen.getAllByTitle("common.delete")[1]);
+    fireEvent.click(screen.getAllByTitle("Delete")[1]);
     expect(api.callsTo("delete_prompt")).toHaveLength(0);
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: "common.confirm" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(api.callsTo("delete_prompt")).toHaveLength(1));
     expect(api.callsTo("delete_prompt")[0].args).toEqual({
       app: "claude",
@@ -371,7 +361,7 @@ describe("PromptPanel", () => {
     );
 
     await screen.findByText("Alpha");
-    fireEvent.click(screen.getAllByTitle("common.edit")[0]);
+    fireEvent.click(screen.getAllByTitle("Edit")[0]);
     const editor = await screen.findByTestId("editor");
     fireEvent.change(editor, { target: { value: "# A\n" } });
 
@@ -382,7 +372,7 @@ describe("PromptPanel", () => {
     await waitFor(() => expect(version).toBeGreaterThan(1));
     expect(screen.getByTestId("editor")).toHaveValue("# A\n");
 
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.callsTo("upsert_prompt")).toHaveLength(1));
     const saved = api.callsTo("upsert_prompt")[0].args.prompt as {
       content: string;
@@ -422,13 +412,13 @@ describe("PromptPanel", () => {
     });
 
     await waitFor(() =>
-      expect(toastMock.error).toHaveBeenCalledWith("prompts.enableFailed"),
+      expect(toastMock.error).toHaveBeenCalledWith("Failed to enable"),
     );
     const [alpha, beta] = screen.getAllByRole("switch");
     expect(alpha).toHaveAttribute("aria-checked", "true");
     expect(beta).toHaveAttribute("aria-checked", "false");
     // The list never fell back to the first-load placeholder.
-    expect(screen.queryByText("prompts.loading")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     window.removeEventListener("unhandledrejection", unhandled);
     expect(unhandled).not.toHaveBeenCalled();
   });
@@ -441,7 +431,7 @@ describe("PromptPanel", () => {
     });
     renderWithQuery(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
     await waitFor(() =>
-      expect(toastMock.error).toHaveBeenCalledWith("prompts.loadFailed"),
+      expect(toastMock.error).toHaveBeenCalledWith("Failed to load prompts"),
     );
   });
 });
@@ -465,7 +455,7 @@ describe("HermesMemoryPanel", () => {
     await waitFor(() => expect(editor).toHaveValue("hello"));
 
     fireEvent.change(editor, { target: { value: "hello world" } });
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
       expect(api.callsTo("set_hermes_memory")).toHaveLength(1),
@@ -475,9 +465,7 @@ describe("HermesMemoryPanel", () => {
       content: "hello world",
     });
     await waitFor(() =>
-      expect(toastMock.success).toHaveBeenCalledWith(
-        "hermes.memory.saveSuccess",
-      ),
+      expect(toastMock.success).toHaveBeenCalledWith("Memory saved"),
     );
   });
 
@@ -496,7 +484,9 @@ describe("HermesMemoryPanel", () => {
     await waitFor(() =>
       expect(screen.getByTestId("editor")).toHaveValue("123456"),
     );
-    expect(screen.getByText(/hermes\.memory\.overLimit/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Over budget — Hermes will truncate on next load/),
+    ).toBeInTheDocument();
   });
 
   it("disables Save while the content is over the limit (FE-UI-50)", async () => {
@@ -513,7 +503,7 @@ describe("HermesMemoryPanel", () => {
     await waitFor(() =>
       expect(screen.getByTestId("editor")).toHaveValue("123456"),
     );
-    expect(screen.getByRole("button", { name: "common.save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("keeps unsaved edits across Agent/User tab switches (FE-UI-50)", async () => {
@@ -538,20 +528,20 @@ describe("HermesMemoryPanel", () => {
     });
 
     await user.click(
-      screen.getByRole("tab", { name: /hermes.memory.userTab/ }),
+      screen.getByRole("tab", { name: /User Profile \(USER\.md\)/ }),
     );
     await waitFor(() =>
       expect(screen.getByTestId("editor")).toHaveValue("user"),
     );
     await user.click(
-      screen.getByRole("tab", { name: /hermes.memory.agentTab/ }),
+      screen.getByRole("tab", { name: /Agent Memory \(MEMORY\.md\)/ }),
     );
     await waitFor(() =>
       expect(screen.getByTestId("editor")).toHaveValue("agent edited"),
     );
     // The dirty tab is marked.
     expect(
-      screen.getByRole("tab", { name: /hermes.memory.agentTab/ }),
+      screen.getByRole("tab", { name: /Agent Memory \(MEMORY\.md\)/ }),
     ).toHaveTextContent("•");
   });
 
@@ -569,7 +559,7 @@ describe("HermesMemoryPanel", () => {
     renderWithQuery(<HermesMemoryPanel />);
 
     expect(
-      await screen.findByText("hermes.memory.disabledHint"),
+      await screen.findByText("Hermes will skip this memory until re-enabled"),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch"));
     await waitFor(() =>

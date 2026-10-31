@@ -8,11 +8,6 @@ import { mockInvoke } from "../msw/invokeRecorder";
 const toastMock = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast: toastMock }));
 
-const stableT = vi.hoisted(() => (key: string) => key);
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: stableT }),
-}));
-
 const multipliers: Record<string, string> = {
   claude: "1",
   codex: "1.2",
@@ -71,7 +66,7 @@ describe("PricingConfigPanel", () => {
     // OpenCode is priced too (FE-UI-29).
     expect(screen.getByTestId("pricing-app-opencode")).toBeInTheDocument();
     // Nothing changed yet, so there is nothing to save.
-    expect(screen.getByRole("button", { name: "common.save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("saves only the changed app's multiplier and source", async () => {
@@ -84,14 +79,12 @@ describe("PricingConfigPanel", () => {
 
     await waitFor(() => expect(multiplierInputs()[1]).toHaveValue(1.2));
     fireEvent.change(multiplierInputs()[1], { target: { value: "1.5" } });
-    const save = screen.getByRole("button", { name: "common.save" });
+    const save = screen.getByRole("button", { name: "Save" });
     expect(save).not.toBeDisabled();
     fireEvent.click(save);
 
     await waitFor(() =>
-      expect(toastMock.success).toHaveBeenCalledWith(
-        "settings.globalProxy.pricingSaved",
-      ),
+      expect(toastMock.success).toHaveBeenCalledWith("Pricing defaults saved"),
     );
     const multiplierCalls = api.callsTo("set_default_cost_multiplier");
     expect(multiplierCalls.map((c) => c.args)).toEqual([
@@ -101,9 +94,7 @@ describe("PricingConfigPanel", () => {
       { appType: "codex", value: "request" },
     ]);
     await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "common.save" }),
-      ).toBeDisabled(),
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled(),
     );
   });
 
@@ -117,7 +108,7 @@ describe("PricingConfigPanel", () => {
 
     await waitFor(() => expect(multiplierInputs()[0]).toHaveValue(1));
     fireEvent.change(multiplierInputs()[0], { target: { value: "-2" } });
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
     expect(api.callsTo("set_default_cost_multiplier")).toHaveLength(0);
@@ -137,21 +128,19 @@ describe("PricingConfigPanel", () => {
     await waitFor(() => expect(multiplierInputs()[2]).toHaveValue(1));
     fireEvent.change(multiplierInputs()[1], { target: { value: "1.5" } });
     fireEvent.change(multiplierInputs()[2], { target: { value: "3" } });
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
     expect(toastMock.success).not.toHaveBeenCalled();
     expect(api.callsTo("set_default_cost_multiplier")).toHaveLength(2);
     // Gemini is still dirty (and flagged), codex is saved.
     expect(screen.getByTestId("pricing-app-gemini")).toHaveTextContent(
-      "settings.globalProxy.pricingSaveFailedBadge",
+      "(not saved)",
     );
     expect(screen.getByTestId("pricing-app-codex")).not.toHaveTextContent(
-      "settings.globalProxy.pricingSaveFailedBadge",
+      "(not saved)",
     );
-    expect(
-      screen.getByRole("button", { name: "common.save" }),
-    ).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled();
   });
 
   it("shows an error instead of the table when pricing cannot be loaded", async () => {

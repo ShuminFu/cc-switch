@@ -23,12 +23,6 @@ vi.mock("sonner", () => ({
   },
 }));
 
-const tStable = (key: string) => key;
-
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: tStable }),
-}));
-
 const renderDialog = () =>
   render(
     <QueryClientProvider client={new QueryClient()}>
@@ -70,7 +64,7 @@ describe("DeepLinkImportDialog pending deep links", () => {
     renderDialog();
 
     await waitFor(() =>
-      expect(toastErrorMock).toHaveBeenCalledWith("deeplink.parseError", {
+      expect(toastErrorMock).toHaveBeenCalledWith("Failed to parse deep link", {
         description: "bad link",
       }),
     );

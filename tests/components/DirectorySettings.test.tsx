@@ -21,13 +21,6 @@ vi.mock("@tauri-apps/api/path", () => ({
   join: vi.fn(async (...segments: string[]) => segments.join("/")),
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: Record<string, unknown>) =>
-      (options?.defaultValue as string) ?? key,
-  }),
-}));
-
 let latestSettings: SettingsFormState | null = null;
 
 function Harness() {
@@ -65,7 +58,7 @@ describe("DirectorySettings inputs", () => {
     render(<Harness />);
 
     const input = screen.getByLabelText(
-      "settings.claudeConfigDir",
+      "Claude Code Configuration Directory",
     ) as HTMLInputElement;
     await waitFor(() => expect(input.placeholder).toBe("/home/mock/.claude"));
 
@@ -83,7 +76,7 @@ describe("DirectorySettings inputs", () => {
     render(<Harness />);
 
     const input = screen.getByLabelText(
-      "settings.claudeConfigDir",
+      "Claude Code Configuration Directory",
     ) as HTMLInputElement;
     await waitFor(() => expect(input.placeholder).toBe("/home/mock/.claude"));
 
