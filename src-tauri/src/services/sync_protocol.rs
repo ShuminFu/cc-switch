@@ -37,6 +37,8 @@ pub(crate) const DB_COMPAT_VERSION: u32 = crate::database::SYNC_DB_COMPAT_VERSIO
 /// snapshots keep `version: 2` and stay readable by every client.
 pub(crate) const ENCRYPTED_PROTOCOL_VERSION: u32 = 3;
 pub(crate) const LEGACY_DB_COMPAT_VERSION: u32 = 5;
+/// The first database generation written with the current remote layout.
+pub(crate) const MIN_CURRENT_LAYOUT_DB_COMPAT_VERSION: u32 = 6;
 pub(crate) const REMOTE_DB_SQL: &str = "db.sql";
 pub(crate) const REMOTE_SKILLS_ZIP: &str = "skills.zip";
 pub(crate) const REMOTE_MANIFEST: &str = "manifest.json";
@@ -275,7 +277,13 @@ pub(crate) fn validate_manifest_compat(
         ));
     };
     match layout {
-        RemoteLayout::Current if db_compat_version != DB_COMPAT_VERSION => {
+        // DB-32: older snapshots of the current layout are upgraded by the
+        // importer (it migrates the imported schema), so only snapshots from a
+        // newer database generation are refused.
+        RemoteLayout::Current
+            if db_compat_version > DB_COMPAT_VERSION
+                || db_compat_version < MIN_CURRENT_LAYOUT_DB_COMPAT_VERSION =>
+        {
             return Err(localized(
                 "sync.manifest_db_version_incompatible",
                 format!(
@@ -1337,6 +1345,23 @@ mod tests {
             Some(LEGACY_DB_COMPAT_VERSION),
         );
         assert!(validate_manifest_compat(&manifest, RemoteLayout::Current).is_err());
+    }
+
+    #[test]
+    fn validate_manifest_compat_current_layout_accepts_older_and_rejects_newer_generations() {
+        for compat in MIN_CURRENT_LAYOUT_DB_COMPAT_VERSION..=DB_COMPAT_VERSION {
+            let manifest = manifest_with(PROTOCOL_FORMAT, PROTOCOL_VERSION, Some(compat));
+            assert!(
+                validate_manifest_compat(&manifest, RemoteLayout::Current).is_ok(),
+                "db-v{compat}"
+            );
+        }
+        let newer = manifest_with(
+            PROTOCOL_FORMAT,
+            PROTOCOL_VERSION,
+            Some(DB_COMPAT_VERSION + 1),
+        );
+        assert!(validate_manifest_compat(&newer, RemoteLayout::Current).is_err());
     }
 
     #[test]
