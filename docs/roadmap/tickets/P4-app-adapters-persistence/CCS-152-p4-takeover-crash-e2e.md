@@ -88,3 +88,10 @@ Re-run on the lane2/followups tree at f13a403 (Linux):
   → clean.
 - Status stays Partial: "Green on 3 OSes" still needs the windows-latest and
   macos-latest CI runs.
+
+### Wine evidence: full Windows suite (2026-10-31)
+
+- First Wine run (at `a04dafe`): 3 of 10 `takeover_crash` tests failed. Root cause: `Paths` modelled only HOME, so the Windows Hermes and Claude Desktop defaults read the process `%LOCALAPPDATA%`. Tests wrote into the real (Wine prefix) `AppData\Local\hermes` and `Claude-3p` and saw each other's state ("a second restart must find nothing to recover"). On a real Windows dev machine the tests would have overwritten the user's Hermes and Claude Desktop config.
+- Fixed in `4385f6f`: `Paths::with_home` derives `<home>\AppData\Local`, `Paths::system()` keeps reading the env var, and `AppDescriptor::default_dir` takes `&Paths`.
+- Run: `cargo test --target x86_64-pc-windows-gnu --no-fail-fast` under Wine 9.0 (mingw cross-compile, `LANG=LC_ALL=C.UTF-8`, `WINEPATH` set to the target dir), at `bdd666e`. `takeover_crash` passes 10 of 10 under Wine and 10 of 10 on Linux. Full Wine suite: 3092 passed, 1 failed (the CCS-083 DACL test, a Wine limitation).
+- Still needs a real run: windows-latest and macos-latest (Wine is interim evidence; macOS has not been run).

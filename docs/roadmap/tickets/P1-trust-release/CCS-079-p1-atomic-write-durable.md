@@ -75,3 +75,9 @@ p0-config-writer-snapshots
 - Target held with `share_mode(0)`: Wine returns os error 5 for the rename. If the target is released after 50 ms, the retry succeeds (about 65 ms). If it is held for 1.5 s, the write gives up after about 208 ms, keeps the old content and leaves no temp file. `atomic_write_secret`, including `owner_only_acl::apply`, creates and overwrites the file.
 - Negative controls: without the retries, or without `TempFileGuard` removing the temp file, the harness fails (exit 101).
 - Details are in [CCS-228](../P1-trust-release/CCS-228-p1-config-atomic-write-wine.md). The "On Windows CI" box stays unchecked until a real windows-latest run.
+
+### Wine evidence: full Windows suite (2026-10-31)
+
+- Run: `cargo test --target x86_64-pc-windows-gnu --no-fail-fast` under Wine 9.0 (mingw cross-compile, `LANG=LC_ALL=C.UTF-8`, `WINEPATH` set to the target dir), at `bdd666e`. This was the whole crate, not an extract, so the CCS-228 note that cross-compiling fails in `aws-lc-sys` no longer applies once mingw is installed. Result: 3092 passed, 1 failed (the CCS-083 DACL test, a Wine limitation; see CCS-083).
+- Under the default C locale, `database::backup::tests::backup_commands_reject_colon_filenames_without_touching_files` fails with NotFound when it renames `ok.db` to `我的备份.db`. Wine maps non-ASCII names through the unix locale. A C repro (`MoveFileExW` to a CJK name) fails with error 2 under `LANG` unset and succeeds under `C.UTF-8`. NTFS has no such limit, so this is not a product bug. Run Wine with a UTF-8 locale.
+- Still needs real Windows: the "On Windows CI" box (windows-latest run).

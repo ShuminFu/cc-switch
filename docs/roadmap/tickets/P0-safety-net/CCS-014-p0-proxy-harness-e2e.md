@@ -65,3 +65,8 @@ Baseline recorded (linux-x86_64, debug): p50 2.87 ms, p95 3.18 ms, 17 SQL statem
 - Blocked: proxy_e2e green on macOS and Windows in the backend matrix. Needs a windows-latest/macos-latest run of the ci.yml backend matrix, or real machines (cross-compiling to windows-gnu/apple fails on aws-lc-sys).
 - Blocked: Confirming the perf artifact actually uploads. Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history).
 - Follow-up [CCS-213](../P0-safety-net/CCS-213-p0-ci-proxy-perf-artifact.md): Upload the proxy_e2e perf JSON as a CI artifact from the backend matrix. Done: ci.yml `backend` now has an `Upload proxy e2e perf artifact` step (`if: always()`, artifact `proxy-e2e-perf-${{ matrix.os }}`) after "Run tests". Only the real-run confirmation above stays blocked on GitHub Actions.
+
+### Wine evidence: full Windows suite (2026-10-31)
+
+- Run: `cargo test --target x86_64-pc-windows-gnu --no-fail-fast` under Wine 9.0 (mingw cross-compile, `LANG=LC_ALL=C.UTF-8`, `WINEPATH` set to the target dir), at `bdd666e`. Under Wine, `proxy_e2e` passes 37 of 37 and `proxy_golden` 18 of 18, and the capture and trace suites pass too. Full suite: 3092 passed, 1 failed (the CCS-083 DACL test, a Wine limitation). Cross-compiling to windows-gnu now works once mingw is installed.
+- Still needs real runners: macOS, and a windows-latest run of the backend matrix. Wine does not exercise real WebView2, the real filesystem or real performance (for example the half-open timing and allocation gates).

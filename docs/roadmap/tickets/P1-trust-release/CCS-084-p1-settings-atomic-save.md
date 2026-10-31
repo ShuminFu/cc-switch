@@ -58,3 +58,12 @@ p1-atomic-write-perms
 - Blocked: Windows owner-only DACL path of atomic_write_secret. Needs a Windows machine or Windows CI run.
 - Follow-up [CCS-225](../P1-trust-release/CCS-225-p1-settings-load-failure-notice.md): Show a startup notice and confirm flow when settings.json failed to load.
 - Done in CCS-225: the frontend now shows the load failure on startup (`SettingsLoadFailureNotice` in `src/components/app-shell/AppConfirmDialogs.tsx`): a persistent warning with the backup path, or a confirm dialog that calls `acknowledge_settings_load_failure` when saving is blocked. Marked Done; the only open item is the Windows owner-only DACL check above, which still needs a Windows runner.
+
+### Wine evidence: full Windows suite (2026-10-31)
+
+The settings save goes through `atomic_write_secret`, so CCS-083's result applies here.
+
+- Run: `cargo test --target x86_64-pc-windows-gnu --no-fail-fast` under Wine 9.0 (mingw cross-compile, `LANG=LC_ALL=C.UTF-8`, `WINEPATH` set to the target dir), at `bdd666e`. Result: 3092 passed, 1 failed, 3 ignored. The one failure is `config::tests::atomic_write_secret_sets_owner_only_acl`.
+- That failure is a Wine limitation, not a product bug. A minimal mingw C repro (`SetEntriesInAclW` + `SetNamedSecurityInfoW(DACL | PROTECTED_DACL)` on a new file, then `GetNamedSecurityInfoW`) shows that Wine returns `ERROR_SUCCESS` but does not keep the DACL. Reading it back gives a DACL with 3 ACEs synthesised from the unix mode, control `0x8004` (no `SE_DACL_PROTECTED`), and no `user.wine.sd` xattr on the file. `GetKernelObjectSecurity` gives the same result. The test was not changed and must still pass on real Windows.
+- The rest of the `#[cfg(windows)]` atomic-write path passed under Wine: `rename_replace` overwrites without `remove_file`, there are no leftover `*.tmp.*` files, and creating then rewriting through `atomic_write_secret` works.
+- Still needs real Windows: the owner-only DACL assertion (a windows-latest CI job or a Windows machine).

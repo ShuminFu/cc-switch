@@ -90,3 +90,7 @@ All of that is outside this ticket's scope.
 
 [CCS-233](CCS-233-p4-apps-ninth-app-six-files.md) (commit `2b10c68`) moved the `paths.rs`, `deeplink/preview.rs`, `deeplink/provider.rs` and `services/config.rs` dispatch onto the registry descriptor, adapter hooks and catch-all arms. `new_app_backend_touch_points_stay_within_budget` now measures 5 files: `app_config.rs`, `apps/registry.rs`, `apps/mod.rs`, `apps/<new app>/mod.rs` and `proxy/providers/mod.rs`. The budget is 5. Every criterion is met: Done.
 
+### Wine evidence: full Windows suite (2026-10-31)
+
+- First Wine run (at `a04dafe`): 4 of 13 conformance tests failed: credentials_round_trip, prompt_and_skills_paths ("claude-desktop: config_dir C:\users\root\AppData\Local\Claude-3p\configLibrary escapes the test HOME"), mcp_upsert_and_remove ("hermes: mcp upsert wrote nothing"), and takeover_apply_then_cleanup. They share one root cause with CCS-152: the injected `Paths` did not cover `%LOCALAPPDATA%`. That was fixed in `4385f6f`, and the conformance checks were not loosened.
+- Run: `cargo test --target x86_64-pc-windows-gnu --no-fail-fast` under Wine 9.0 (mingw cross-compile, `LANG=LC_ALL=C.UTF-8`, `WINEPATH` set to the target dir), at `bdd666e`. `app_adapter_conformance` passes 13 of 13 under Wine and on Linux.

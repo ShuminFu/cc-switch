@@ -19,12 +19,20 @@ This fork has no Actions history, and CI only runs for pushes or PRs to `main`. 
 
 ## Needs macOS or Windows runners or machines
 
-Cross-compiling from Linux fails in `aws-lc-sys`. Wine runs give interim evidence only.
+With mingw installed the whole crate now cross-compiles to `x86_64-pc-windows-gnu`. Under Wine 9.0 (`LANG=LC_ALL=C.UTF-8`, at `bdd666e`) the full suite gives 3092 passed, 1 failed, 3 ignored. Linux gives 3136 passed, 0 failed. Both clippy runs (Linux and `--target x86_64-pc-windows-gnu`, `--all-targets -D warnings`) are clean.
+
+Wine found 13 failures at `a04dafe`. Twelve were fixed:
+- 9 came from a test-isolation bug: the injected `Paths` ignored `%LOCALAPPDATA%`, so tests wrote to the real user's Hermes and Claude Desktop directories. Fixed in `4385f6f`.
+- 2 were POSIX-only assumptions in tests: the Tauri local origin, and `~/.hermes`.
+- 1 was Wine's stubbed `CreateSymbolicLinkW`. Skill sync now falls back to copying, in `d83fd0b`.
+- 1 needed a UTF-8 locale for non-ASCII filenames under Wine.
+
+The remaining failure is Wine not keeping a protected DACL (CCS-083). That is a Wine gap, not a product bug. Wine is interim evidence only.
 
 - CCS-014 / CCS-001 / CCS-004: proxy_e2e and the golden suite pass on macOS and Windows.
-- CCS-152 / CCS-005: `takeover_crash` passes on all 3 OSes (Linux: 10/10).
+- CCS-152 / CCS-005 / CCS-150: `takeover_crash` and `app_adapter_conformance` pass on all 3 OSes. Linux and Wine both pass 10/10 and 13/13; macOS and real Windows have not been run.
 - CCS-036: the cfg-gated macOS and Windows terminal branches.
-- CCS-079 / CCS-083 / CCS-002: Windows `rename_replace` and the owner-only DACL tests on `windows-latest`.
+- CCS-079 / CCS-083 / CCS-084 / CCS-002: the owner-only DACL test on `windows-latest`. Wine cannot check it, because it does not keep DACLs. `rename_replace` already passes under Wine.
 - CCS-100: clippy on macOS, plus a check that keychain prompts stay responsive on a Mac.
 - CCS-179: a native macOS run of the terminal tests.
 
