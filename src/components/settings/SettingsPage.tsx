@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/accordion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { settingsApi } from "@/lib/api";
+import { backupsApi, settingsApi } from "@/lib/api";
 import { LanguageSettings } from "@/components/settings/LanguageSettings";
 import { ThemeSettings } from "@/components/settings/ThemeSettings";
 import { WindowSettings } from "@/components/settings/WindowSettings";
@@ -58,6 +58,7 @@ import { useInstalledSkills } from "@/hooks/useSkills";
 import { useSettings } from "@/hooks/useSettings";
 import { directoryValuesByApp } from "@/hooks/settingsDirectoryFields";
 import { useImportExport } from "@/hooks/useImportExport";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { SettingsFormState } from "@/hooks/useSettings";
 
@@ -109,6 +110,34 @@ export function SettingsPage({
   } = useImportExport({ onImportSuccess });
 
   const { data: installedSkills } = useInstalledSkills();
+  const queryClient = useQueryClient();
+
+  // FE-UI-55: one-click rollback to the safety backup taken by the import.
+  const revertImport = useCallback(
+    async (id: string) => {
+      try {
+        await backupsApi.restoreDbBackup(id.endsWith(".db") ? id : `${id}.db`);
+        // The whole database was replaced, so every cached query is stale.
+        await queryClient.invalidateQueries();
+        toast.success(
+          t("settings.revertImportSuccess", {
+            defaultValue: "Import reverted",
+          }),
+          { closeButton: true },
+        );
+        await onImportSuccess?.();
+      } catch (error) {
+        toast.error(
+          t("settings.revertImportFailed", {
+            defaultValue: "Failed to revert the import: {{message}}",
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        throw error;
+      }
+    },
+    [onImportSuccess, queryClient, t],
+  );
 
   const [activeTab, setActiveTab] = useState<string>("general");
   const [showRestartPrompt, setShowRestartPrompt] = useState(false);
@@ -392,6 +421,7 @@ export function SettingsPage({
                             onImport={importConfig}
                             onExport={exportConfig}
                             onClear={clearSelection}
+                            onRevertImport={revertImport}
                           />
                           <div className="mt-4">
                             <SecretsVaultSettings />

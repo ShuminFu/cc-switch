@@ -1,5 +1,6 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { within } from "@testing-library/react";
 import { ImportExportSection } from "@/components/settings/ImportExportSection";
 
 const tMock = vi.fn((key: string) => key);
@@ -61,6 +62,12 @@ describe("ImportExportSection Component", () => {
     });
     expect(importButton).toBeEnabled();
     fireEvent.click(importButton);
+    // FE-UI-55: importing replaces everything, so it asks first.
+    expect(baseProps.onImport).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "settings.import" }),
+    );
     expect(baseProps.onImport).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "common.clear" }));
@@ -111,5 +118,50 @@ describe("ImportExportSection Component", () => {
 
     expect(screen.getByText("settings.importFailed")).toBeInTheDocument();
     expect(screen.getByText("Parse failed")).toBeInTheDocument();
+  });
+
+  it("does not import when the confirmation is cancelled", () => {
+    render(
+      <ImportExportSection
+        {...baseProps}
+        selectedFile={"/tmp/test/config.sql"}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /settings\.import/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("settings.importConfirmMessage");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "common.cancel" }),
+    );
+    expect(baseProps.onImport).not.toHaveBeenCalled();
+  });
+
+  it("offers a revert that restores the pre-import backup", async () => {
+    const onRevertImport = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ImportExportSection
+        {...baseProps}
+        selectedFile={"/tmp/test/config.sql"}
+        status="success"
+        backupId="db_safety_20260101_000000"
+        onRevertImport={onRevertImport}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "settings.revertImport" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "settings.revertImport" }),
+    );
+    await waitFor(() =>
+      expect(onRevertImport).toHaveBeenCalledWith("db_safety_20260101_000000"),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "settings.revertImport" }),
+      ).toBeNull(),
+    );
   });
 });

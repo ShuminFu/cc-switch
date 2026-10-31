@@ -343,8 +343,13 @@ describe("SettingsPage Component", () => {
     expect(screen.getByText("webdav-sync-section:none")).toBeInTheDocument();
     fireEvent.click(screen.getByText("settings.advanced.data.title"));
 
-    // 有文件时，点击导入按钮执行 importConfig
+    // 有文件时，点击导入按钮先确认（FE-UI-55），确认后执行 importConfig
     fireEvent.click(screen.getByRole("button", { name: /settings\.import/ }));
+    expect(importExportMock.importConfig).not.toHaveBeenCalled();
+    const confirmButtons = screen.getAllByRole("button", {
+      name: "settings.import",
+    });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
     expect(importExportMock.importConfig).toHaveBeenCalled();
 
     fireEvent.click(
