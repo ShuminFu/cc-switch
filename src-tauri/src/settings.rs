@@ -8,7 +8,7 @@ use crate::error::AppError;
 use crate::services::skill::{SkillStorageLocation, SyncMethod};
 
 /// 自定义端点配置（历史兼容，实际存储在 provider.meta.custom_endpoints）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomEndpoint {
     pub url: String,
