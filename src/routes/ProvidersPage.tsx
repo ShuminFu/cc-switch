@@ -227,7 +227,7 @@ export default function ProvidersPage() {
     onSuccess: () => {
       toast.success(t("omo.disabled", { defaultValue: "OMO 已停用" }));
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       toast.error(
         t("omo.disableFailed", {
           defaultValue: "停用 OMO 失败: {{error}}",

@@ -33,7 +33,7 @@ export const useCreateProfileMutation = () => {
       await updateTrayMenuSafely();
       toast.success(t("profiles.createSuccess"), { closeButton: true });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(t("profiles.createFailed", { detail }), {
         closeButton: true,
@@ -63,7 +63,7 @@ export const useUpdateProfileMutation = () => {
       await updateTrayMenuSafely();
       toast.success(t("profiles.updateSuccess"), { closeButton: true });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(t("profiles.updateFailed", { detail }), {
         closeButton: true,
@@ -83,7 +83,7 @@ export const useDeleteProfileMutation = () => {
       await updateTrayMenuSafely();
       toast.success(t("profiles.deleteSuccess"), { closeButton: true });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(t("profiles.deleteFailed", { detail }), {
         closeButton: true,
@@ -103,7 +103,7 @@ export const useClearProfileMutation = () => {
       await updateTrayMenuSafely();
       toast.success(t("profiles.clearSuccess"), { closeButton: true });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(t("profiles.applyFailed", { detail }), {
         closeButton: true,
@@ -144,7 +144,7 @@ export const useApplyProfileMutation = () => {
         toast.success(t("profiles.applySuccess"), { closeButton: true });
       }
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(t("profiles.applyFailed", { detail }), {
         closeButton: true,

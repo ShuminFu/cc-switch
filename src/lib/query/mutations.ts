@@ -159,7 +159,7 @@ export const useAddProviderMutation = (appId: AppId) => {
         },
       );
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("notifications.addFailed", {
@@ -210,7 +210,7 @@ export const useUpdateProviderMutation = (appId: AppId) => {
         },
       );
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("notifications.updateFailed", {
@@ -251,7 +251,7 @@ export const useDeleteProviderMutation = (appId: AppId) => {
         },
       );
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("notifications.deleteFailed", {
@@ -283,7 +283,7 @@ export const useSwitchProviderMutation = (appId: AppId) => {
         );
       }
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
 
       toast.error(
@@ -345,7 +345,7 @@ export const useDeleteSessionMutation = () => {
         }),
       );
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("sessionManager.deleteFailed", {

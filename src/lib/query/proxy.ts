@@ -105,7 +105,7 @@ export function useProxyStatus() {
       );
       queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail =
         extractErrorMessage(error) ||
         t("common.unknown", { defaultValue: "未知错误" });
@@ -130,7 +130,7 @@ export function useProxyStatus() {
       );
       queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail =
         extractErrorMessage(error) ||
         t("common.unknown", { defaultValue: "未知错误" });
@@ -167,7 +167,7 @@ export function useProxyStatus() {
       });
       // 注意：故障转移队列和开关状态会保留，不需要刷新
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail =
         extractErrorMessage(error) ||
         t("common.unknown", { defaultValue: "未知错误" });
@@ -205,7 +205,7 @@ export function useProxyStatus() {
         queryKey: queryKeys.proxy.takeoverStatus,
       });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail =
         extractErrorMessage(error) ||
         t("common.unknown", { defaultValue: "未知错误" });
@@ -230,7 +230,7 @@ export function useProxyStatus() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail =
         extractErrorMessage(error) ||
         t("common.unknown", { defaultValue: "未知错误" });
@@ -380,7 +380,7 @@ export function useSwitchProxyProvider() {
         queryKey: queryKeys.providers.byApp(variables.appType),
       });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       toast.error(
         t("proxy.switchFailed", { error: extractErrorMessage(error) }),
       );

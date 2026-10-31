@@ -18,6 +18,7 @@ import {
   type DetectedProxy,
 } from "@/lib/api/globalProxy";
 import { queryKeys } from "@/lib/query/keys";
+import { extractErrorMessage } from "@/utils/errorUtils";
 
 /**
  * 获取全局代理 URL
@@ -47,12 +48,7 @@ export function useSetGlobalProxyUrl() {
       });
     },
     onError: (error: unknown) => {
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === "string"
-            ? error
-            : "Unknown error";
+      const message = extractErrorMessage(error) || t("common.unknown");
       toast.error(t("settings.globalProxy.saveFailed", { error: message }));
     },
   });
@@ -77,8 +73,12 @@ export function useTestProxy() {
         );
       }
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
+    onError: (error: unknown) => {
+      toast.error(
+        t("settings.globalProxy.testFailed", {
+          error: extractErrorMessage(error) || t("common.unknown"),
+        }),
+      );
     },
   });
 }
@@ -101,9 +101,11 @@ export function useScanProxies() {
 
   return useMutation({
     mutationFn: scanLocalProxies,
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       toast.error(
-        t("settings.globalProxy.scanFailed", { error: error.message }),
+        t("settings.globalProxy.scanFailed", {
+          error: extractErrorMessage(error) || t("common.unknown"),
+        }),
       );
     },
   });

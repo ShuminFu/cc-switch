@@ -181,7 +181,7 @@ export function AutoFailoverConfigPanel({
   return (
     <div className="border-0 rounded-none shadow-none bg-transparent">
       <div className="space-y-4">
-        {error && (
+        {!!error && (
           <Alert variant="destructive">
             <AlertDescription>{String(error)}</AlertDescription>
           </Alert>
