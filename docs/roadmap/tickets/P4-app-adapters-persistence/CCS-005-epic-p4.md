@@ -10,10 +10,10 @@ Collapse the per-app fan-out (including services/provider/mod.rs, which the plan
 
 ## Exit criteria
 - [x] Migration framework: MIGRATIONS is contiguous and ends at SCHEMA_VERSION (CI check); create_tables is deleted; each schema bump has a documented DB_COMPAT_VERSION decision. Evidence: `MIGRATIONS` = v1..v21, `SCHEMA_VERSION = 21`; `migrations_are_contiguous_and_end_at_schema_version` and `migrations_declare_db_compat_impact_per_policy` pass (they run in CI `cargo test`). No `fn create_tables` remains; the name appears only in comments. Every step declares `db_compat` (v16–v21 `Additive`, `DB_COMPAT_VERSION` stays 6), and the policy is in `docs/dev/DB_COMPATIBILITY.md`.
-- [ ] live.rs, prompt_files.rs, skill.rs and commands/config.rs contain no match app_type; backend match-app sites outside apps/** number 15 or fewer. Partly met: the four files have no AppType match (asserted by `match_app_sites_outside_apps_stay_within_budget`). Not met: the same counter finds **30** sites today (40 after CCS-149, 56 before it), against a target of 15. See the closure audit.
+- [x] live.rs, prompt_files.rs, skill.rs and commands/config.rs contain no match app_type; backend match-app sites outside apps/** number 15 or fewer. Met since CCS-236: the counter reports **4** sites (budget 4; 2 of them in time-gated `takeover/legacy.rs`). Audit text: Partly met: the four files have no AppType match (asserted by `match_app_sites_outside_apps_stay_within_budget`). Not met: the same counter finds **30** sites today (40 after CCS-149, 56 before it), against a target of 15. See the closure audit.
 - [x] Conformance suite green for all 8 apps (credentials, MCP, prompt/skills paths, takeover apply/cleanup restores bytes, caps match traits, codex model_provider id stable). Evidence: `cargo test --test app_adapter_conformance` gives 13 passed. That includes `credentials_round_trip_for_every_app`, `mcp_upsert_and_remove_for_every_app`, `prompt_and_skills_paths_for_every_app`, `takeover_apply_then_cleanup_restores_original_bytes` (all 7 `PROXY_TAKEOVER` apps), `caps_match_implemented_traits_for_every_app` and `codex_model_provider_id_is_stable`.
 - [x] No services/proxy/ file exceeds 1500 lines of production code; crash/restore E2E green for claude, codex, gemini, grokbuild, opencode, openclaw and hermes. Evidence: the largest production file is `services/proxy/takeover/mod.rs` at 684 lines (`tests.rs`, 4718 lines, is `#[cfg(test)] mod tests;`). `cargo test --test takeover_crash` gives 10 passed, covering all 7 apps in `cases()`, on Linux. The 3-OS run is tracked by CCS-152 through the CI matrix.
-- [x] Fresh and migrated DBs are schema-equivalent; a test-only 9th app touches 6 or fewer backend files and needs no migration. Met since CCS-233: `new_app_backend_touch_points_stay_within_budget` reports **5** files (budget 5). Audit text: Partly met: schema equivalence holds (`every_released_schema_migrates_to_current` in `tests/migrations.rs`, 14 passed), and no migration is needed (`dummy_app_needs_no_schema_migration`, `dao::ninth_app_needs_no_migration`). Not met: `new_app_backend_touch_points_stay_within_budget` reports **9** files (budget constant 10), against a target of 6.
+- [x] Fresh and migrated DBs are schema-equivalent; a test-only 9th app touches 6 or fewer backend files and needs no migration. Met since CCS-233: `new_app_backend_touch_points_stay_within_budget` reports **5** files (budget 5); **4** files (budget 4) since CCS-236. Audit text: Partly met: schema equivalence holds (`every_released_schema_migrates_to_current` in `tests/migrations.rs`, 14 passed), and no migration is needed (`dummy_app_needs_no_schema_migration`, `dao::ninth_app_needs_no_migration`). Not met: `new_app_backend_touch_points_stay_within_budget` reports **9** files (budget constant 10), against a target of 6.
 - [x] One cost function; the cost golden table (at least 50 rows) passes; backfill output equals ingest output. Evidence: `pricing::engine::cost` is the only `fn cost`. The golden table has 72 rows with a `>= 50` guard. The 7 `cost_golden_*` tests pass, including `cost_golden_backfill_output_equals_ingest_output`.
 - [x] No SQL outside database/ (CI grep); dashboard summary p95 is 50 ms or less on a 1M-row DB; superseded_by backfill is chunked and resumable. Evidence: `no_sql_outside_database` passes; its allowlist covers only foreign-DB readers and the test harness. CCS-160's 1M-row benchmark measured a "today" summary p95 of 24 ms after the backfill (`superseded_benchmark_one_million_rows`, ignored by default and not re-run here). `superseded_backfill_resumes_from_cursor_after_kill` and the parity tests pass.
 - [x] Killing the process mid-import causes no double counting; a downgraded app still reads current providers through dual-written keys. Evidence: `session_import_killed_between_files_does_not_double_count`, `new_settings_json_is_readable_by_the_old_struct` and `frontend_save_uses_flat_keys_for_legacy_apps` pass.
@@ -33,8 +33,8 @@ Audited 2026-10-30 on branch `claude/funny-carson-9c7j3e` against the current co
 | CCS-146 | p4-adapter-trait-gemini-grok | Done |
 | CCS-147 | p4-adapter-claude | Done |
 | CCS-148 | p4-adapter-codex | Done |
-| CCS-149 | p4-adapter-additive | Partial (match-app sites ≤ 15 is not met) |
-| CCS-150 | p4-adapter-conformance | Done (9th app touches 5 files since CCS-233) |
+| CCS-149 | p4-adapter-additive | Done (match-app sites 4 since CCS-236) |
+| CCS-150 | p4-adapter-conformance | Done (9th app touches 4 files since CCS-236) |
 | CCS-151 | p4-mcp-projector | Done |
 | CCS-152 | p4-takeover-crash-e2e | Partial (green on 3 OSes is not verified) |
 | CCS-153 | p4-services-proxy-split | Done |
@@ -70,7 +70,7 @@ Audited 2026-10-30 on branch `claude/funny-carson-9c7j3e` against the current co
 - **Persistence safety.** Kill-mid-import is idempotent, and per-app settings keys are dual-written so a downgraded app still reads current providers.
 
 ### What remains
-1. **Match-app sites outside `apps/**`: 30 today, target ≤ 15.** Measured with the same heuristic as `apps::tests::match_app_sites`. Remaining files:
+1. **Resolved by CCS-233/234/235/236 (now 4 sites).** **Match-app sites outside `apps/**`: 30 today, target ≤ 15.** Measured with the same heuristic as `apps::tests::match_app_sites`. Remaining files:
    - `app_config.rs` (4)
    - `services/proxy/takeover/mod.rs` (4) and `takeover/engine.rs` (3)
    - `services/profile.rs` (3)

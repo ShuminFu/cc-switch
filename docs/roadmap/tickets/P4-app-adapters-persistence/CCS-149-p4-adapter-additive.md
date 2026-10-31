@@ -1,6 +1,6 @@
 # CCS-149: [apps] Migrate OpenCode, OpenClaw and Hermes to AppAdapter and remove the remaining fan-out
 
-**Status:** Partial · **Kind:** refactor · **Labels:** `refactor`, `phase:P4`, `p2-medium`, `area:apps`
+**Status:** Done · **Kind:** refactor · **Labels:** `refactor`, `phase:P4`, `p2-medium`, `area:apps`
 
 > **Ticket key:** `p4-adapter-additive` · **Phase:** P4 · **Priority:** p2-medium · **Effort:** L · **Depends on:** `p4-adapter-claude`, `p4-adapter-codex`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -12,7 +12,7 @@
 
 ## Acceptance criteria / verification
 - [x] live.rs, prompt_files.rs, skill.rs and commands/config.rs have no match app_type
-- [ ] Backend match-app sites outside apps/** number 15 or fewer (CI count). The CI count now exists and is 40 (was 56). The rest needs CCS-153/154/155, see below.
+- [x] Backend match-app sites outside apps/** number 15 or fewer (CI count). Met by CCS-236: the counter reports **4** sites (`MATCH_APP_SITE_BUDGET = 4`; was 40 after this ticket, 56 before it).
 - [x] Writer snapshots are identical
 
 ## Dependencies
