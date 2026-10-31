@@ -38,7 +38,7 @@ with a transform error instead of being silently changed).
 | `image` (url) | mapped (`image_url` with the http(s) URL) | mapped | error: Gemini Native only accepts base64 media |
 | `document` (base64 PDF) | mapped (`file` part) | mapped (`input_file`) | mapped (`inlineData`) |
 | `tool_use` | mapped (`tool_calls`) | mapped (`function_call` item) | mapped (`functionCall`); synthesized ids are not forwarded |
-| `tool_result` | mapped (`role: tool` message; media moved to a follow-up user message; `is_error` prefixes `[error]`) | mapped (`function_call_output`; `is_error` adds a marker) | mapped (`functionResponse`; `is_error` uses the `error` key) |
+| `tool_result` | mapped (`role: tool` message; media moved to a follow-up user message; `is_error` prefixes `[error]`) | mapped (`function_call_output`; `is_error` adds a marker) | mapped (`functionResponse`; `is_error` uses the `error` key; returned images/PDFs follow as `inlineData` parts) |
 | `thinking` / `redacted_thinking` | replayed as `reasoning_content` for providers that need it, otherwise dropped | the cc-switch reasoning envelope is restored as the original `reasoning` item; other thinking is dropped | dropped; a `ccswitch-gemini-thought-v1` envelope restores `thoughtSignature`s |
 
 ## Upstream response → client

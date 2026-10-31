@@ -753,7 +753,8 @@ fn convert_message_content_to_parts(
                     })?;
 
                 // See `tool_use` above: synthesized ids must not leak upstream.
-                let mut response = normalize_tool_result_response(block.get("content"));
+                let (mut response, media_parts) =
+                    normalize_tool_result_response(block.get("content"));
                 // PROV-15: keep the error signal. Gemini's convention is an
                 // `error` key in `functionResponse.response`.
                 if block.get("is_error").and_then(|value| value.as_bool()) == Some(true) {
@@ -772,6 +773,10 @@ fn convert_message_content_to_parts(
                 }
 
                 parts.push(json!({ "functionResponse": function_response }));
+                // PROV-15: images/PDFs a tool returned travel as inline media
+                // parts right after the response instead of being dropped or
+                // serialized as base64 JSON text.
+                parts.extend(media_parts);
             }
             "thinking" | "redacted_thinking" => {}
             _ => {}
@@ -781,24 +786,70 @@ fn convert_message_content_to_parts(
     Ok(parts)
 }
 
-fn normalize_tool_result_response(content: Option<&Value>) -> Value {
-    match content {
-        Some(Value::String(text)) => json!({ "content": text }),
-        Some(Value::Array(blocks)) => {
-            let texts: Vec<&str> = blocks
-                .iter()
-                .filter(|block| block.get("type").and_then(|value| value.as_str()) == Some("text"))
-                .filter_map(|block| block.get("text").and_then(|value| value.as_str()))
-                .collect();
-
-            if texts.is_empty() {
-                json!({ "content": Value::Array(blocks.clone()) })
+/// Media block inside a `tool_result` → Gemini `inlineData` part (base64
+/// only; URL sources become a text reference).
+fn tool_result_media_part(block: &Value) -> Option<Result<Value, String>> {
+    let block_type = block.get("type").and_then(Value::as_str)?;
+    if block_type != "image" && block_type != "document" {
+        return None;
+    }
+    let source = block.get("source")?;
+    match source.get("type").and_then(Value::as_str) {
+        Some("base64") => {
+            let default_mime = if block_type == "image" {
+                "image/png"
             } else {
-                json!({ "content": texts.join("\n") })
+                "application/pdf"
+            };
+            Some(Ok(json!({
+                "inlineData": {
+                    "mimeType": source.get("media_type").and_then(Value::as_str).unwrap_or(default_mime),
+                    "data": source.get("data").and_then(Value::as_str).unwrap_or("")
+                }
+            })))
+        }
+        Some("url") => source
+            .get("url")
+            .and_then(Value::as_str)
+            .map(|url| Err(format!("[{block_type}: {url}]"))),
+        _ => None,
+    }
+}
+
+/// Anthropic `tool_result.content` → (`functionResponse.response`, media parts).
+fn normalize_tool_result_response(content: Option<&Value>) -> (Value, Vec<Value>) {
+    match content {
+        Some(Value::String(text)) => (json!({ "content": text }), Vec::new()),
+        Some(Value::Array(blocks)) => {
+            let mut texts: Vec<String> = Vec::new();
+            let mut media = Vec::new();
+            for block in blocks {
+                if block.get("type").and_then(Value::as_str) == Some("text") {
+                    if let Some(text) = block.get("text").and_then(Value::as_str) {
+                        texts.push(text.to_string());
+                    }
+                    continue;
+                }
+                match tool_result_media_part(block) {
+                    Some(Ok(part)) => media.push(part),
+                    Some(Err(reference)) => texts.push(reference),
+                    None => {}
+                }
+            }
+
+            if !texts.is_empty() {
+                (json!({ "content": texts.join("\n") }), media)
+            } else if !media.is_empty() {
+                (
+                    json!({ "content": "[tool returned media; see the following parts]" }),
+                    media,
+                )
+            } else {
+                (json!({ "content": Value::Array(blocks.clone()) }), media)
             }
         }
-        Some(value) => json!({ "content": value.clone() }),
-        None => json!({ "content": "" }),
+        Some(value) => (json!({ "content": value.clone() }), Vec::new()),
+        None => (json!({ "content": "" }), Vec::new()),
     }
 }
 
@@ -2491,6 +2542,36 @@ mod tests {
         );
         assert_eq!(calls[1]["thoughtSignature"], "sig-rome");
         assert!(calls[2].get("thoughtSignature").is_none());
+    }
+
+    /// PROV-15: images returned by a tool reach Gemini as inline media parts
+    /// next to the functionResponse instead of base64 JSON text, and the
+    /// error signal survives.
+    #[test]
+    fn tool_result_media_becomes_inline_parts() {
+        let request = json!({
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "call_1", "name": "screenshot", "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "call_1", "is_error": true, "content": [
+                        {"type": "text", "text": "partial capture"},
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "QUJD"}},
+                        {"type": "image", "source": {"type": "url", "url": "https://example.com/a.png"}}
+                    ]}
+                ]}
+            ]
+        });
+        let result = anthropic_to_gemini_with_shadow(request, None, None, None).unwrap();
+        let parts = result["contents"][1]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2, "{parts:?}");
+        assert_eq!(
+            parts[0]["functionResponse"]["response"]["error"],
+            "partial capture\n[image: https://example.com/a.png]"
+        );
+        assert_eq!(parts[1]["inlineData"]["mimeType"], "image/jpeg");
+        assert_eq!(parts[1]["inlineData"]["data"], "QUJD");
     }
 
     #[test]

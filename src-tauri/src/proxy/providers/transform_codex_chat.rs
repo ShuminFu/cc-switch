@@ -1139,20 +1139,11 @@ fn serialize_tool_definition_for_description(tool: &Value) -> String {
 ///
 /// Some Responses tools carry `parameters: null` or `parameters: {"type": null}`,
 /// but OpenAI Chat Completions strictly requires `{"type": "object", "properties": {...}}`.
+/// PROV-25: the Codex→Chat path shares the Claude→Chat/Responses sanitizer
+/// (`transform::clean_schema`): root forced to `type: object` with
+/// `properties`, unsupported `format: "uri"` stripped in every sub-schema.
 fn normalize_function_parameters(params: Option<&Value>) -> Value {
-    let mut params = match params {
-        Some(Value::Object(obj)) => Value::Object(obj.clone()),
-        _ => json!({"type": "object", "properties": {}}),
-    };
-    if let Some(obj) = params.as_object_mut() {
-        match obj.get("type").and_then(|v| v.as_str()) {
-            Some("object") => {}
-            _ => {
-                obj.insert("type".to_string(), json!("object"));
-            }
-        }
-    }
-    params
+    super::transform::clean_schema(params.cloned().unwrap_or(Value::Null))
 }
 
 fn responses_function_tool_to_chat_tool(tool: &Value, chat_name: &str) -> Option<Value> {
@@ -3281,5 +3272,31 @@ mod tests {
             "tools should be present from tool_search_output"
         );
         assert_eq!(result["tools"][0]["function"]["name"], "search_docs");
+    }
+
+    /// PROV-25: Codex→Chat tool schemas go through the shared sanitizer.
+    #[test]
+    fn function_parameters_use_shared_schema_sanitizer() {
+        let body = json!({
+            "model": "m",
+            "input": "hi",
+            "tools": [
+                {"type": "function", "name": "a", "parameters": {"type": null}},
+                {"type": "function", "name": "b", "parameters": {
+                    "type": "object",
+                    "properties": {"link": {"anyOf": [{"type": "string", "format": "uri"}, {"type": "null"}]}}
+                }}
+            ]
+        });
+        let result = responses_to_chat_completions(body).unwrap();
+        assert_eq!(
+            result["tools"][0]["function"]["parameters"],
+            json!({"type": "object", "properties": {}})
+        );
+        assert!(
+            result["tools"][1]["function"]["parameters"]["properties"]["link"]["anyOf"][0]
+                .get("format")
+                .is_none()
+        );
     }
 }
