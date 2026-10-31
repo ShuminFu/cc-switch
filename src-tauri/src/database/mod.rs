@@ -32,8 +32,10 @@
 //! ```
 
 pub(crate) mod backup;
+pub(crate) mod cost_nanos;
 mod dao;
 mod migration;
+pub(crate) mod model_catalog;
 mod pricing_seed;
 mod read_pool;
 mod request_cache;
@@ -47,6 +49,8 @@ mod usage_writer;
 mod tests;
 
 // DAO 类型导出供外部使用
+pub(crate) use dao::pricing as dao_pricing;
+pub use dao::pricing::ModelPricingInfo;
 pub(crate) use dao::providers_seed::{
     is_official_seed_id, CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID, CODEX_OFFICIAL_PROVIDER_ID,
 };
@@ -80,6 +84,9 @@ pub(crate) const SYNC_DB_COMPAT_VERSION: u32 = schema::SYNC_DB_COMPAT_VERSION;
 
 /// 主库连接的 busy_timeout：其它进程/连接（备份、外部工具）短暂持有写锁时等待而不是立即报错。
 pub(crate) const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+/// Prepared-statement cache per connection (PERF-31): enough for the DAO's hot
+/// statements (settings, per-app proxy config, providers, pricing lookups).
+pub(crate) const DB_STATEMENT_CACHE_CAPACITY: usize = 64;
 /// 页缓存大小（负数 = KiB），约 16 MiB。
 const DB_CACHE_SIZE_KIB: i64 = 16_000;
 /// WAL 文件在检查点后截断到的上限，避免长时间运行后 -wal 文件无限增长。
@@ -99,11 +106,13 @@ fn wal_disabled_by_env() -> bool {
 ///   WAL 下 `synchronous=NORMAL` 仍保证崩溃一致性（断电只可能丢最后几个事务）。
 ///   若 WAL 不可用（或被环境变量禁用）则保持回滚日志 + `synchronous=FULL`，不降低持久性。
 /// - 内存库：journal_mode 固定为 memory，只应用其余设置。
-/// - 所有连接：`foreign_keys=ON`、`busy_timeout`、`cache_size`、`temp_store=MEMORY`。
+/// - 所有连接：`foreign_keys=ON`、`busy_timeout`、`cache_size`、`temp_store=MEMORY`，
+///   以及 [`DB_STATEMENT_CACHE_CAPACITY`] 条预编译语句缓存（PERF-31）。
 pub(crate) fn configure_connection(conn: &Connection, file_backed: bool) -> Result<(), AppError> {
     let db_err = |e: rusqlite::Error| AppError::Database(format!("配置数据库连接失败: {e}"));
 
     conn.busy_timeout(DB_BUSY_TIMEOUT).map_err(db_err)?;
+    conn.set_prepared_statement_cache_capacity(DB_STATEMENT_CACHE_CAPACITY);
     conn.execute_batch(&format!(
         "PRAGMA foreign_keys = ON;
          PRAGMA cache_size = -{DB_CACHE_SIZE_KIB};
@@ -184,6 +193,19 @@ pub struct Database {
     request_cache: request_cache::RequestCache,
     /// Serialises read-modify-write of the universal-provider map (DB-16).
     universal_providers_lock: Mutex<()>,
+    /// Whether this database feeds the process-wide model capability snapshot
+    /// (PROV-33). Only the app database (`Database::init`) does.
+    publishes_model_catalog: bool,
+}
+
+/// Whether `model_pricing.input_modalities` exists (v24+).
+pub(crate) fn schema_has_input_modalities(conn: &Connection) -> Result<bool, AppError> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('model_pricing') WHERE name = 'input_modalities')",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|e| AppError::Database(e.to_string()))
 }
 
 fn register_db_change_hook(conn: &Connection, config_generation: Arc<AtomicU64>) {
@@ -258,6 +280,7 @@ impl Database {
         if let Err(e) = db.ensure_incremental_auto_vacuum() {
             log::warn!("Failed to ensure incremental auto-vacuum: {e}");
         }
+        db.publishes_model_catalog = true;
         db.ensure_model_pricing_seeded()?;
 
         // 迁移完成后再打开只读连接，避免它们缓存迁移前的 schema。
@@ -357,6 +380,7 @@ impl Database {
             read_pool: None,
             request_cache,
             universal_providers_lock: Mutex::new(()),
+            publishes_model_catalog: false,
         }
     }
 
@@ -386,6 +410,27 @@ impl Database {
             Some(pool) => pool.get().map(ReadConn::pooled),
             None => Ok(ReadConn::main(lock_conn!(self.conn))),
         }
+    }
+
+    /// Run a read-only closure on a read connection (the WAL read pool when
+    /// available, else the main connection) (DB-15). Callers outside
+    /// `database/` should prefer this (or a DAO method) over locking `conn`.
+    pub(crate) fn read<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> Result<T, AppError>,
+    ) -> Result<T, AppError> {
+        let conn = self.read_conn()?;
+        f(&conn)
+    }
+
+    /// Run a closure on the main (read-write) connection (DB-15). For
+    /// all-or-nothing multi-statement writes use [`Self::with_transaction`].
+    pub(crate) fn write<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> Result<T, AppError>,
+    ) -> Result<T, AppError> {
+        let conn = lock_conn!(self.conn);
+        f(&conn)
     }
 
     /// Config-change counter bumped by the update hook (tests only).

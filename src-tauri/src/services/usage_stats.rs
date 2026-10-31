@@ -2,6 +2,8 @@
 //!
 //! 提供使用量数据的聚合查询功能
 
+use crate::database::dao_pricing as pricing;
+pub use crate::database::ModelPricingInfo;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::proxy::usage::calculator::ModelPricing;
@@ -9,7 +11,7 @@ use crate::services::sql_helpers::{
     fresh_input_sql, INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_TOTAL,
 };
 use chrono::{Local, NaiveDate, TimeZone, Timelike};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -690,7 +692,7 @@ impl Database {
             FROM
                 (SELECT
                     COUNT(*) as total_requests,
-                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as total_cost,
+                    (COALESCE(SUM(l.total_cost_nanos), 0) / 1e9) as total_cost,
                     COALESCE(SUM({fresh_input_detail}), 0) as total_input_tokens,
                     COALESCE(SUM(l.output_tokens), 0) as total_output_tokens,
                     COALESCE(SUM(l.cache_creation_tokens), 0) as total_cache_creation_tokens,
@@ -699,7 +701,7 @@ impl Database {
                  FROM proxy_request_logs l {detail_join} {where_clause}) d,
                 (SELECT
                     COALESCE(SUM(r.request_count), 0) as total_requests,
-                    COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0) as total_cost,
+                    (COALESCE(SUM(r.total_cost_nanos), 0) / 1e9) as total_cost,
                     COALESCE(SUM({fresh_input_rollup}), 0) as total_input_tokens,
                     COALESCE(SUM(r.output_tokens), 0) as total_output_tokens,
                     COALESCE(SUM(r.cache_creation_tokens), 0) as total_cache_creation_tokens,
@@ -836,7 +838,7 @@ impl Database {
             FROM (
                 SELECT {detail_app_type} as app_type,
                     COUNT(*) as req_count,
-                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as cost,
+                    (COALESCE(SUM(l.total_cost_nanos), 0) / 1e9) as cost,
                     COALESCE(SUM({fresh_input_detail}), 0) as input_t,
                     COALESCE(SUM(l.output_tokens), 0) as output_t,
                     COALESCE(SUM(l.cache_creation_tokens), 0) as cache_create_t,
@@ -847,7 +849,7 @@ impl Database {
                 UNION ALL
                 SELECT {rollup_app_type} as app_type,
                     COALESCE(SUM(r.request_count), 0),
-                    COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0),
+                    (COALESCE(SUM(r.total_cost_nanos), 0) / 1e9),
                     COALESCE(SUM({fresh_input_rollup}), 0),
                     COALESCE(SUM(r.output_tokens), 0),
                     COALESCE(SUM(r.cache_creation_tokens), 0),
@@ -980,7 +982,7 @@ impl Database {
                 "SELECT
                     CAST((l.created_at - ?1) / ?3 AS INTEGER) as bucket_idx,
                     COUNT(*) as request_count,
-                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as total_cost,
+                    (COALESCE(SUM(l.total_cost_nanos), 0) / 1e9) as total_cost,
                     COALESCE(SUM({fresh_input} + l.output_tokens), 0) as total_tokens,
                     COALESCE(SUM({fresh_input}), 0) as total_input_tokens,
                     COALESCE(SUM(l.output_tokens), 0) as total_output_tokens,
@@ -1093,7 +1095,7 @@ impl Database {
             "SELECT
                 date(l.created_at, 'unixepoch', 'localtime') as bucket_date,
                 COUNT(*) as request_count,
-                COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as total_cost,
+                (COALESCE(SUM(l.total_cost_nanos), 0) / 1e9) as total_cost,
                 COALESCE(SUM({fresh_input} + l.output_tokens), 0) as total_tokens,
                 COALESCE(SUM({fresh_input}), 0) as total_input_tokens,
                 COALESCE(SUM(l.output_tokens), 0) as total_output_tokens,
@@ -1176,7 +1178,7 @@ impl Database {
             "SELECT
                 r.date,
                 COALESCE(SUM(r.request_count), 0),
-                COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0),
+                (COALESCE(SUM(r.total_cost_nanos), 0) / 1e9),
                 COALESCE(SUM({fresh_input_rollup} + r.output_tokens), 0),
                 COALESCE(SUM({fresh_input_rollup}), 0),
                 COALESCE(SUM(r.output_tokens), 0),
@@ -1344,7 +1346,7 @@ impl Database {
                     {detail_pname} as provider_name,
                     COUNT(*) as request_count,
                     COALESCE(SUM({fresh_input_detail} + l.output_tokens), 0) as total_tokens,
-                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as total_cost,
+                    (COALESCE(SUM(l.total_cost_nanos), 0) / 1e9) as total_cost,
                     COALESCE(SUM(CASE WHEN l.status_code >= 200 AND l.status_code < 300 THEN 1 ELSE 0 END), 0) as success_count,
                     COALESCE(SUM(l.latency_ms), 0) as latency_sum
                 FROM proxy_request_logs l
@@ -1356,7 +1358,7 @@ impl Database {
                     {rollup_pname} as provider_name,
                     COALESCE(SUM(r.request_count), 0),
                     COALESCE(SUM({fresh_input_rollup} + r.output_tokens), 0),
-                    COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0),
+                    (COALESCE(SUM(r.total_cost_nanos), 0) / 1e9),
                     COALESCE(SUM(r.success_count), 0),
                     COALESCE(SUM(r.avg_latency_ms * r.request_count), 0)
                 FROM usage_daily_rollups r
@@ -1498,7 +1500,7 @@ impl Database {
                 SELECT {detail_model} as model,
                     COUNT(*) as request_count,
                     COALESCE(SUM({fresh_input_detail} + l.output_tokens), 0) as total_tokens,
-                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as total_cost
+                    (COALESCE(SUM(l.total_cost_nanos), 0) / 1e9) as total_cost
                 FROM proxy_request_logs l
                 {detail_join}
                 {detail_where}
@@ -1507,7 +1509,7 @@ impl Database {
                 SELECT {rollup_model},
                     COALESCE(SUM(r.request_count), 0),
                     COALESCE(SUM({fresh_input_rollup} + r.output_tokens), 0),
-                    COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0)
+                    (COALESCE(SUM(r.total_cost_nanos), 0) / 1e9)
                 FROM usage_daily_rollups r
                 {rollup_join}
                 {rollup_where}
@@ -1816,8 +1818,9 @@ pub struct ProviderLimitStatus {
     pub monthly_exceeded: bool,
 }
 
-/// 成本回填候选行。`CAST(total_cost_usd AS REAL) <= 0` 与部分索引
-/// `idx_request_logs_zero_cost` 的 WHERE 完全一致，使查询只扫描零成本行而非全表（DB-09）。
+/// 成本回填候选行。`total_cost_nanos <= 0` 与部分索引
+/// `idx_request_logs_zero_cost_nanos` 的 WHERE 完全一致，使查询只扫描零成本行而非全表
+/// （DB-09；DB-14 起基于精确的整数成本列）。
 pub(crate) const BACKFILL_ZERO_COST_CANDIDATES_SQL: &str =
     "SELECT request_id, provider_id, NULL AS provider_name, app_type, model, request_model,
                         cost_multiplier,
@@ -1827,31 +1830,31 @@ pub(crate) const BACKFILL_ZERO_COST_CANDIDATES_SQL: &str =
                         first_token_ms, duration_ms, status_code, error_message, created_at,
                         data_source, pricing_model, input_token_semantics
              FROM proxy_request_logs
-             WHERE CAST(total_cost_usd AS REAL) <= 0
+             WHERE total_cost_nanos <= 0
                AND (input_tokens > 0 OR output_tokens > 0
                     OR cache_read_tokens > 0 OR cache_creation_tokens > 0)";
 
 /// 某 provider 今日用量：?1 provider_id, ?2 app_type, ?3/?4 今日 [起, 止) 时间戳, ?5 今日日期。
-const PROVIDER_DAILY_USAGE_SQL: &str = "SELECT COALESCE(SUM(cost), 0) FROM (
-        SELECT CAST(total_cost_usd AS REAL) as cost
+const PROVIDER_DAILY_USAGE_SQL: &str = "SELECT COALESCE(SUM(cost), 0) / 1e9 FROM (
+        SELECT total_cost_nanos as cost
         FROM proxy_request_logs
         WHERE provider_id = ?1 AND app_type = ?2
           AND created_at >= ?3 AND created_at < ?4
         UNION ALL
-        SELECT CAST(total_cost_usd AS REAL)
+        SELECT total_cost_nanos
         FROM usage_daily_rollups
         WHERE provider_id = ?1 AND app_type = ?2
           AND date = ?5
     )";
 
 /// 某 provider 本月用量：?3/?4 本月 [起, 止) 时间戳, ?5/?6 本月 [首日, 下月首日) 日期。
-const PROVIDER_MONTHLY_USAGE_SQL: &str = "SELECT COALESCE(SUM(cost), 0) FROM (
-        SELECT CAST(total_cost_usd AS REAL) as cost
+const PROVIDER_MONTHLY_USAGE_SQL: &str = "SELECT COALESCE(SUM(cost), 0) / 1e9 FROM (
+        SELECT total_cost_nanos as cost
         FROM proxy_request_logs
         WHERE provider_id = ?1 AND app_type = ?2
           AND created_at >= ?3 AND created_at < ?4
         UNION ALL
-        SELECT CAST(total_cost_usd AS REAL)
+        SELECT total_cost_nanos
         FROM usage_daily_rollups
         WHERE provider_id = ?1 AND app_type = ?2
           AND date >= ?5 AND date < ?6
@@ -2182,15 +2185,15 @@ pub(crate) fn find_model_pricing_row(
     }
 
     for candidate in &candidates {
-        if let Some(row) = query_model_pricing_exact(conn, candidate)? {
-            return Ok(Some(row));
+        if let Some(row) = pricing::query_model_pricing_exact(conn, candidate)? {
+            return pricing::pricing_row_in_usd(conn, row);
         }
     }
 
     for candidate in &candidates {
         if should_try_pricing_prefix_match(candidate) {
-            if let Some(row) = query_model_pricing_prefix(conn, candidate)? {
-                return Ok(Some(row));
+            if let Some(row) = pricing::query_model_pricing_prefix(conn, candidate)? {
+                return pricing::pricing_row_in_usd(conn, row);
             }
         }
     }
@@ -2225,55 +2228,6 @@ fn log_pricing_scope_matches(log: &RequestLogDetail, target_candidates: &[String
 pub(crate) fn is_placeholder_pricing_model(model_id: &str) -> bool {
     let normalized = model_id.trim().to_ascii_lowercase();
     normalized.is_empty() || matches!(normalized.as_str(), "unknown" | "null" | "none")
-}
-
-fn query_model_pricing_exact(
-    conn: &Connection,
-    model_id: &str,
-) -> Result<Option<(String, String, String, String)>, AppError> {
-    conn.query_row(
-        "SELECT input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million
-         FROM model_pricing
-         WHERE model_id = ?1",
-        [model_id],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        },
-    )
-    .optional()
-    .map_err(|e| AppError::Database(format!("查询模型定价失败: {e}")))
-}
-
-fn query_model_pricing_prefix(
-    conn: &Connection,
-    model_id: &str,
-) -> Result<Option<(String, String, String, String)>, AppError> {
-    let pattern = format!("{model_id}-%");
-    conn.query_row(
-        "SELECT input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million
-         FROM model_pricing
-         WHERE model_id LIKE ?1
-         ORDER BY LENGTH(model_id) ASC
-         LIMIT 1",
-        [pattern],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        },
-    )
-    .optional()
-    .map_err(|e| AppError::Database(format!("查询模型前缀定价失败: {e}")))
 }
 
 fn model_pricing_candidates(model_id: &str) -> Vec<String> {
@@ -2493,148 +2447,66 @@ fn should_try_pricing_prefix_match(model_id: &str) -> bool {
         && dash_count >= 2
 }
 
-/// 模型定价信息
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelPricingInfo {
-    pub model_id: String,
-    pub display_name: String,
-    pub input_cost_per_million: String,
-    pub output_cost_per_million: String,
-    pub cache_read_cost_per_million: String,
-    pub cache_creation_cost_per_million: String,
-}
-
-// 模型定价表的读写（原先以裸 SQL 写在 commands/usage.rs 中）。
-impl Database {
-    /// 列出全部模型定价（按显示名称排序）。表缺失时返回空列表。
-    pub fn list_model_pricing(&self) -> Result<Vec<ModelPricingInfo>, AppError> {
-        let conn = lock_conn!(self.conn);
-
-        // 检查表是否存在
-        let table_exists: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='model_pricing'",
-                [],
-                |row| row.get::<_, i64>(0).map(|count| count > 0),
-            )
-            .unwrap_or(false);
-
-        if !table_exists {
-            log::error!("model_pricing 表不存在,可能需要重启应用以触发数据库迁移");
-            return Ok(Vec::new());
-        }
-
-        let mut stmt = conn.prepare(
-            "SELECT model_id, display_name, input_cost_per_million, output_cost_per_million,
-                    cache_read_cost_per_million, cache_creation_cost_per_million
-             FROM model_pricing
-             ORDER BY display_name",
-        )?;
-
-        let rows = stmt.query_map([], |row| {
-            Ok(ModelPricingInfo {
-                model_id: row.get(0)?,
-                display_name: row.get(1)?,
-                input_cost_per_million: row.get(2)?,
-                output_cost_per_million: row.get(3)?,
-                cache_read_cost_per_million: row.get(4)?,
-                cache_creation_cost_per_million: row.get(5)?,
-            })
-        })?;
-
-        let mut pricing = Vec::new();
-        for row in rows {
-            pricing.push(row?);
-        }
-        Ok(pricing)
-    }
-
-    /// 插入或更新一条模型定价（调用方负责校验输入）。
-    ///
-    /// DB-19: the row becomes `source = 'user'`, so built-in seeding never
-    /// overwrites it again.
-    pub fn upsert_model_pricing(&self, pricing: &ModelPricingInfo) -> Result<(), AppError> {
-        let conn = lock_conn!(self.conn);
-        conn.execute(
-            "INSERT INTO model_pricing (
-                model_id, display_name, input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million, source
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'user')
-            ON CONFLICT(model_id) DO UPDATE SET
-                display_name = excluded.display_name,
-                input_cost_per_million = excluded.input_cost_per_million,
-                output_cost_per_million = excluded.output_cost_per_million,
-                cache_read_cost_per_million = excluded.cache_read_cost_per_million,
-                cache_creation_cost_per_million = excluded.cache_creation_cost_per_million,
-                source = 'user'",
-            params![
-                pricing.model_id,
-                pricing.display_name,
-                pricing.input_cost_per_million,
-                pricing.output_cost_per_million,
-                pricing.cache_read_cost_per_million,
-                pricing.cache_creation_cost_per_million
-            ],
-        )
-        .map_err(|e| AppError::Database(format!("更新模型定价失败: {e}")))?;
-        Ok(())
-    }
-
-    /// 删除一条模型定价。
-    pub fn delete_model_pricing(&self, model_id: &str) -> Result<(), AppError> {
-        let conn = lock_conn!(self.conn);
-        conn.execute(
-            "DELETE FROM model_pricing WHERE model_id = ?1",
-            params![model_id],
-        )
-        .map_err(|e| AppError::Database(format!("删除模型定价失败: {e}")))?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// PRODUCT-40: a CNY-quoted row is converted to USD with the FX rate when
+    /// costs are computed (¥1/M at 7.2 is $0.1389/M), and a price edit keeps
+    /// the row's currency.
     #[test]
-    fn model_pricing_crud_roundtrip() -> Result<(), AppError> {
+    fn non_usd_pricing_rows_are_converted_with_the_fx_rate() -> Result<(), AppError> {
         let db = Database::memory()?;
-        let pricing = ModelPricingInfo {
-            model_id: "zz-test-model".to_string(),
-            display_name: "ZZ Test".to_string(),
-            input_cost_per_million: "1.5".to_string(),
-            output_cost_per_million: "2".to_string(),
-            cache_read_cost_per_million: "0.1".to_string(),
-            cache_creation_cost_per_million: "0.2".to_string(),
-        };
-        db.upsert_model_pricing(&pricing)?;
-        let listed = db.list_model_pricing()?;
-        let found = listed
-            .iter()
-            .find(|p| p.model_id == "zz-test-model")
-            .expect("upserted pricing listed");
-        assert_eq!(found.input_cost_per_million, "1.5");
-        assert_eq!(found.display_name, "ZZ Test");
-
         db.upsert_model_pricing(&ModelPricingInfo {
-            output_cost_per_million: "3".to_string(),
-            ..pricing
+            model_id: "zz-cny-model".to_string(),
+            display_name: "ZZ CNY".to_string(),
+            input_cost_per_million: "1".to_string(),
+            output_cost_per_million: "7.2".to_string(),
+            cache_read_cost_per_million: "0".to_string(),
+            cache_creation_cost_per_million: "0".to_string(),
+            currency: "USD".to_string(),
+            input_modalities: None,
         })?;
-        let replaced = db.list_model_pricing()?;
-        assert_eq!(
-            replaced
-                .iter()
-                .filter(|p| p.model_id == "zz-test-model")
-                .count(),
-            1
-        );
-
-        db.delete_model_pricing("zz-test-model")?;
-        assert!(db
-            .list_model_pricing()?
+        db.set_model_pricing_metadata("zz-cny-model", "cny", None)?;
+        {
+            let conn = db.conn.lock().unwrap();
+            let (input, output, ..) =
+                find_model_pricing_row(&conn, "zz-cny-model")?.expect("priced");
+            assert!(input.starts_with("0.13888"), "{input}");
+            assert_eq!(output, "1");
+        }
+        let listed = db.list_model_pricing()?;
+        let row = listed
             .iter()
-            .all(|p| p.model_id != "zz-test-model"));
+            .find(|p| p.model_id == "zz-cny-model")
+            .unwrap();
+        assert_eq!(row.currency, "CNY");
+        assert_eq!(row.input_cost_per_million, "1", "stored price stays CNY");
+
+        let mut rates = std::collections::BTreeMap::new();
+        rates.insert("CNY".to_string(), "8".to_string());
+        db.set_pricing_fx_rates(&rates)?;
+        assert_eq!(
+            db.get_pricing_fx_rates()?.get("CNY").map(String::as_str),
+            Some("8")
+        );
+        {
+            let conn = db.conn.lock().unwrap();
+            let (_, output, ..) = find_model_pricing_row(&conn, "zz-cny-model")?.unwrap();
+            assert_eq!(output, "0.9");
+        }
+
+        // A currency without a rate is unpriced, never summed as dollars.
+        db.set_model_pricing_metadata("zz-cny-model", "EUR", None)?;
+        {
+            let conn = db.conn.lock().unwrap();
+            assert!(find_model_pricing_row(&conn, "zz-cny-model")?.is_none());
+        }
+        rates.insert("EUR".to_string(), "-1".to_string());
+        assert!(db.set_pricing_fx_rates(&rates).is_err());
+        assert!(db
+            .set_model_pricing_metadata("missing-model", "USD", None)
+            .is_err());
         Ok(())
     }
 

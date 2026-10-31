@@ -135,7 +135,7 @@ mod tests {
     use std::env;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     struct TempHome {
@@ -218,35 +218,13 @@ mod tests {
             .join(format!("{PROFILE_ID}.json"))
     }
 
-    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-    }
-
+    /// SVC-26: a per-thread home from the shared `test_support` seam instead
+    /// of a private mutex + `HOME`/`CC_SWITCH_TEST_HOME` mutation.
     fn with_test_home<T>(test: impl FnOnce(&AppState, &Path) -> T) -> T {
-        let _guard = test_guard();
-        let temp = tempfile::tempdir().expect("tempdir");
-        let old_test_home = std::env::var_os("CC_SWITCH_TEST_HOME");
-        let old_home = std::env::var_os("HOME");
-        std::env::set_var("CC_SWITCH_TEST_HOME", temp.path());
-        std::env::set_var("HOME", temp.path());
-
+        let home = crate::test_support::isolated_home();
         let db = Arc::new(Database::memory().expect("in-memory database"));
         let state = AppState::new(db);
-        let result = test(&state, temp.path());
-
-        match old_test_home {
-            Some(value) => std::env::set_var("CC_SWITCH_TEST_HOME", value),
-            None => std::env::remove_var("CC_SWITCH_TEST_HOME"),
-        }
-        match old_home {
-            Some(value) => std::env::set_var("HOME", value),
-            None => std::env::remove_var("HOME"),
-        }
-
-        result
+        test(&state, home.path())
     }
 
     fn codex_settings(base_url: &str, api_key: &str) -> Value {

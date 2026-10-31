@@ -159,7 +159,7 @@ pub(crate) async fn enable_auto_failover(
         .await
     {
         rollback_queue(state);
-        return Err(e);
+        return Err(e.into());
     }
 
     config.auto_failover_enabled = true;

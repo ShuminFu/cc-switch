@@ -180,6 +180,12 @@ pub(crate) const SETTING_KEYS: &[SettingKey] = &[
         "Request rectifier configuration.",
     ),
     key(
+        "pricing_fx_rates",
+        Synced,
+        Json,
+        "Units of each currency per 1 USD, for model pricing rows not quoted in USD (PRODUCT-40).",
+    ),
+    key(
         "optimizer_config",
         Synced,
         Json,

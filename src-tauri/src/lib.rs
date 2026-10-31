@@ -1113,6 +1113,10 @@ pub fn run() {
             commands::get_model_pricing,
             commands::update_model_pricing,
             commands::delete_model_pricing,
+            commands::set_model_pricing_metadata,
+            commands::get_pricing_fx_rates,
+            commands::set_pricing_fx_rates,
+            commands::preview_sync_download,
             commands::check_provider_limits,
             commands::get_budget_enforcement,
             commands::set_budget_enforcement,
@@ -2051,11 +2055,11 @@ async fn restore_proxy_state_on_startup(app: &tauri::AppHandle, state: &store::A
                     kind: "proxy_restore_failed".to_string(),
                     app_type: Some(app_type.to_string()),
                     path: None,
-                    message: e.clone(),
+                    message: e.to_string(),
                 });
                 if let Err(emit_err) = app.emit(
                     crate::events::PROXY_RESTORE_FAILED,
-                    serde_json::json!({ "appType": app_type, "error": e }),
+                    serde_json::json!({ "appType": app_type, "error": e.to_string() }),
                 ) {
                     log::debug!("发射 proxy-restore-failed 事件失败: {emit_err}");
                 }

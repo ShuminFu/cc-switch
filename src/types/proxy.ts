@@ -1,14 +1,12 @@
+/**
+ * Global proxy settings. Retries and timeouts are per app (`AppProxyConfig`);
+ * the vestigial copies that used to live here were removed (PROXY-29).
+ */
 export interface ProxyConfig {
   listen_address: string;
   listen_port: number;
-  max_retries: number;
-  request_timeout: number;
   enable_logging: boolean;
   live_takeover_active?: boolean;
-  // 超时配置
-  streaming_first_byte_timeout: number;
-  streaming_idle_timeout: number;
-  non_streaming_timeout: number;
 }
 
 export interface ProxyStatus {

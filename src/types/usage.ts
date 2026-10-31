@@ -63,6 +63,10 @@ export interface ModelPricing {
   outputCostPerMillion: string;
   cacheReadCostPerMillion: string;
   cacheCreationCostPerMillion: string;
+  /** ISO code the prices are quoted in; costs are always computed in USD. */
+  currency?: string;
+  /** Declared input modalities, e.g. ["text"]; null/absent = unknown. */
+  inputModalities?: string[] | null;
 }
 
 export interface UsageSummary {

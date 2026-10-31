@@ -1255,6 +1255,80 @@ pub(crate) fn remove_provider_from_live(
     crate::adapters::adapter_for(app_type).remove_provider_from_live(provider_id)
 }
 
+/// One provider read from an additive app's live config (SVC-34).
+struct LiveImportedProvider {
+    id: String,
+    /// Name for a newly created provider.
+    display_name: String,
+    /// Name to apply when the provider already exists (`None` keeps the
+    /// stored name).
+    name_on_update: Option<String>,
+    settings_config: Value,
+}
+
+/// The shared "existing → compare → update, else create with
+/// `live_config_managed: true`" loop of the additive-app importers (SVC-34).
+/// Returns imported + updated rows.
+fn import_additive_providers(
+    state: &AppState,
+    app: &str,
+    label: &str,
+    entries: Vec<LiveImportedProvider>,
+) -> Result<usize, AppError> {
+    let mut imported = 0;
+    let mut updated = 0;
+    let existing_ids = state.db.get_provider_ids(app)?;
+
+    for entry in entries {
+        let id = entry.id;
+        if existing_ids.contains(&id) {
+            match state.db.get_provider_by_id(&id, app) {
+                Ok(Some(existing)) => {
+                    let name = entry
+                        .name_on_update
+                        .clone()
+                        .unwrap_or_else(|| existing.name.clone());
+                    if existing.settings_config != entry.settings_config || existing.name != name {
+                        let mut provider = existing;
+                        provider.name = name;
+                        provider.settings_config = entry.settings_config;
+                        if let Err(e) = state.db.save_provider(app, &provider) {
+                            log::warn!(
+                                "Failed to update {label} provider '{id}' from live config: {e}"
+                            );
+                        } else {
+                            updated += 1;
+                            log::info!("Updated {label} provider '{id}' from live config");
+                        }
+                    }
+                }
+                Ok(None) => {
+                    log::warn!("{label} provider '{id}' disappeared while importing live config")
+                }
+                Err(e) => log::warn!("Failed to look up {label} provider '{id}': {e}"),
+            }
+            continue;
+        }
+
+        let mut provider =
+            Provider::with_id(id.clone(), entry.display_name, entry.settings_config, None);
+        provider.meta = Some(crate::provider::ProviderMeta {
+            live_config_managed: Some(true),
+            ..Default::default()
+        });
+
+        if let Err(e) = state.db.save_provider(app, &provider) {
+            log::warn!("Failed to import {label} provider '{id}': {e}");
+            continue;
+        }
+
+        imported += 1;
+        log::info!("Imported {label} provider '{id}' from live config");
+    }
+
+    Ok(imported + updated)
+}
+
 /// Import all providers from OpenCode live config to database
 ///
 /// This imports existing providers from ~/.config/opencode/opencode.json
@@ -1268,10 +1342,7 @@ pub fn import_opencode_providers_from_live(state: &AppState) -> Result<usize, Ap
         return Ok(0);
     }
 
-    let mut imported = 0;
-    let mut updated = 0;
-    let existing_ids = state.db.get_provider_ids("opencode")?;
-
+    let mut entries = Vec::new();
     for (id, config) in providers {
         // Convert to Value for settings_config
         let settings_config = match serde_json::to_value(&config) {
@@ -1281,53 +1352,14 @@ pub fn import_opencode_providers_from_live(state: &AppState) -> Result<usize, Ap
                 continue;
             }
         };
-
-        if existing_ids.contains(&id) {
-            match state.db.get_provider_by_id(&id, "opencode") {
-                Ok(Some(existing)) => {
-                    let display_name = config.name.clone().unwrap_or_else(|| existing.name.clone());
-                    if existing.settings_config != settings_config || existing.name != display_name
-                    {
-                        let mut provider = existing;
-                        provider.name = display_name;
-                        provider.settings_config = settings_config;
-                        if let Err(e) = state.db.save_provider("opencode", &provider) {
-                            log::warn!(
-                                "Failed to update OpenCode provider '{id}' from live config: {e}"
-                            );
-                        } else {
-                            updated += 1;
-                            log::info!("Updated OpenCode provider '{id}' from live config");
-                        }
-                    }
-                }
-                Ok(None) => {
-                    log::warn!("OpenCode provider '{id}' disappeared while importing live config")
-                }
-                Err(e) => log::warn!("Failed to look up OpenCode provider '{id}': {e}"),
-            }
-            continue;
-        }
-
-        // Create provider
-        let display_name = config.name.clone().unwrap_or_else(|| id.clone());
-        let mut provider = Provider::with_id(id.clone(), display_name, settings_config, None);
-        provider.meta = Some(crate::provider::ProviderMeta {
-            live_config_managed: Some(true),
-            ..Default::default()
+        entries.push(LiveImportedProvider {
+            display_name: config.name.clone().unwrap_or_else(|| id.clone()),
+            name_on_update: config.name.clone(),
+            id,
+            settings_config,
         });
-
-        // Save to database
-        if let Err(e) = state.db.save_provider("opencode", &provider) {
-            log::warn!("Failed to import OpenCode provider '{id}': {e}");
-            continue;
-        }
-
-        imported += 1;
-        log::info!("Imported OpenCode provider '{id}' from live config");
     }
-
-    Ok(imported + updated)
+    import_additive_providers(state, "opencode", "OpenCode", entries)
 }
 
 /// Import all providers from OpenClaw live config to database
@@ -1343,10 +1375,7 @@ pub fn import_openclaw_providers_from_live(state: &AppState) -> Result<usize, Ap
         return Ok(0);
     }
 
-    let mut imported = 0;
-    let mut updated = 0;
-    let existing_ids = state.db.get_provider_ids("openclaw")?;
-
+    let mut entries = Vec::new();
     for (id, config) in providers {
         // Validate: skip entries with empty id or no models
         if id.trim().is_empty() {
@@ -1367,55 +1396,20 @@ pub fn import_openclaw_providers_from_live(state: &AppState) -> Result<usize, Ap
             }
         };
 
-        if existing_ids.contains(&id) {
-            match state.db.get_provider_by_id(&id, "openclaw") {
-                Ok(Some(existing)) => {
-                    if existing.settings_config != settings_config {
-                        let mut provider = existing;
-                        provider.settings_config = settings_config;
-                        if let Err(e) = state.db.save_provider("openclaw", &provider) {
-                            log::warn!(
-                                "Failed to update OpenClaw provider '{id}' from live config: {e}"
-                            );
-                        } else {
-                            updated += 1;
-                            log::info!("Updated OpenClaw provider '{id}' from live config");
-                        }
-                    }
-                }
-                Ok(None) => {
-                    log::warn!("OpenClaw provider '{id}' disappeared while importing live config")
-                }
-                Err(e) => log::warn!("Failed to look up OpenClaw provider '{id}': {e}"),
-            }
-            continue;
-        }
-
         // Determine display name: use first model name if available, otherwise use id
         let display_name = config
             .models
             .first()
             .and_then(|m| m.name.clone())
             .unwrap_or_else(|| id.clone());
-
-        // Create provider
-        let mut provider = Provider::with_id(id.clone(), display_name, settings_config, None);
-        provider.meta = Some(crate::provider::ProviderMeta {
-            live_config_managed: Some(true),
-            ..Default::default()
+        entries.push(LiveImportedProvider {
+            id,
+            display_name,
+            name_on_update: None,
+            settings_config,
         });
-
-        // Save to database
-        if let Err(e) = state.db.save_provider("openclaw", &provider) {
-            log::warn!("Failed to import OpenClaw provider '{id}': {e}");
-            continue;
-        }
-
-        imported += 1;
-        log::info!("Imported OpenClaw provider '{id}' from live config");
     }
-
-    Ok(imported + updated)
+    import_additive_providers(state, "openclaw", "OpenClaw", entries)
 }
 
 /// Import all providers from Hermes live config to database
@@ -1431,65 +1425,103 @@ pub fn import_hermes_providers_from_live(state: &AppState) -> Result<usize, AppE
         return Ok(0);
     }
 
-    let mut imported = 0;
-    let mut updated = 0;
-    let existing_ids = state.db.get_provider_ids("hermes")?;
-
+    let mut entries = Vec::new();
     for (name, config) in providers {
         // Validate: skip entries with empty name
         if name.trim().is_empty() {
             log::warn!("Skipping Hermes provider with empty name");
             continue;
         }
-
-        if existing_ids.contains(&name) {
-            match state.db.get_provider_by_id(&name, "hermes") {
-                Ok(Some(existing)) => {
-                    if existing.settings_config != config {
-                        let mut provider = existing;
-                        provider.settings_config = config;
-                        if let Err(e) = state.db.save_provider("hermes", &provider) {
-                            log::warn!(
-                                "Failed to update Hermes provider '{name}' from live config: {e}"
-                            );
-                        } else {
-                            updated += 1;
-                            log::info!("Updated Hermes provider '{name}' from live config");
-                        }
-                    }
-                }
-                Ok(None) => {
-                    log::warn!("Hermes provider '{name}' disappeared while importing live config")
-                }
-                Err(e) => log::warn!("Failed to look up Hermes provider '{name}': {e}"),
-            }
-            continue;
-        }
-
-        // Create provider
-        let mut provider = Provider::with_id(name.clone(), name.clone(), config, None);
-        provider.meta = Some(crate::provider::ProviderMeta {
-            live_config_managed: Some(true),
-            ..Default::default()
+        entries.push(LiveImportedProvider {
+            display_name: name.clone(),
+            id: name,
+            name_on_update: None,
+            settings_config: config,
         });
-
-        // Save to database
-        if let Err(e) = state.db.save_provider("hermes", &provider) {
-            log::warn!("Failed to import Hermes provider '{name}': {e}");
-            continue;
-        }
-
-        imported += 1;
-        log::info!("Imported Hermes provider '{name}' from live config");
     }
-
-    Ok(imported + updated)
+    import_additive_providers(state, "hermes", "Hermes", entries)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// SVC-34: the shared additive import loop creates live-managed rows,
+    /// updates changed ones (name only when the importer supplies one) and
+    /// leaves unchanged rows alone.
+    #[test]
+    fn additive_import_loop_creates_updates_and_skips() {
+        let db = std::sync::Arc::new(Database::memory().expect("create memory db"));
+        let state = AppState::new(db);
+        let entry = |id: &str, name: Option<&str>, url: &str| LiveImportedProvider {
+            id: id.to_string(),
+            display_name: name.unwrap_or(id).to_string(),
+            name_on_update: name.map(str::to_string),
+            settings_config: json!({ "baseURL": url }),
+        };
+
+        let n = import_additive_providers(
+            &state,
+            "opencode",
+            "OpenCode",
+            vec![
+                entry("a", Some("Alpha"), "https://a"),
+                entry("b", None, "https://b"),
+            ],
+        )
+        .unwrap();
+        assert_eq!(n, 2);
+        let a = state
+            .db
+            .get_provider_by_id("a", "opencode")
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.name, "Alpha");
+        assert_eq!(
+            a.meta.as_ref().and_then(|m| m.live_config_managed),
+            Some(true)
+        );
+
+        // Unchanged → 0; changed config → updated; no name → keep stored name.
+        let n = import_additive_providers(
+            &state,
+            "opencode",
+            "OpenCode",
+            vec![
+                entry("a", Some("Alpha"), "https://a"),
+                entry("b", None, "https://b2"),
+            ],
+        )
+        .unwrap();
+        assert_eq!(n, 1);
+        let b = state
+            .db
+            .get_provider_by_id("b", "opencode")
+            .unwrap()
+            .unwrap();
+        assert_eq!(b.name, "b");
+        assert_eq!(b.settings_config["baseURL"], "https://b2");
+
+        // A new name alone is an update.
+        let n = import_additive_providers(
+            &state,
+            "opencode",
+            "OpenCode",
+            vec![entry("a", Some("Alpha 2"), "https://a")],
+        )
+        .unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(
+            state
+                .db
+                .get_provider_by_id("a", "opencode")
+                .unwrap()
+                .unwrap()
+                .name,
+            "Alpha 2"
+        );
+    }
 
     #[test]
     fn kimi_for_coding_effective_settings_backfill_256k_context() {

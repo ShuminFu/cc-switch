@@ -45,6 +45,7 @@ impl ReadPool {
             }
             conn.execute_batch("PRAGMA temp_store = MEMORY;")
                 .map_err(|e| AppError::Database(format!("配置只读连接失败: {e}")))?;
+            conn.set_prepared_statement_cache_capacity(super::DB_STATEMENT_CACHE_CAPACITY);
             conns.push(Mutex::new(conn));
         }
         Ok(Some(Self {

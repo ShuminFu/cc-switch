@@ -222,8 +222,7 @@ pub async fn download(
 
 /// Dry-run a download (SVC-27): what the remote snapshot would change
 /// locally, without applying it. `None` when the remote has no snapshot.
-/// Not exposed as a command yet (the IPC layer is owned separately).
-#[allow(dead_code)]
+/// Exposed as the `preview_sync_download` command.
 pub(crate) async fn preview(
     db: &crate::database::Database,
     settings: &WebDavSyncSettings,

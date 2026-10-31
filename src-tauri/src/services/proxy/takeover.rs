@@ -5,7 +5,7 @@ use super::*;
 
 impl ProxyService {
     /// 获取各应用的接管状态（是否改写该应用的 Live 配置指向本地代理）
-    pub async fn get_takeover_status(&self) -> Result<ProxyTakeoverStatus, String> {
+    pub async fn get_takeover_status(&self) -> Result<ProxyTakeoverStatus, TakeoverError> {
         // 从 proxy_config.enabled 读取（优先），兼容旧的 live_backup 备份检测
         let claude_enabled = self
             .db
@@ -61,7 +61,11 @@ impl ProxyService {
     ///
     /// - 开启：自动启动代理服务，仅接管当前 app 的 Live 配置
     /// - 关闭：仅恢复当前 app 的 Live 配置；若无其它接管，则自动停止代理服务
-    pub async fn set_takeover_for_app(&self, app_type: &str, enabled: bool) -> Result<(), String> {
+    pub async fn set_takeover_for_app(
+        &self,
+        app_type: &str,
+        enabled: bool,
+    ) -> Result<(), TakeoverError> {
         // SVC-23: one traced operation per takeover toggle.
         let op = crate::services::operation_log::Operation::start_async(
             "takeover",
@@ -83,7 +87,7 @@ impl ProxyService {
         &self,
         app_type: &str,
         enabled: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let app = AppType::from_str(app_type).map_err(|e| format!("无效的应用类型: {e}"))?;
         let app_type_str = app.as_str();
         let _guard = self.switch_locks.lock_for_app(app_type_str).await;
@@ -296,7 +300,7 @@ impl ProxyService {
         enabled || has_backup || self.detect_takeover_in_live_config_for_app(app_type)
     }
 
-    pub fn disable_takeover_for_app_sync(&self, app_type: &AppType) -> Result<(), String> {
+    pub fn disable_takeover_for_app_sync(&self, app_type: &AppType) -> Result<(), TakeoverError> {
         crate::services::provider::block_on_async(
             self.disable_takeover_for_app_sync_async(app_type),
         )
@@ -306,7 +310,7 @@ impl ProxyService {
     pub(crate) async fn disable_takeover_for_app_sync_async(
         &self,
         app_type: &AppType,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let app_type_str = app_type.as_str();
 
         // 1) 恢复原始 Live 配置（备份 → SSOT → 清理占位符 三层兜底）
@@ -352,13 +356,21 @@ impl ProxyService {
     ///
     /// 在清空 Live Token 之前调用，确保数据库中的 Provider 配置有最新的 Token。
     /// 这样代理才能从数据库读取到正确的认证信息。
-    pub(super) async fn sync_live_to_provider(&self, app_type: &AppType) -> Result<(), String> {
+    pub(super) async fn sync_live_to_provider(
+        &self,
+        app_type: &AppType,
+    ) -> Result<(), TakeoverError> {
         let live_config = match app_type {
             AppType::Claude => self.read_claude_live()?,
             AppType::Codex => self.read_codex_live()?,
             AppType::Gemini => self.read_gemini_live()?,
             AppType::GrokBuild => self.read_grok_live()?,
-            _ => return Err("该应用不支持代理功能".to_string()),
+            _ => {
+                return Err(TakeoverError::new(
+                    TakeoverErrorKind::UnsupportedApp,
+                    "该应用不支持代理功能",
+                ))
+            }
         };
 
         self.sync_live_config_to_provider(app_type, &live_config)
@@ -369,7 +381,7 @@ impl ProxyService {
         &self,
         app_type: &AppType,
         live_config: &Value,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         match app_type {
             AppType::Claude => {
                 let provider_id =
@@ -628,7 +640,10 @@ impl ProxyService {
     }
 
     /// 备份指定应用的 Live 配置（严格模式：目标配置不存在则返回错误）
-    pub(super) async fn backup_live_config_strict(&self, app_type: &AppType) -> Result<(), String> {
+    pub(super) async fn backup_live_config_strict(
+        &self,
+        app_type: &AppType,
+    ) -> Result<(), TakeoverError> {
         let app_type_str = app_type.as_str();
         let config = self.read_live_config_for_app(app_type)?;
 
@@ -653,7 +668,7 @@ impl ProxyService {
     }
 
     /// 构造写入 Live 的代理地址（处理 0.0.0.0 / IPv6 等特殊情况）
-    pub(super) async fn build_proxy_urls(&self) -> Result<(String, String), String> {
+    pub(super) async fn build_proxy_urls(&self) -> Result<(String, String), TakeoverError> {
         let config = self
             .db
             .get_proxy_config()
@@ -681,7 +696,10 @@ impl ProxyService {
             }
         }
         if listen_port == 0 {
-            return Err("代理监听端口为 0，但代理服务器尚未运行，无法生成接管地址".to_string());
+            return Err(TakeoverError::new(
+                TakeoverErrorKind::NotRunning,
+                "代理监听端口为 0，但代理服务器尚未运行，无法生成接管地址",
+            ));
         }
 
         let proxy_origin = format!("http://{}:{}", connect_host_for_url, listen_port);
@@ -694,7 +712,7 @@ impl ProxyService {
     pub(super) fn apply_grok_takeover_fields(
         config: &mut Value,
         proxy_base_url: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let config_toml = config
             .get("config")
             .and_then(Value::as_str)
@@ -713,7 +731,7 @@ impl ProxyService {
     pub(super) async fn takeover_live_config_strict(
         &self,
         app_type: &AppType,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let (proxy_url, proxy_codex_base_url) = self.build_proxy_urls().await?;
         let proxy_grok_base_url = format!("{}/grokbuild/v1", proxy_url.trim_end_matches('/'));
 
@@ -765,7 +783,12 @@ impl ProxyService {
                 self.write_grok_live(&live_config)?;
                 log::info!("Grok Build Live 配置已接管，代理地址: {proxy_grok_base_url}");
             }
-            _ => return Err("该应用不支持代理功能".to_string()),
+            _ => {
+                return Err(TakeoverError::new(
+                    TakeoverErrorKind::UnsupportedApp,
+                    "该应用不支持代理功能",
+                ))
+            }
         }
 
         Ok(())
@@ -779,7 +802,7 @@ impl ProxyService {
     pub(super) async fn takeover_live_config_best_effort(
         &self,
         app_type: &AppType,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let (proxy_url, proxy_codex_base_url) = self.build_proxy_urls().await?;
         let proxy_grok_base_url = format!("{}/grokbuild/v1", proxy_url.trim_end_matches('/'));
 

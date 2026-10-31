@@ -225,6 +225,34 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         breaks_sync: false,
         up: Database::migrate_v22_to_v23,
     },
+    Migration {
+        version: 24,
+        name: "model_pricing_input_modalities",
+        checksum: "d7581a47baeeedc3c6cf9e4f1888cfd6de68bead790fb9ac76a206e57baa8969",
+        breaks_sync: false,
+        up: Database::migrate_v23_to_v24,
+    },
+    Migration {
+        version: 25,
+        name: "model_pricing_currency",
+        checksum: "3542f0b8f71c3b15372995f1d3ec030d839445eddedd3512f8ecb75f5c3d4ed6",
+        breaks_sync: false,
+        up: Database::migrate_v24_to_v25,
+    },
+    Migration {
+        version: 26,
+        name: "integer_cost_nanos",
+        checksum: "76d0f759b1d393145367068f65ea1bae67fb51be5308bb47cb79e461fdf9773c",
+        breaks_sync: false,
+        up: Database::migrate_v25_to_v26,
+    },
+    Migration {
+        version: 27,
+        name: "openclaw_skills",
+        checksum: "69756384aa3458aee69940111f75e2ac472201ed1faa8df6a92900c9d60f0836",
+        breaks_sync: false,
+        up: Database::migrate_v26_to_v27,
+    },
 ];
 
 /// 注册表中最新的 schema 版本（即 `SCHEMA_VERSION`）。
@@ -536,6 +564,9 @@ impl Database {
             return Self::in_savepoint(conn, "create_schema", || Self::create_fresh_schema(conn));
         }
         Self::create_request_logs_dedup_triggers_if_supported(conn)?;
+        // DB-14: cost triggers are not exported either; recreating them also
+        // recomputes the integer cost column of imported rows.
+        super::cost_nanos::ensure_cost_nanos_triggers(conn)?;
         // DB-20: the device-local tombstone table is not part of SQL exports and
         // the triggers are dropped on import; recreate both (no-op otherwise).
         if Self::get_user_version(conn)? >= super::sync_rows::SYNC_ROWS_SCHEMA_VERSION {
@@ -2015,6 +2046,84 @@ impl Database {
         Ok(())
     }
 
+    /// v23 → v24 (PROV-33): `model_pricing.input_modalities`, a JSON array of
+    /// input modalities (`NULL` = unknown), seeded `["text"]` for the
+    /// confirmed text-only built-in models. The media sanitizer reads it, so
+    /// a capability change is a data edit instead of a release. An additive
+    /// nullable column: older clients import it as an unknown column and
+    /// snapshots without it import as `NULL`, so sync stays compatible.
+    fn migrate_v23_to_v24(conn: &Connection) -> Result<(), AppError> {
+        if !Self::table_exists(conn, "model_pricing")? {
+            return Ok(());
+        }
+        Self::add_column_if_missing(conn, "model_pricing", "input_modalities", "TEXT")?;
+        if Self::has_column(conn, "model_pricing", "source")? {
+            super::model_catalog::seed_text_only_modalities(conn)?;
+        }
+        Ok(())
+    }
+
+    /// v24 → v25 (PRODUCT-40): `model_pricing.currency` (ISO code the row's
+    /// prices are quoted in, default `USD`). Costs stay USD; non-USD rows are
+    /// converted with the `pricing_fx_rates` setting at lookup. Additive with
+    /// a default, so sync stays compatible in both directions.
+    fn migrate_v24_to_v25(conn: &Connection) -> Result<(), AppError> {
+        if !Self::table_exists(conn, "model_pricing")? {
+            return Ok(());
+        }
+        Self::add_column_if_missing(
+            conn,
+            "model_pricing",
+            "currency",
+            "TEXT NOT NULL DEFAULT 'USD'",
+        )?;
+        Ok(())
+    }
+
+    /// v25 → v26 (DB-14): exact integer costs. `total_cost_nanos INTEGER`
+    /// (USD × 10⁹) on `proxy_request_logs` and `usage_daily_rollups`, kept in
+    /// step with the decimal TEXT by app-owned triggers (recreated after SQL
+    /// imports like the dedup triggers) and backfilled once, so aggregates sum
+    /// integers instead of floats. The zero-cost backfill index moves to the
+    /// new column. Plain nullable column: both tables are device-local (their
+    /// rows are not in the sync data) and older clients ignore it.
+    fn migrate_v25_to_v26(conn: &Connection) -> Result<(), AppError> {
+        for table in super::cost_nanos::COST_NANOS_TABLES {
+            if Self::table_exists(conn, table)? && Self::has_column(conn, table, "total_cost_usd")?
+            {
+                Self::add_column_if_missing(conn, table, "total_cost_nanos", "INTEGER")?;
+            }
+        }
+        super::cost_nanos::ensure_cost_nanos_triggers(conn)?;
+        if Self::table_exists(conn, "proxy_request_logs")?
+            && Self::has_column(conn, "proxy_request_logs", "total_cost_nanos")?
+        {
+            conn.execute_batch(
+                "DROP INDEX IF EXISTS idx_request_logs_zero_cost;
+                 CREATE INDEX IF NOT EXISTS idx_request_logs_zero_cost_nanos
+                     ON proxy_request_logs(created_at) WHERE total_cost_nanos <= 0;",
+            )
+            .map_err(db_err("重建零成本用量索引失败"))?;
+        }
+        Ok(())
+    }
+
+    /// v26 → v27 (PRODUCT-53): `skills.enabled_openclaw` so a skill can be
+    /// synced to OpenClaw's managed skills directory (`~/.openclaw/skills`).
+    /// Additive with a default: older clients ignore the column, snapshots
+    /// without it import as disabled, so sync stays compatible.
+    fn migrate_v26_to_v27(conn: &Connection) -> Result<(), AppError> {
+        if Self::table_exists(conn, "skills")? {
+            Self::add_column_if_missing(
+                conn,
+                "skills",
+                "enabled_openclaw",
+                "BOOLEAN NOT NULL DEFAULT 0",
+            )?;
+        }
+        Ok(())
+    }
+
     /// v21 → v22 (DB-20, first increment): per-row `sync_rev` /
     /// `sync_updated_at` (Unix ms) on the synced entity tables and a local
     /// `sync_tombstones` table recording deletions, maintained by the app's
@@ -2099,8 +2208,31 @@ impl Database {
 
     /// 确保模型定价表具备默认数据
     pub fn ensure_model_pricing_seeded(&self) -> Result<(), AppError> {
-        let conn = lock_conn!(self.conn);
-        Self::ensure_model_pricing_seeded_on_conn(&conn)
+        {
+            let conn = lock_conn!(self.conn);
+            Self::ensure_model_pricing_seeded_on_conn(&conn)?;
+        }
+        // PROV-33: seeding and imports end here, so the published catalog
+        // snapshot follows every bulk change to `model_pricing`.
+        self.refresh_model_catalog();
+        Ok(())
+    }
+
+    /// Republish the declared input modalities of this database's
+    /// `model_pricing` rows (PROV-33). Only the app database publishes;
+    /// scratch/test databases leave the process-wide snapshot alone.
+    pub(crate) fn refresh_model_catalog(&self) {
+        if !self.publishes_model_catalog {
+            return;
+        }
+        let loaded = match self.conn.lock() {
+            Ok(conn) => super::model_catalog::load_declared_modalities(&conn),
+            Err(e) => Err(AppError::Database(format!("Mutex lock failed: {e}"))),
+        };
+        match loaded {
+            Ok(map) => super::model_catalog::publish_declared_modalities(map),
+            Err(e) => log::warn!("刷新模型能力目录失败: {e}"),
+        }
     }
 
     fn ensure_model_pricing_seeded_on_conn(conn: &Connection) -> Result<(), AppError> {
@@ -2484,7 +2616,7 @@ mod tests {
                 SCHEMA_VERSION,
                 crate::services::sync_protocol::DB_COMPAT_VERSION
             ),
-            (23, 6),
+            (27, 6),
             "SCHEMA_VERSION changed without reviewing DB_COMPAT_VERSION (or vice versa)"
         );
         assert_eq!(
@@ -2647,7 +2779,7 @@ mod tests {
         "idx_request_logs_dedup_lookup_expr",
         "idx_request_logs_provider_created_at",
         "idx_request_logs_session",
-        "idx_request_logs_zero_cost",
+        "idx_request_logs_zero_cost_nanos",
     ];
 
     /// PRODUCT-14 regression: per-session cost totals look rows up by
@@ -2706,7 +2838,8 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(triggers, 2);
+        // Two dedup triggers plus the two DB-14 cost triggers.
+        assert_eq!(triggers, 4);
         Ok(())
     }
 
@@ -2747,7 +2880,7 @@ mod tests {
             "DROP TRIGGER trg_request_logs_dedup_session_insert;
              DROP TRIGGER trg_request_logs_dedup_proxy_insert;
              DROP INDEX idx_request_logs_provider_created_at;
-             DROP INDEX idx_request_logs_zero_cost;
+             DROP INDEX idx_request_logs_zero_cost_nanos;
              ALTER TABLE proxy_request_logs DROP COLUMN dedup_hidden;
              CREATE INDEX idx_request_logs_provider ON proxy_request_logs(provider_id, app_type);
              CREATE INDEX idx_request_logs_model ON proxy_request_logs(model);",

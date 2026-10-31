@@ -23,7 +23,7 @@ impl Database {
             .prepare(
                 "SELECT id, name, description, directory, repo_owner, repo_name, repo_branch,
                         readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild,
-                        enabled_opencode, enabled_hermes, installed_at, content_hash, updated_at
+                        enabled_opencode, enabled_hermes, enabled_openclaw, installed_at, content_hash, updated_at
                  FROM skills ORDER BY name ASC",
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -46,10 +46,11 @@ impl Database {
                         grokbuild: row.get(11)?,
                         opencode: row.get(12)?,
                         hermes: row.get(13)?,
+                        openclaw: row.get(14)?,
                     },
-                    installed_at: row.get(14)?,
-                    content_hash: row.get(15)?,
-                    updated_at: row.get::<_, i64>(16).unwrap_or(0),
+                    installed_at: row.get(15)?,
+                    content_hash: row.get(16)?,
+                    updated_at: row.get::<_, i64>(17).unwrap_or(0),
                 })
             })
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -69,7 +70,7 @@ impl Database {
             .prepare(
                 "SELECT id, name, description, directory, repo_owner, repo_name, repo_branch,
                         readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild,
-                        enabled_opencode, enabled_hermes, installed_at, content_hash, updated_at
+                        enabled_opencode, enabled_hermes, enabled_openclaw, installed_at, content_hash, updated_at
                  FROM skills WHERE id = ?1",
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -91,10 +92,11 @@ impl Database {
                     grokbuild: row.get(11)?,
                     opencode: row.get(12)?,
                     hermes: row.get(13)?,
+                    openclaw: row.get(14)?,
                 },
-                installed_at: row.get(14)?,
-                content_hash: row.get(15)?,
-                updated_at: row.get::<_, i64>(16).unwrap_or(0),
+                installed_at: row.get(15)?,
+                content_hash: row.get(16)?,
+                updated_at: row.get::<_, i64>(17).unwrap_or(0),
             })
         });
 
@@ -113,8 +115,8 @@ impl Database {
             "INSERT INTO skills
              (id, name, description, directory, repo_owner, repo_name, repo_branch,
               readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild, enabled_opencode, enabled_hermes,
-              installed_at, content_hash, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+              enabled_openclaw, installed_at, content_hash, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
@@ -129,6 +131,7 @@ impl Database {
                 enabled_grokbuild = excluded.enabled_grokbuild,
                 enabled_opencode = excluded.enabled_opencode,
                 enabled_hermes = excluded.enabled_hermes,
+                enabled_openclaw = excluded.enabled_openclaw,
                 installed_at = excluded.installed_at,
                 content_hash = excluded.content_hash,
                 updated_at = excluded.updated_at",
@@ -147,6 +150,7 @@ impl Database {
                 skill.apps.grokbuild,
                 skill.apps.opencode,
                 skill.apps.hermes,
+                skill.apps.openclaw,
                 skill.installed_at,
                 skill.content_hash,
                 skill.updated_at,
@@ -178,8 +182,8 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let affected = conn
             .execute(
-                "UPDATE skills SET enabled_claude = ?1, enabled_codex = ?2, enabled_gemini = ?3, enabled_grokbuild = ?4, enabled_opencode = ?5, enabled_hermes = ?6 WHERE id = ?7",
-                params![apps.claude, apps.codex, apps.gemini, apps.grokbuild, apps.opencode, apps.hermes, id],
+                "UPDATE skills SET enabled_claude = ?1, enabled_codex = ?2, enabled_gemini = ?3, enabled_grokbuild = ?4, enabled_opencode = ?5, enabled_hermes = ?6, enabled_openclaw = ?7 WHERE id = ?8",
+                params![apps.claude, apps.codex, apps.gemini, apps.grokbuild, apps.opencode, apps.hermes, apps.openclaw, id],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(affected > 0)
@@ -278,5 +282,50 @@ impl Database {
 
         self.set_setting(INITIALIZED_KEY, "true")?;
         Ok(count)
+    }
+}
+
+#[cfg(test)]
+mod openclaw_tests {
+    use super::*;
+    use crate::app_config::AppType;
+
+    /// PRODUCT-53: OpenClaw enablement is stored (v27 `enabled_openclaw`)
+    /// and drives the app list a skill is synced to.
+    #[test]
+    fn openclaw_skill_enablement_round_trips() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let mut skill = InstalledSkill {
+            id: "local:oc-skill".to_string(),
+            name: "OC".to_string(),
+            description: None,
+            directory: "oc-skill".to_string(),
+            repo_owner: None,
+            repo_name: None,
+            repo_branch: None,
+            readme_url: None,
+            apps: SkillApps::only(&AppType::OpenClaw),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        };
+        assert!(skill.apps.is_enabled_for(&AppType::OpenClaw));
+        assert_eq!(skill.apps.enabled_apps(), vec![AppType::OpenClaw]);
+        assert!(!skill.apps.is_empty());
+        db.save_skill(&skill)?;
+        let stored = db.get_all_installed_skills()?;
+        assert!(stored["local:oc-skill"].apps.openclaw);
+
+        skill.apps.set_enabled_for(&AppType::OpenClaw, false);
+        skill.apps.claude = true;
+        db.update_skill_apps(&skill.id, &skill.apps)?;
+        let stored = db.get_all_installed_skills()?;
+        assert!(!stored["local:oc-skill"].apps.openclaw);
+        assert!(stored["local:oc-skill"].apps.claude);
+
+        // Older payloads without the field still deserialize.
+        let apps: SkillApps = serde_json::from_str(r#"{"claude":true}"#).unwrap();
+        assert!(!apps.openclaw);
+        Ok(())
     }
 }

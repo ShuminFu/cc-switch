@@ -34,7 +34,7 @@ fn webdav_sync_disabled_error() -> AppError {
     )
 }
 
-fn require_enabled_webdav_settings() -> Result<WebDavSyncSettings, AppError> {
+pub(super) fn require_enabled_webdav_settings() -> Result<WebDavSyncSettings, AppError> {
     let settings = settings::get_webdav_sync_settings().ok_or_else(webdav_not_configured_error)?;
     if !settings.enabled {
         return Err(webdav_sync_disabled_error());

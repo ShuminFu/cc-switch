@@ -215,6 +215,8 @@ fn validate_model_pricing_input(
         output_cost_per_million: output_cost.trim().to_string(),
         cache_read_cost_per_million: cache_read_cost.trim().to_string(),
         cache_creation_cost_per_million: cache_creation_cost.trim().to_string(),
+        currency: crate::database::model_catalog::BASE_CURRENCY.to_string(),
+        input_modalities: None,
     })
 }
 
@@ -278,6 +280,44 @@ pub async fn delete_model_pricing(handle: AppHandle, model_id: String) -> Result
         Ok(())
     })
     .await
+}
+
+/// Set a pricing row's currency and declared input modalities
+/// (PRODUCT-40, PROV-33). `input_modalities: None` means unknown.
+#[tauri::command]
+pub async fn set_model_pricing_metadata(
+    handle: AppHandle,
+    model_id: String,
+    currency: String,
+    input_modalities: Option<Vec<String>>,
+) -> Result<(), AppError> {
+    run_blocking_with_state(handle, move |state| {
+        state
+            .db
+            .set_model_pricing_metadata(&model_id, &currency, input_modalities.as_deref())?;
+        if let Err(e) = state.db.backfill_missing_usage_costs_for_model(&model_id) {
+            log::warn!("模型定价货币更新后回填历史用量成本失败 (model_id={model_id}): {e}");
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Effective FX rates for pricing rows not quoted in USD (units per 1 USD).
+#[tauri::command]
+pub async fn get_pricing_fx_rates(
+    handle: AppHandle,
+) -> Result<std::collections::BTreeMap<String, String>, AppError> {
+    run_blocking_with_state(handle, |state| state.db.get_pricing_fx_rates()).await
+}
+
+/// Store FX rates (units per 1 USD) used to convert non-USD pricing rows.
+#[tauri::command]
+pub async fn set_pricing_fx_rates(
+    handle: AppHandle,
+    rates: std::collections::BTreeMap<String, String>,
+) -> Result<(), AppError> {
+    run_blocking_with_state(handle, move |state| state.db.set_pricing_fx_rates(&rates)).await
 }
 
 /// 手动触发会话日志同步

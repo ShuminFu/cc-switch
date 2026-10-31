@@ -966,6 +966,8 @@ fn user_edited_pricing_survives_seed_bumps() {
         output_cost_per_million: "7".to_string(),
         cache_read_cost_per_million: "0".to_string(),
         cache_creation_cost_per_million: "0".to_string(),
+        currency: "USD".to_string(),
+        input_modalities: None,
     })
     .expect("user edit");
     {
@@ -1805,6 +1807,23 @@ fn drop_columns(conn: &Connection, table: &str, columns: &[&str]) {
 /// `create_tables` stay in place, as they did in real installations).
 fn undo_migration(conn: &Connection, version: i32) {
     match version {
+        27 => drop_columns(conn, "skills", &["enabled_openclaw"]),
+        26 => {
+            conn.execute_batch(
+                "DROP INDEX idx_request_logs_zero_cost_nanos;
+                 DROP TRIGGER trg_proxy_request_logs_cost_nanos_insert;
+                 DROP TRIGGER trg_proxy_request_logs_cost_nanos_update;
+                 DROP TRIGGER trg_usage_daily_rollups_cost_nanos_insert;
+                 DROP TRIGGER trg_usage_daily_rollups_cost_nanos_update;
+                 ALTER TABLE proxy_request_logs DROP COLUMN total_cost_nanos;
+                 ALTER TABLE usage_daily_rollups DROP COLUMN total_cost_nanos;
+                 CREATE INDEX idx_request_logs_zero_cost ON proxy_request_logs(created_at)
+                     WHERE CAST(total_cost_usd AS REAL) <= 0;",
+            )
+            .expect("undo v26");
+        }
+        25 => drop_columns(conn, "model_pricing", &["currency"]),
+        24 => drop_columns(conn, "model_pricing", &["input_modalities"]),
         23 => conn
             .execute_batch(
                 "CREATE INDEX idx_request_logs_status ON proxy_request_logs(status_code);",
@@ -2212,7 +2231,9 @@ fn baseline_schema_checksum_is_pinned() {
     // migration instead. The hash covers the fresh schema, i.e. the baseline plus
     // later migrations (v18 added session_log_sync.byte_offset / prefix_hash; v19-v22
     // added the endpoint unique index, pricing source, CHECK-free proxy_config and row versions;
-    // v23 dropped the unused status_code request-log index).
+    // v23 dropped the unused status_code request-log index; v24/v25 added the
+    // model_pricing catalog columns; v26 the integer cost columns and index;
+    // v27 skills.enabled_openclaw).
     let conn = Connection::open_in_memory().expect("open memory db");
     Database::create_tables_on_conn(&conn).expect("create fresh schema");
     let objects = query_strings(
@@ -2228,7 +2249,7 @@ fn baseline_schema_checksum_is_pinned() {
     let checksum = format!("{:x}", Sha256::digest(text.as_bytes()));
     assert_eq!(
         checksum,
-        "00d405dac6681ad836a35c733186815358a34bb1067411b4f428bf444a958dbd",
+        "9bf327fdf49c0ed4241d20f542438db91304a3eae278d69c55c057522ebe3b13",
         "baseline schema changed; it is frozen at v{}:\n{text}",
         schema::BASELINE_SCHEMA_VERSION
     );

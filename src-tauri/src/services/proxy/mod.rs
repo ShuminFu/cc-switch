@@ -20,10 +20,13 @@ use tokio::sync::RwLock;
 
 /// 用于接管 Live 配置时的占位符（避免客户端提示缺少 key，同时不泄露真实 Token）
 mod claude_fields;
+mod error;
 mod hot_switch;
 mod live_io;
 mod restore;
 mod takeover;
+
+pub use error::{TakeoverError, TakeoverErrorKind};
 
 const PROXY_TOKEN_PLACEHOLDER: &str = "PROXY_MANAGED";
 
@@ -99,7 +102,7 @@ impl ProxyService {
     }
 
     /// 启动代理服务器
-    pub async fn start(&self) -> Result<ProxyServerInfo, String> {
+    pub async fn start(&self) -> Result<ProxyServerInfo, TakeoverError> {
         // 1. 启动时自动设置 proxy_enabled = true
         let mut global_config = self
             .db
@@ -136,10 +139,10 @@ impl ProxyService {
         // 4. 创建并启动服务器
         let app_handle = self.app_handle.read().await.clone();
         let server = ProxyServer::new(config.clone(), self.db.clone(), app_handle);
-        let info = server
-            .start()
-            .await
-            .map_err(|e| format!("启动代理服务器失败: {e}"))?;
+        let info = server.start().await.map_err(TakeoverError::with(
+            TakeoverErrorKind::StartFailed,
+            "启动代理服务器失败",
+        ))?;
         if let Err(e) = self
             .persist_ephemeral_listen_port_if_needed(&config, info.port)
             .await
@@ -159,7 +162,7 @@ impl ProxyService {
         &self,
         config: &ProxyConfig,
         actual_port: u16,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         if config.listen_port != 0 {
             return Ok(());
         }
@@ -169,23 +172,29 @@ impl ProxyService {
         self.db
             .update_proxy_config(resolved_config)
             .await
-            .map_err(|e| format!("保存动态代理端口失败: {e}"))
+            .map_err(TakeoverError::with(
+                TakeoverErrorKind::Config,
+                "保存动态代理端口失败",
+            ))
     }
 
     /// 停止代理服务器
-    pub async fn stop(&self) -> Result<(), String> {
+    pub async fn stop(&self) -> Result<(), TakeoverError> {
         let mut slot = self.server.write().await;
         let Some(server) = slot.as_ref() else {
-            return Err("代理服务器未运行".to_string());
+            return Err(TakeoverError::new(
+                TakeoverErrorKind::NotRunning,
+                "代理服务器未运行",
+            ));
         };
         // SVC-50: the handle stays in the slot until `ProxyServer::stop` has
         // returned (it aborts the serve task itself after the drain timeout),
         // and `proxy_enabled` is cleared whatever the outcome, so the DB never
         // claims a proxy that the UI shows as stopped.
-        let stop_result = server
-            .stop()
-            .await
-            .map_err(|e| format!("停止代理服务器失败: {e}"));
+        let stop_result = server.stop().await.map_err(TakeoverError::with(
+            TakeoverErrorKind::StopFailed,
+            "停止代理服务器失败",
+        ));
         slot.take();
         drop(slot);
 
@@ -208,7 +217,7 @@ impl ProxyService {
     /// 停止代理服务器（恢复 Live 配置，用户手动关闭时使用）
     ///
     /// 会清除 settings 表中的代理状态，下次启动不会自动恢复。
-    pub async fn stop_with_restore(&self) -> Result<(), String> {
+    pub async fn stop_with_restore(&self) -> Result<(), TakeoverError> {
         // 1. 停止代理服务器（即使未运行也继续执行恢复逻辑）
         if let Err(e) = self.stop().await {
             log::warn!("停止代理服务器失败（将继续恢复 Live 配置）: {e}");
@@ -255,7 +264,7 @@ impl ProxyService {
     /// 停止代理服务器（恢复 Live 配置，但保留 settings 表中的代理状态）
     ///
     /// 用于程序正常退出时，保留代理状态以便下次启动时自动恢复
-    pub async fn stop_with_restore_keep_state(&self) -> Result<(), String> {
+    pub async fn stop_with_restore_keep_state(&self) -> Result<(), TakeoverError> {
         // 1. 停止代理服务器（即使未运行也继续执行恢复逻辑）
         if let Err(e) = self.stop().await {
             log::warn!("停止代理服务器失败（将继续恢复 Live 配置）: {e}");
@@ -288,7 +297,7 @@ impl ProxyService {
     }
 
     /// 获取服务器状态
-    pub async fn get_status(&self) -> Result<ProxyStatus, String> {
+    pub async fn get_status(&self) -> Result<ProxyStatus, TakeoverError> {
         if let Some(server) = self.server.read().await.as_ref() {
             Ok(server.get_status().await)
         } else {
@@ -301,15 +310,18 @@ impl ProxyService {
     }
 
     /// 获取代理配置
-    pub async fn get_config(&self) -> Result<ProxyConfig, String> {
+    pub async fn get_config(&self) -> Result<ProxyConfig, TakeoverError> {
         self.db
             .get_proxy_config()
             .await
-            .map_err(|e| format!("获取代理配置失败: {e}"))
+            .map_err(TakeoverError::with(
+                TakeoverErrorKind::Config,
+                "获取代理配置失败",
+            ))
     }
 
     /// 更新代理配置
-    pub async fn update_config(&self, config: &ProxyConfig) -> Result<(), String> {
+    pub async fn update_config(&self, config: &ProxyConfig) -> Result<(), TakeoverError> {
         // 记录旧配置用于判定是否需要重启
         let previous = self
             .db
@@ -350,7 +362,7 @@ impl ProxyService {
                     return Err(port_unavailable_error(
                         &new_config.listen_address,
                         new_config.listen_port,
-                        &e,
+                        e.message(),
                     ));
                 }
             }
@@ -360,7 +372,10 @@ impl ProxyService {
                     *server_guard = Some(server);
                     drop(server_guard);
                     self.revert_proxy_config(&previous).await;
-                    return Err(format!("重启前停止代理服务器失败: {e}"));
+                    return Err(TakeoverError::new(
+                        TakeoverErrorKind::StopFailed,
+                        format!("重启前停止代理服务器失败: {e}"),
+                    ));
                 }
             }
 
@@ -438,9 +453,12 @@ impl ProxyService {
                     log::info!("已同步更新 Live 配置中的代理地址");
                 }
                 if !failures.is_empty() {
-                    return Err(format!(
-                        "代理服务器已重启，但更新 Live 配置中的代理地址失败（客户端可能仍指向旧端口）: {}",
-                        failures.join("; ")
+                    return Err(TakeoverError::new(
+                        TakeoverErrorKind::LiveWrite,
+                        format!(
+                            "代理服务器已重启，但更新 Live 配置中的代理地址失败（客户端可能仍指向旧端口）: {}",
+                            failures.join("; ")
+                        ),
                     ));
                 }
             }
@@ -497,7 +515,7 @@ impl ProxyService {
     pub async fn update_circuit_breaker_configs(
         &self,
         config: crate::proxy::CircuitBreakerConfig,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         if let Some(server) = self.server.read().await.as_ref() {
             server.update_circuit_breaker_configs(config).await;
             log::info!("已热更新运行中的熔断器配置");
@@ -512,7 +530,7 @@ impl ProxyService {
         &self,
         app_type: &str,
         config: crate::proxy::CircuitBreakerConfig,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         if let Some(server) = self.server.read().await.as_ref() {
             server
                 .update_circuit_breaker_config_for_app(app_type, config)
@@ -531,7 +549,7 @@ impl ProxyService {
         &self,
         provider_id: &str,
         app_type: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         if let Some(server) = self.server.read().await.as_ref() {
             server
                 .reset_provider_circuit_breaker(provider_id, app_type)
@@ -544,25 +562,26 @@ impl ProxyService {
 
 /// Check that `address:port` can be bound right now (SVC-43). The probe
 /// listener is dropped immediately.
-fn probe_listen_address(address: &str, port: u16) -> Result<(), String> {
+fn probe_listen_address(address: &str, port: u16) -> Result<(), TakeoverError> {
     let host = address.trim().trim_start_matches('[').trim_end_matches(']');
     let host = if host.is_empty() { "127.0.0.1" } else { host };
     std::net::TcpListener::bind((host, port))
         .map(drop)
-        .map_err(|e| e.to_string())
+        .map_err(|e| TakeoverError::new(TakeoverErrorKind::PortUnavailable, e.to_string()))
 }
 
 /// User-facing error for a restart that could not bind the new address. The
 /// key lets the frontend localize it; the message names the port.
-fn port_unavailable_error(address: &str, port: u16, detail: &str) -> String {
-    crate::error::AppError::localized(
+fn port_unavailable_error(address: &str, port: u16, detail: &str) -> TakeoverError {
+    let message = crate::error::AppError::localized(
         "proxy.port_unavailable",
         format!("无法监听 {address}:{port}（端口可能已被占用），已保留原代理配置: {detail}"),
         format!(
             "Cannot listen on {address}:{port} (the port may be in use); the previous proxy settings were kept: {detail}"
         ),
     )
-    .to_string()
+    .to_string();
+    TakeoverError::new(TakeoverErrorKind::PortUnavailable, message)
 }
 
 #[cfg(test)]

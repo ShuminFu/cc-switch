@@ -223,7 +223,10 @@ async fn shutdown(state: &AppState) -> Result<(), String> {
     let proxy = &state.proxy_service;
     let has_backups = state.db.has_any_live_backup().await.unwrap_or(false);
     if has_backups || proxy.detect_takeover_in_live_configs() {
-        return proxy.stop_with_restore_keep_state().await;
+        return proxy
+            .stop_with_restore_keep_state()
+            .await
+            .map_err(String::from);
     }
     if proxy.is_running().await {
         proxy.stop().await?;

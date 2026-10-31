@@ -47,6 +47,24 @@ export type CloudRemoteSnapshotInfo = RemoteSnapshotInfo & {
 
 export type CloudRemoteInfoResult = CloudRemoteSnapshotInfo | { empty: true };
 
+/** Per-table difference in a sync download preview (ids and key paths only). */
+export interface SyncPreviewTableDiff {
+  table: string;
+  added: string[];
+  removed: string[];
+  changed: { id: string; fields: string[] }[];
+}
+
+/** What downloading the remote snapshot would change locally (SVC-27). */
+export type SyncDownloadPreview =
+  | {
+      deviceName: string;
+      createdAt: string;
+      snapshotId: string;
+      tables: SyncPreviewTableDiff[];
+    }
+  | { empty: true };
+
 /**
  * Manual upload/download options. `force` defaults to `true` on the backend
  * for compatibility; pass `false` to get a `sync.conflict.*` error when the
@@ -246,6 +264,13 @@ export const settingsApi = {
 
   async s3SyncFetchRemoteInfo(): Promise<CloudRemoteInfoResult> {
     return await callJson(commands.s3SyncFetchRemoteInfo());
+  },
+
+  /** Dry-run a sync download: diff the remote snapshot against local data. */
+  async previewSyncDownload(
+    backend: "webdav" | "s3",
+  ): Promise<SyncDownloadPreview> {
+    return await invoke("preview_sync_download", { backend });
   },
 
   async syncCurrentProvidersLive(): Promise<void> {
