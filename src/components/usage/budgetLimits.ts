@@ -137,6 +137,24 @@ export function worstBudgetProgress(
   return null;
 }
 
+/** Providers/periods already announced as exceeded in this app session. */
+const announcedExceeded = new Set<string>();
+
+/**
+ * Returns `true` the first time `key` (app:provider:period) is claimed in
+ * this session, so an exceeded budget raises one toast, not one per refetch.
+ */
+export function claimBudgetExceededAlert(key: string): boolean {
+  if (announcedExceeded.has(key)) return false;
+  announcedExceeded.add(key);
+  return true;
+}
+
+/** Test helper. */
+export function resetBudgetExceededAlerts(): void {
+  announcedExceeded.clear();
+}
+
 export function formatUsd(value: number): string {
   return `$${value.toFixed(2)}`;
 }

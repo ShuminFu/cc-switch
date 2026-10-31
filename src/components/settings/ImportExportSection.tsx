@@ -1,13 +1,15 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
   FolderOpen,
   Loader2,
+  RotateCcw,
   Save,
   XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useTranslation } from "react-i18next";
 import type { ImportStatus } from "@/hooks/useImportExport";
 
@@ -21,6 +23,11 @@ interface ImportExportSectionProps {
   onImport: () => Promise<void>;
   onExport: () => Promise<void>;
   onClear: () => void;
+  /**
+   * Restore the safety backup taken right before the last import
+   * (FE-UI-55). The button is shown only when this is provided.
+   */
+  onRevertImport?: (backupId: string) => Promise<void>;
 }
 
 export function ImportExportSection({
@@ -33,8 +40,13 @@ export function ImportExportSection({
   onImport,
   onExport,
   onClear,
+  onRevertImport,
 }: ImportExportSectionProps) {
   const { t } = useTranslation();
+  const [confirmImportOpen, setConfirmImportOpen] = useState(false);
+  const [confirmRevertOpen, setConfirmRevertOpen] = useState(false);
+  const [isReverting, setIsReverting] = useState(false);
+  const [revertedBackupId, setRevertedBackupId] = useState<string | null>(null);
 
   const selectedFileName = useMemo(() => {
     if (!selectedFile) return "";
@@ -61,7 +73,9 @@ export function ImportExportSection({
             <Button
               type="button"
               className={`w-full h-auto py-3 px-4 bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700 text-white ${selectedFile && !isImporting ? "flex-col items-start" : "items-center"}`}
-              onClick={!selectedFile ? onSelectFile : onImport}
+              onClick={
+                !selectedFile ? onSelectFile : () => setConfirmImportOpen(true)
+              }
               disabled={isImporting}
             >
               <div className="flex items-center gap-2 w-full justify-center">
@@ -118,7 +132,75 @@ export function ImportExportSection({
           errorMessage={errorMessage}
           backupId={backupId}
         />
+
+        {onRevertImport &&
+          backupId &&
+          (status === "success" || status === "partial-success") &&
+          revertedBackupId !== backupId && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isReverting}
+              onClick={() => setConfirmRevertOpen(true)}
+            >
+              {isReverting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="mr-2 h-4 w-4" />
+              )}
+              {t("settings.revertImport", {
+                defaultValue: "Revert import",
+              })}
+            </Button>
+          )}
       </div>
+
+      <ConfirmDialog
+        isOpen={confirmImportOpen}
+        title={t("settings.importConfirmTitle", {
+          defaultValue: "Replace all current data?",
+        })}
+        message={t("settings.importConfirmMessage", {
+          defaultValue:
+            "Importing {{file}} replaces all providers, MCP servers, prompts and settings, and rewrites the live CLI config files. A safety backup is taken first so the import can be reverted.",
+          file: selectedFileName,
+        })}
+        confirmText={t("settings.import")}
+        onConfirm={() => {
+          setConfirmImportOpen(false);
+          void onImport();
+        }}
+        onCancel={() => setConfirmImportOpen(false)}
+      />
+
+      {onRevertImport && backupId && (
+        <ConfirmDialog
+          isOpen={confirmRevertOpen}
+          title={t("settings.revertImportConfirmTitle", {
+            defaultValue: "Revert the import?",
+          })}
+          message={t("settings.revertImportConfirmMessage", {
+            defaultValue:
+              "Restore the backup {{backupId}} taken right before the import? Changes made since the import are lost.",
+            backupId,
+          })}
+          confirmText={t("settings.revertImport", {
+            defaultValue: "Revert import",
+          })}
+          onConfirm={() => {
+            setConfirmRevertOpen(false);
+            setIsReverting(true);
+            onRevertImport(backupId)
+              .then(() => setRevertedBackupId(backupId))
+              .catch(() => {
+                // The caller reports the error; keep the button for a retry.
+              })
+              .finally(() => setIsReverting(false));
+          }}
+          onCancel={() => setConfirmRevertOpen(false)}
+        />
+      )}
     </section>
   );
 }

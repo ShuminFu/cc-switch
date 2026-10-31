@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AppId } from "@/lib/api";
 import type { EnvConflict } from "@/types/env";
 import { checkAllEnvConflicts, checkEnvConflicts } from "@/lib/api/env";
@@ -16,6 +16,9 @@ const isDismissed = () => {
 
 const conflictKey = (c: EnvConflict) => `${c.varName}:${c.sourcePath}`;
 
+/** Apps covered by the startup `checkAllEnvConflicts` scan. */
+const ALL_APPS_SCAN: readonly string[] = ["claude", "codex", "gemini"];
+
 /**
  * Environment-variable conflict banner: checks all apps at startup and the
  * active app whenever it changes.
@@ -23,6 +26,9 @@ const conflictKey = (c: EnvConflict) => `${c.varName}:${c.sourcePath}`;
 export function EnvConflictBanner({ activeApp }: { activeApp: AppId }) {
   const [envConflicts, setEnvConflicts] = useState<EnvConflict[]>([]);
   const [showEnvBanner, setShowEnvBanner] = useState(false);
+  // The startup all-apps scan already covers the initial active app; only
+  // re-check per app on later switches (PERF-33).
+  const skipInitialAppCheck = useRef(true);
 
   useEffect(() => {
     const checkEnvOnStartup = async () => {
@@ -48,6 +54,9 @@ export function EnvConflictBanner({ activeApp }: { activeApp: AppId }) {
   }, []);
 
   useEffect(() => {
+    const isInitial = skipInitialAppCheck.current;
+    skipInitialAppCheck.current = false;
+    if (isInitial && ALL_APPS_SCAN.includes(activeApp)) return;
     const checkEnvOnSwitch = async () => {
       try {
         const conflicts = await checkEnvConflicts(activeApp);

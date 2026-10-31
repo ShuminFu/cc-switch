@@ -42,6 +42,19 @@ import { extractErrorMessage } from "@/utils/errorUtils";
 import { isWindows } from "@/lib/platform";
 import { isUpdateAvailable } from "@/lib/version";
 import { ToolUpgradeConfirmDialog } from "./ToolUpgradeConfirmDialog";
+import {
+  TOOL_DISPLAY_NAMES,
+  TOOL_NAMES,
+  classifyRunResult,
+  summarizeRun,
+  type ToolLifecycleAction,
+  type ToolName,
+  type ToolRunFailure,
+} from "./about/toolLifecycle";
+import {
+  installScriptSources,
+  oneClickInstallCommands,
+} from "./about/installCommands";
 import { ToolInstallRow } from "./ToolInstallRow";
 
 interface AboutSectionProps {
@@ -59,18 +72,6 @@ interface ToolVersion {
   env_type: "windows" | "wsl" | "macos" | "linux" | "unknown";
   wsl_distro: string | null;
 }
-
-const TOOL_NAMES = [
-  "claude",
-  "codex",
-  "gemini",
-  "grok",
-  "opencode",
-  "openclaw",
-  "hermes",
-] as const;
-type ToolName = (typeof TOOL_NAMES)[number];
-type ToolLifecycleAction = "install" | "update";
 
 type WslShellPreference = {
   wslShell?: string | null;
@@ -107,68 +108,8 @@ const ENV_BADGE_CONFIG: Record<
   },
 };
 
-const posixScriptInstallCommand = (url: string) =>
-  `bash -c 'tmp=$(mktemp) && curl -fsSL ${url} -o $tmp && bash $tmp; status=$?; rm -f $tmp; exit $status'`;
-
-const HERMES_WINDOWS_INSTALL_SCRIPT =
-  "irm https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1 | iex";
-
-const powershellEncodedCommand = (script: string): string => {
-  let binary = "";
-  for (let i = 0; i < script.length; i += 1) {
-    const code = script.charCodeAt(i);
-    binary += String.fromCharCode(code & 0xff, code >> 8);
-  }
-  return btoa(binary);
-};
-
-const HERMES_WINDOWS_INSTALL_COMMAND = `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${powershellEncodedCommand(
-  HERMES_WINDOWS_INSTALL_SCRIPT,
-)}`;
-
-const POSIX_ONE_CLICK_INSTALL_COMMANDS = `# Claude Code
-${posixScriptInstallCommand("https://claude.ai/install.sh")} || npm i -g @anthropic-ai/claude-code@latest
-# Codex
-npm i -g @openai/codex@latest
-# Gemini CLI
-npm i -g @google/gemini-cli@latest
-# Grok Build
-npm i -g @xai-official/grok@latest
-# OpenCode
-${posixScriptInstallCommand("https://opencode.ai/install")} || npm i -g opencode-ai@latest
-# OpenClaw
-npm i -g openclaw@latest
-# Hermes
-${posixScriptInstallCommand("https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh")}`;
-
-const WINDOWS_ONE_CLICK_INSTALL_COMMANDS = `# Claude Code
-npm i -g @anthropic-ai/claude-code@latest
-# Codex
-npm i -g @openai/codex@latest
-# Gemini CLI
-npm i -g @google/gemini-cli@latest
-# Grok Build
-npm i -g @xai-official/grok@latest
-# OpenCode
-npm i -g opencode-ai@latest
-# OpenClaw
-npm i -g openclaw@latest
-# Hermes
-${HERMES_WINDOWS_INSTALL_COMMAND}`;
-
-const ONE_CLICK_INSTALL_COMMANDS = isWindows()
-  ? WINDOWS_ONE_CLICK_INSTALL_COMMANDS
-  : POSIX_ONE_CLICK_INSTALL_COMMANDS;
-
-const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
-  claude: "Claude Code",
-  codex: "Codex",
-  gemini: "Gemini CLI",
-  grok: "Grok Build",
-  opencode: "OpenCode",
-  openclaw: "OpenClaw",
-  hermes: "Hermes",
-};
+const ONE_CLICK_INSTALL_COMMANDS = oneClickInstallCommands(isWindows());
+const INSTALL_SCRIPT_SOURCES = installScriptSources(isWindows());
 
 // 后端返回的 tool 是 string；这里收敛唯一的 ToolName 断言与兜底，供升级确认
 // 对话框按工具名展示（避免在 JSX 里内联 cast、且每次渲染都新建闭包）。
@@ -331,8 +272,8 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
   const loadAllToolVersions = useCallback(
     async (options?: { force?: boolean }) => {
       const force = options?.force ?? false;
-      // 命中新鲜缓存：切回「关于」Tab 触发的重挂直接复用上次结果，跳过 6 个 `--version`
-      // 子进程 + 6 个 latest 版本网络请求。手动「刷新」传 force 绕过缓存强制重查。
+      // 命中新鲜缓存：切回「关于」Tab 触发的重挂直接复用上次结果，跳过 7 个 `--version`
+      // 子进程 + 7 个 latest 版本网络请求。手动「刷新」传 force 绕过缓存强制重查。
       if (
         !force &&
         toolVersionsCache &&
@@ -346,7 +287,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
       try {
         // 逐工具并发探测：每个工具一完成就合并进 toolVersions（并写模块缓存）、清掉自己
         // 的 loadingTools 标志，对应卡片随即独立刷新——而非等全部探测完才一次性显示（后端
-        // 原本对 6 个工具串行 await，总耗时累加；并发后压成「最慢的那一个」）。refreshTool-
+        // 原本对全部工具串行 await，总耗时累加；并发后压成「最慢的那一个」）。refreshTool-
         // Versions 已内建按 name 合并 + per-tool loading + try/catch 兜底（单工具失败返回 []
         // 不拖累其余），故 Promise.all 永不 reject。Respect current shell/flag overrides.
         await Promise.all(
@@ -393,7 +334,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
 
     // 本软件自身版本走本地调用（getVersion，无网络，毫秒级），与工具版本探测彼此独立。
     // 之前两者被塞进同一个 Promise.all，导致 setVersion / setIsLoadingVersion 被压在
-    // 「全部工具检查完成」之后——图标下方的版本徽标因此要干等 6 个工具全检完才显示。
+    // 「全部工具检查完成」之后——图标下方的版本徽标因此要干等全部工具检完才显示。
     // 拆成两条独立链路：应用版本一拿到就立刻显示，工具探测各自渐进刷新，互不阻塞。
     const loadAppVersion = async () => {
       try {
@@ -535,7 +476,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
     }
   }, []);
 
-  // 顶部按钮：一次性诊断全部 6 个工具，有冲突的写入各自卡片，
+  // 顶部按钮：一次性诊断全部工具，有冲突的写入各自卡片，
   // 全部无冲突时给一条 info toast。后端逐工具枚举所有安装并判定分歧。
   const handleDiagnoseAll = useCallback(async () => {
     setIsDiagnosingAll(true);
@@ -576,12 +517,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
       // 后续工具（后端把整批拼成单脚本 + set -e，会在首个失败处中止整批）。
       // soft=true 表示"命令成功执行但结果仍需用户介入"（版本没变/装上却跑不起来），
       // 与命令本身报错（soft=false）区别对待：前者不算硬失败，toast 降级为 warning。
-      const failures: {
-        toolName: ToolName;
-        detail: string;
-        soft: boolean;
-        kind?: "notRunnable" | "versionUnchanged";
-      }[] = [];
+      const failures: ToolRunFailure[] = [];
       let succeeded = 0;
 
       for (const toolName of toolNames) {
@@ -602,48 +538,42 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
             wslShellByTool,
           );
           const tool = refreshed.find((t) => t.name === toolName);
-          if (tool?.version) {
-            const latestVersion = tool.latest_version ?? previousLatestVersion;
-            const versionUnchangedAfterUpdate =
-              action === "update" &&
-              Boolean(previousVersion) &&
-              tool.version === previousVersion &&
-              isUpdateAvailable(tool.version, latestVersion);
-
-            if (versionUnchangedAfterUpdate) {
-              // 有些上游 updater 会在未实际改动版本时仍返回 0。这里用刷新后的
-              // 当前版本 + latest_version 再确认一次，避免给用户误报升级成功。
-              failures.push({
-                toolName,
-                detail: t("settings.toolActionVersionUnchanged", {
-                  version: tool.version,
-                  latest: latestVersion ?? t("common.unknown"),
-                }),
-                soft: true,
-                kind: "versionUnchanged",
-              });
-              void diagnoseToolSilently(toolName);
-            } else {
-              succeeded += 1;
-              // 升级成功后无条件补诊：版本没变多半被另一处遮蔽，版本变了另一处也可能仍在，
-              // 两种都要刷新冲突展示（diagnoseToolSilently 无冲突时会自动清旧）。
-              if (action === "update") {
-                void diagnoseToolSilently(toolName);
-              }
-            }
-          } else {
-            // 命令退出码为 0、但刷新后仍探不到版本：多半是"装上了却跑不起来"
-            // （如 openclaw 要求更高的 Node 版本）。refreshToolVersions 的 merge 已把
-            // version 置空并写入后端 error，这里只需归类为软失败并展示原因。
-            const detail = tool?.error?.trim() || t("settings.toolNotRunnable");
+          const outcome = classifyRunResult({
+            action,
+            previousVersion,
+            previousLatestVersion,
+            refreshed: tool,
+          });
+          if (outcome.kind === "versionUnchanged") {
+            // 有些上游 updater 会在未实际改动版本时仍返回 0。这里用刷新后的
+            // 当前版本 + latest_version 再确认一次，避免给用户误报升级成功。
             failures.push({
               toolName,
-              detail,
+              detail: t("settings.toolActionVersionUnchanged", {
+                version: outcome.version,
+                latest: outcome.latest ?? t("common.unknown"),
+              }),
+              soft: true,
+              kind: "versionUnchanged",
+            });
+            void diagnoseToolSilently(toolName);
+          } else if (outcome.kind === "notRunnable") {
+            // 命令退出码为 0、但刷新后仍探不到版本：多半是"装上了却跑不起来"
+            // （如 openclaw 要求更高的 Node 版本），归类为软失败并展示原因。
+            failures.push({
+              toolName,
+              detail: outcome.detail ?? t("settings.toolNotRunnable"),
               soft: true,
               kind: "notRunnable",
             });
             // 装了却跑不起来同样可能源于多处安装，自动诊断帮用户定位。
             void diagnoseToolSilently(toolName);
+          } else {
+            succeeded += 1;
+            // 升级成功后无条件补诊：版本没变多半被另一处遮蔽，版本变了另一处也可能仍在。
+            if (action === "update") {
+              void diagnoseToolSilently(toolName);
+            }
           }
         } catch (error) {
           console.error(
@@ -670,62 +600,44 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
           ? t("settings.toolInstall")
           : t("settings.toolUpdate");
 
-      if (failures.length === 0) {
-        toast.success(
-          t("settings.toolActionDone", {
-            count: succeeded,
-            action: actionLabel,
-          }),
-          { closeButton: true },
-        );
-        return;
-      }
-
-      // 批量场景每个失败只摘取错误末行（最相关），单工具场景给出完整详情。
-      const lastLine = (text: string) => {
-        const lines = text.trim().split("\n").filter(Boolean);
-        return lines[lines.length - 1] ?? text;
-      };
-      const failureDescription = isBatch
-        ? failures
-            .map(
-              (f) => `${TOOL_DISPLAY_NAMES[f.toolName]}: ${lastLine(f.detail)}`,
-            )
-            .join("\n")
-        : failures[0]?.detail;
-
-      const hardFailures = failures.filter((f) => !f.soft);
-      const allSoftVersionUnchanged =
-        failures.length > 0 &&
-        failures.every((f) => f.soft && f.kind === "versionUnchanged");
-
-      if (succeeded === 0 && hardFailures.length === 0) {
-        // 命令均成功执行、但结果需要用户介入（版本没变 / 装上却跑不起来）
-        // → 降级为 warning 并解释原因。
-        toast.warning(
-          allSoftVersionUnchanged
-            ? t("settings.toolActionVersionUnchangedTitle")
-            : t("settings.toolActionInstalledNotRunnable"),
-          {
-            description: failureDescription || undefined,
+      const summary = summarizeRun(failures, succeeded, isBatch);
+      switch (summary.level) {
+        case "success":
+          toast.success(
+            t("settings.toolActionDone", {
+              count: summary.succeeded,
+              action: actionLabel,
+            }),
+            { closeButton: true },
+          );
+          break;
+        case "versionUnchanged":
+        case "notRunnable":
+          // 命令均成功执行、但结果需要用户介入 → 降级为 warning 并解释原因。
+          toast.warning(
+            summary.level === "versionUnchanged"
+              ? t("settings.toolActionVersionUnchangedTitle")
+              : t("settings.toolActionInstalledNotRunnable"),
+            { description: summary.description, closeButton: true },
+          );
+          break;
+        case "failed":
+          toast.error(t("settings.toolActionFailed"), {
+            description: summary.description,
             closeButton: true,
-          },
-        );
-      } else if (succeeded === 0) {
-        toast.error(t("settings.toolActionFailed"), {
-          description: failureDescription || undefined,
-          closeButton: true,
-        });
-      } else {
-        // 部分成功：用 warning 汇总成败数量，详情列出失败的工具。
-        toast.warning(
-          t("settings.toolActionPartial", {
-            succeeded,
-            failed: failures.length,
-            action: actionLabel,
-          }),
-          { description: failureDescription || undefined, closeButton: true },
-        );
+          });
+          break;
+        case "partial":
+          // 部分成功：用 warning 汇总成败数量，详情列出失败的工具。
+          toast.warning(
+            t("settings.toolActionPartial", {
+              succeeded: summary.succeeded,
+              failed: summary.failed,
+              action: actionLabel,
+            }),
+            { description: summary.description, closeButton: true },
+          );
+          break;
       }
     },
     [
@@ -1258,6 +1170,32 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
             <pre className="text-xs font-mono bg-background/80 px-3 py-2.5 rounded-lg border border-border/60 overflow-x-auto">
               {ONE_CLICK_INSTALL_COMMANDS}
             </pre>
+            <div
+              className="space-y-1 text-xs text-muted-foreground"
+              data-testid="install-script-sources"
+            >
+              <p>
+                {t("settings.installScriptSourcesHint", {
+                  defaultValue:
+                    "Some commands download and run these install scripts. Review them before running:",
+                })}
+              </p>
+              <ul className="list-disc space-y-0.5 pl-5">
+                {INSTALL_SCRIPT_SOURCES.map((source) => (
+                  <li key={source.url}>
+                    {source.tool}:{" "}
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono underline underline-offset-2 break-all"
+                    >
+                      {source.url}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         )}
       </motion.div>

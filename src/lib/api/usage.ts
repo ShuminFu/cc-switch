@@ -139,6 +139,19 @@ export const usageApi = {
     });
   },
 
+  /**
+   * Ask for a destination with a native save dialog and write an exported
+   * usage report there (FE-UI-25). Resolves with the saved path, or `null`
+   * when the user cancelled. The backend only writes .csv / .json files.
+   */
+  saveUsageExport: async (
+    defaultName: string,
+    format: "csv" | "json",
+    content: string,
+  ): Promise<string | null> => {
+    return invoke("save_usage_export", { defaultName, format, content });
+  },
+
   getRequestDetail: async (requestId: string): Promise<RequestLog | null> => {
     return invoke("get_request_detail", { requestId });
   },

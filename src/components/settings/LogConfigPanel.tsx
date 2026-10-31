@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
@@ -11,38 +10,34 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { settingsApi, type LogConfig } from "@/lib/api/settings";
+import { queryKeys } from "@/lib/query/keys";
+import { useBackendConfig } from "./useBackendConfig";
+import { ConfigLoadErrorAlert } from "./ConfigLoadErrorAlert";
 
 const LOG_LEVELS = ["error", "warn", "info", "debug", "trace"] as const;
 
 export function LogConfigPanel() {
   const { t } = useTranslation();
-  const [config, setConfig] = useState<LogConfig>({
-    enabled: true,
-    level: "info",
-  });
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    settingsApi
-      .getLogConfig()
-      .then(setConfig)
-      .catch((e) => console.error("Failed to load log config:", e))
-      .finally(() => setIsLoading(false));
-  }, []);
-
-  const handleChange = async (updates: Partial<LogConfig>) => {
-    const newConfig = { ...config, ...updates };
-    setConfig(newConfig);
-    try {
-      await settingsApi.setLogConfig(newConfig);
-    } catch (e) {
+  const {
+    config,
+    isLoading,
+    error,
+    refetch,
+    update: handleChange,
+  } = useBackendConfig<LogConfig>(
+    queryKeys.backendConfig.log,
+    () => settingsApi.getLogConfig(),
+    (next) => settingsApi.setLogConfig(next),
+    (e) => {
       console.error("Failed to save log config:", e);
       toast.error(String(e));
-      setConfig(config);
-    }
-  };
+    },
+  );
 
   if (isLoading) return null;
+  if (!config) {
+    return <ConfigLoadErrorAlert error={error} onRetry={() => refetch()} />;
+  }
 
   return (
     <div className="space-y-6">

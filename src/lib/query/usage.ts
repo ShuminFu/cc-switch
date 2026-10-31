@@ -1,4 +1,9 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { usageApi } from "@/lib/api/usage";
 import { resolveUsageRange } from "@/lib/usageRange";
 import { usageKeys, type RequestLogsKey } from "./keys";
@@ -220,6 +225,8 @@ export function useRequestLogs({
     providerName: filters.providerName,
     model: filters.model,
     statusCode: filters.statusCode,
+    statusMin: filters.statusMin,
+    statusMax: filters.statusMax,
   };
 
   return useQuery({
@@ -228,6 +235,8 @@ export function useRequestLogs({
       const effectiveFilters = { ...filters, ...resolveUsageRange(range) };
       return usageApi.getRequestLogs(effectiveFilters, page, pageSize);
     },
+    // Keep the previous page visible while the next one loads (FE-UI-59).
+    placeholderData: keepPreviousData,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS, // 每30秒自动刷新
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });

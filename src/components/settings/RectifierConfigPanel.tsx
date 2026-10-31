@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
@@ -8,60 +7,52 @@ import {
   type RectifierConfig,
   type OptimizerConfig,
 } from "@/lib/api/settings";
+import { queryKeys } from "@/lib/query/keys";
+import { useBackendConfig } from "./useBackendConfig";
+import { ConfigLoadErrorAlert } from "./ConfigLoadErrorAlert";
+
+const OPTIMIZER_PLACEHOLDER: OptimizerConfig = {
+  enabled: false,
+  thinkingOptimizer: false,
+  cacheInjection: false,
+};
 
 export function RectifierConfigPanel() {
   const { t } = useTranslation();
-  const [config, setConfig] = useState<RectifierConfig>({
-    enabled: true,
-    requestThinkingSignature: true,
-    requestThinkingBudget: true,
-    requestMediaFallback: true,
-    requestMediaHeuristic: true,
-  });
-  const [optimizerConfig, setOptimizerConfig] = useState<OptimizerConfig>({
-    enabled: false,
-    thinkingOptimizer: true,
-    cacheInjection: true,
-  });
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    settingsApi
-      .getRectifierConfig()
-      .then(setConfig)
-      .catch((e) => console.error("Failed to load rectifier config:", e))
-      .finally(() => setIsLoading(false));
-    settingsApi
-      .getOptimizerConfig()
-      .then(setOptimizerConfig)
-      .catch((e) => console.error("Failed to load optimizer config:", e));
-  }, []);
-
-  const handleChange = async (updates: Partial<RectifierConfig>) => {
-    const newConfig = { ...config, ...updates };
-    setConfig(newConfig);
-    try {
-      await settingsApi.setRectifierConfig(newConfig);
-    } catch (e) {
+  const rectifier = useBackendConfig<RectifierConfig>(
+    queryKeys.backendConfig.rectifier,
+    () => settingsApi.getRectifierConfig(),
+    (next) => settingsApi.setRectifierConfig(next),
+    (e) => {
       console.error("Failed to save rectifier config:", e);
       toast.error(String(e));
-      setConfig(config);
-    }
-  };
-
-  const handleOptimizerChange = async (updates: Partial<OptimizerConfig>) => {
-    const newConfig = { ...optimizerConfig, ...updates };
-    setOptimizerConfig(newConfig);
-    try {
-      await settingsApi.setOptimizerConfig(newConfig);
-    } catch (e) {
+    },
+  );
+  const optimizer = useBackendConfig<OptimizerConfig>(
+    queryKeys.backendConfig.optimizer,
+    () => settingsApi.getOptimizerConfig(),
+    (next) => settingsApi.setOptimizerConfig(next),
+    (e) => {
       console.error("Failed to save optimizer config:", e);
       toast.error(String(e));
-      setOptimizerConfig(optimizerConfig);
-    }
-  };
+    },
+  );
+  const handleChange = rectifier.update;
+  const handleOptimizerChange = optimizer.update;
 
-  if (isLoading) return null;
+  if (rectifier.isLoading) return null;
+  const config = rectifier.config;
+  if (!config) {
+    return (
+      <ConfigLoadErrorAlert
+        error={rectifier.error}
+        onRetry={() => rectifier.refetch()}
+      />
+    );
+  }
+  // The optimizer section stays disabled until its own config has loaded.
+  const optimizerLoaded = optimizer.config !== undefined;
+  const optimizerConfig = optimizer.config ?? OPTIMIZER_PLACEHOLDER;
 
   return (
     <div className="space-y-6">
@@ -154,6 +145,14 @@ export function RectifierConfigPanel() {
           </p>
         </div>
 
+        {optimizer.error != null && !optimizerLoaded && (
+          <div className="mb-4">
+            <ConfigLoadErrorAlert
+              error={optimizer.error}
+              onRetry={() => optimizer.refetch()}
+            />
+          </div>
+        )}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
@@ -161,6 +160,7 @@ export function RectifierConfigPanel() {
             </div>
             <Switch
               checked={optimizerConfig.enabled}
+              disabled={!optimizerLoaded}
               onCheckedChange={(checked) =>
                 handleOptimizerChange({ enabled: checked })
               }
@@ -181,7 +181,7 @@ export function RectifierConfigPanel() {
               </div>
               <Switch
                 checked={optimizerConfig.thinkingOptimizer}
-                disabled={!optimizerConfig.enabled}
+                disabled={!optimizerLoaded || !optimizerConfig.enabled}
                 onCheckedChange={(checked) =>
                   handleOptimizerChange({ thinkingOptimizer: checked })
                 }
@@ -197,7 +197,7 @@ export function RectifierConfigPanel() {
               </div>
               <Switch
                 checked={optimizerConfig.cacheInjection}
-                disabled={!optimizerConfig.enabled}
+                disabled={!optimizerLoaded || !optimizerConfig.enabled}
                 onCheckedChange={(checked) =>
                   handleOptimizerChange({ cacheInjection: checked })
                 }

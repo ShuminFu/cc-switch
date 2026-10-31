@@ -1,4 +1,6 @@
+import { memo, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   AreaChart,
   Area,
@@ -11,12 +13,14 @@ import {
 } from "recharts";
 import { useUsageTrends } from "@/lib/query/usage";
 import { Loader2 } from "lucide-react";
+import { fmtInt, fmtUsd, getLocaleFromLanguage } from "./format";
 import {
-  fmtInt,
-  fmtUsd,
-  getLocaleFromLanguage,
-  parseFiniteNumber,
-} from "./format";
+  buildTrendPoints,
+  downsampleTrendPoints,
+  formatCostTick,
+  formatTokenTick,
+  type TrendPoint,
+} from "./trendChartData";
 import { resolveUsageRange } from "@/lib/usageRange";
 import type { UsageRangeSelection } from "@/types/usage";
 
@@ -47,6 +51,18 @@ export function UsageTrendChart({
     },
   );
 
+  const durationSeconds = Math.max(endDate - startDate, 0);
+  const isHourly = durationSeconds <= 24 * 60 * 60;
+  const language = i18n.resolvedLanguage || i18n.language || "en";
+  const dateLocale = getLocaleFromLanguage(language);
+  // React Query keeps `trends` referentially stable when a refetch returns
+  // the same rows, so the memoised chart below only re-renders on real
+  // data changes (PERF-21 / FE-UI-28).
+  const chartData = useMemo(
+    () => downsampleTrendPoints(buildTrendPoints(trends, isHourly, dateLocale)),
+    [trends, isHourly, dateLocale],
+  );
+
   if (isLoading) {
     return (
       <div className="flex h-[350px] items-center justify-center rounded-xl bg-card/40 border border-border/50">
@@ -54,67 +70,6 @@ export function UsageTrendChart({
       </div>
     );
   }
-
-  const durationSeconds = Math.max(endDate - startDate, 0);
-  const isHourly = durationSeconds <= 24 * 60 * 60;
-  const language = i18n.resolvedLanguage || i18n.language || "en";
-  const dateLocale = getLocaleFromLanguage(language);
-  const chartData =
-    trends?.map((stat) => {
-      const pointDate = new Date(stat.date);
-      const cost = parseFiniteNumber(stat.totalCost);
-      return {
-        rawDate: stat.date,
-        label: isHourly
-          ? pointDate.toLocaleString(dateLocale, {
-              month: "2-digit",
-              day: "2-digit",
-              hour: "2-digit",
-              minute: "2-digit",
-            })
-          : pointDate.toLocaleDateString(dateLocale, {
-              month: "2-digit",
-              day: "2-digit",
-            }),
-        hour: pointDate.getHours(),
-        inputTokens: stat.totalInputTokens,
-        outputTokens: stat.totalOutputTokens,
-        cacheCreationTokens: stat.totalCacheCreationTokens,
-        cacheReadTokens: stat.totalCacheReadTokens,
-        cost: cost ?? null,
-      };
-    }) || [];
-
-  const displayData = chartData;
-
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="rounded-lg border bg-background/95 p-3 shadow-lg backdrop-blur-md">
-          <p className="mb-2 font-medium">{label}</p>
-          {payload.map((entry: any, index: number) => (
-            <div
-              key={index}
-              className="flex items-center gap-2 text-sm"
-              style={{ color: entry.color }}
-            >
-              <div
-                className="h-2 w-2 rounded-full"
-                style={{ backgroundColor: entry.color }}
-              />
-              <span className="font-medium">{entry.name}:</span>
-              <span>
-                {entry.dataKey === "cost"
-                  ? fmtUsd(entry.value, 6)
-                  : fmtInt(entry.value, dateLocale)}
-              </span>
-            </div>
-          ))}
-        </div>
-      );
-    }
-    return null;
-  };
 
   return (
     <div className="rounded-xl border border-border/50 bg-card/40 p-6 backdrop-blur-sm">
@@ -125,119 +80,188 @@ export function UsageTrendChart({
         <p className="text-sm text-muted-foreground">{rangeLabel}</p>
       </div>
 
-      <div className="h-[350px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart
-            data={displayData}
-            margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-          >
-            <defs>
-              <linearGradient id="colorInput" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient id="colorOutput" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#22c55e" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient
-                id="colorCacheCreation"
-                x1="0"
-                y1="0"
-                x2="0"
-                y2="1"
-              >
-                <stop offset="5%" stopColor="#f97316" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient id="colorCacheRead" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#a855f7" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid
-              strokeDasharray="3 3"
-              vertical={false}
-              stroke="hsl(var(--border))"
-              opacity={0.4}
-            />
-            <XAxis
-              dataKey="label"
-              axisLine={false}
-              tickLine={false}
-              tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-              dy={10}
-            />
-            <YAxis
-              yAxisId="tokens"
-              axisLine={false}
-              tickLine={false}
-              tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-              tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
-            />
-            <YAxis
-              yAxisId="cost"
-              orientation="right"
-              axisLine={false}
-              tickLine={false}
-              tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-              tickFormatter={(value) => `$${value}`}
-            />
-            <Tooltip content={<CustomTooltip />} />
-            <Legend />
-            <Area
-              yAxisId="tokens"
-              type="monotone"
-              dataKey="inputTokens"
-              name={t("usage.inputTokens", "输入 Tokens")}
-              stroke="#3b82f6"
-              fillOpacity={1}
-              fill="url(#colorInput)"
-              strokeWidth={2}
-            />
-            <Area
-              yAxisId="tokens"
-              type="monotone"
-              dataKey="outputTokens"
-              name={t("usage.outputTokens", "输出 Tokens")}
-              stroke="#22c55e"
-              fillOpacity={1}
-              fill="url(#colorOutput)"
-              strokeWidth={2}
-            />
-            <Area
-              yAxisId="tokens"
-              type="monotone"
-              dataKey="cacheCreationTokens"
-              name={t("usage.cacheCreationTokens", "缓存创建")}
-              stroke="#f97316"
-              fillOpacity={1}
-              fill="url(#colorCacheCreation)"
-              strokeWidth={2}
-            />
-            <Area
-              yAxisId="tokens"
-              type="monotone"
-              dataKey="cacheReadTokens"
-              name={t("usage.cacheReadTokens", "缓存命中")}
-              stroke="#a855f7"
-              fillOpacity={1}
-              fill="url(#colorCacheRead)"
-              strokeWidth={2}
-            />
-            <Area
-              yAxisId="cost"
-              type="monotone"
-              dataKey="cost"
-              name={t("usage.cost", "成本")}
-              stroke="#f43f5e"
-              fill="none"
-              strokeWidth={2}
-              strokeDasharray="4 4"
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+      <TrendChartBody data={chartData} dateLocale={dateLocale} t={t} />
     </div>
   );
 }
+
+interface TooltipEntry {
+  color?: string;
+  name?: string;
+  dataKey?: string | number;
+  value?: number | string | null;
+}
+
+interface TrendTooltipProps {
+  active?: boolean;
+  payload?: TooltipEntry[];
+  label?: string | number;
+  dateLocale: string;
+}
+
+/** Hoisted so its identity is stable across refetches (FE-UI-28). */
+function TrendTooltip({
+  active,
+  payload,
+  label,
+  dateLocale,
+}: TrendTooltipProps) {
+  if (!active || !payload || payload.length === 0) return null;
+  return (
+    <div className="rounded-lg border bg-background/95 p-3 shadow-lg backdrop-blur-md">
+      <p className="mb-2 font-medium">{label}</p>
+      {payload.map((entry, index) => (
+        <div
+          key={index}
+          className="flex items-center gap-2 text-sm"
+          style={{ color: entry.color }}
+        >
+          <div
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: entry.color }}
+          />
+          <span className="font-medium">{entry.name}:</span>
+          <span>
+            {entry.dataKey === "cost"
+              ? fmtUsd(entry.value, 6)
+              : fmtInt(entry.value, dateLocale)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+interface TrendChartBodyProps {
+  data: TrendPoint[];
+  dateLocale: string;
+  t: TFunction;
+}
+
+const TrendChartBody = memo(function TrendChartBody({
+  data,
+  dateLocale,
+  t,
+}: TrendChartBodyProps) {
+  // Animate the first paint only; refetches update the paths in place.
+  const hasAnimated = useRef(false);
+  const animate = !hasAnimated.current;
+  useEffect(() => {
+    hasAnimated.current = true;
+  }, []);
+
+  return (
+    <div className="h-[350px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart
+          data={data}
+          margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+        >
+          <defs>
+            <linearGradient id="colorInput" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
+              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="colorOutput" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#22c55e" stopOpacity={0.2} />
+              <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="colorCacheCreation" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#f97316" stopOpacity={0.2} />
+              <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="colorCacheRead" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#a855f7" stopOpacity={0.2} />
+              <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid
+            strokeDasharray="3 3"
+            vertical={false}
+            stroke="hsl(var(--border))"
+            opacity={0.4}
+          />
+          <XAxis
+            dataKey="label"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+            dy={10}
+          />
+          <YAxis
+            yAxisId="tokens"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+            tickFormatter={formatTokenTick}
+          />
+          <YAxis
+            yAxisId="cost"
+            orientation="right"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+            tickFormatter={formatCostTick}
+          />
+          <Tooltip content={<TrendTooltip dateLocale={dateLocale} />} />
+          <Legend />
+          <Area
+            yAxisId="tokens"
+            type="monotone"
+            dataKey="inputTokens"
+            name={t("usage.inputTokens", "输入 Tokens")}
+            stroke="#3b82f6"
+            fillOpacity={1}
+            fill="url(#colorInput)"
+            strokeWidth={2}
+            isAnimationActive={animate}
+          />
+          <Area
+            yAxisId="tokens"
+            type="monotone"
+            dataKey="outputTokens"
+            name={t("usage.outputTokens", "输出 Tokens")}
+            stroke="#22c55e"
+            fillOpacity={1}
+            fill="url(#colorOutput)"
+            strokeWidth={2}
+            isAnimationActive={animate}
+          />
+          <Area
+            yAxisId="tokens"
+            type="monotone"
+            dataKey="cacheCreationTokens"
+            name={t("usage.cacheCreationTokens", "缓存创建")}
+            stroke="#f97316"
+            fillOpacity={1}
+            fill="url(#colorCacheCreation)"
+            strokeWidth={2}
+            isAnimationActive={animate}
+          />
+          <Area
+            yAxisId="tokens"
+            type="monotone"
+            dataKey="cacheReadTokens"
+            name={t("usage.cacheReadTokens", "缓存命中")}
+            stroke="#a855f7"
+            fillOpacity={1}
+            fill="url(#colorCacheRead)"
+            strokeWidth={2}
+            isAnimationActive={animate}
+          />
+          <Area
+            yAxisId="cost"
+            type="monotone"
+            dataKey="cost"
+            name={t("usage.cost", "成本")}
+            stroke="#f43f5e"
+            fill="none"
+            strokeWidth={2}
+            strokeDasharray="4 4"
+            isAnimationActive={animate}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+});

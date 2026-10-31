@@ -118,6 +118,9 @@ export interface LogFilters {
   providerName?: string;
   model?: string;
   statusCode?: number;
+  /** Inclusive status range, e.g. `statusMin: 400` for "errors only" (FE-UI-59). */
+  statusMin?: number;
+  statusMax?: number;
   startDate?: number;
   endDate?: number;
 }

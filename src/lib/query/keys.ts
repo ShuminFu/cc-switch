@@ -27,6 +27,8 @@ export type RequestLogsKey = {
   providerName?: string;
   model?: string;
   statusCode?: number;
+  statusMin?: number;
+  statusMax?: number;
 };
 
 // Query keys
@@ -133,6 +135,8 @@ export const usageKeys = {
       key.providerName ?? "",
       key.model ?? "",
       key.statusCode ?? -1,
+      key.statusMin ?? -1,
+      key.statusMax ?? -1,
       page,
       pageSize,
     ] as const,
@@ -305,6 +309,14 @@ export const queryKeys = {
   },
 
   modelsDevPricing: ["models-dev-pricing"] as const,
+
+  /** Backend config blobs edited by Settings/Usage panels (FE-UI-10). */
+  backendConfig: {
+    rectifier: ["backendConfig", "rectifier"] as const,
+    optimizer: ["backendConfig", "optimizer"] as const,
+    log: ["backendConfig", "log"] as const,
+    streamCheck: ["backendConfig", "streamCheck"] as const,
+  },
 } as const;
 
 /**

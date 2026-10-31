@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 mod auth;
+mod backup_folder;
 mod balance;
 #[cfg(test)]
 mod bindings;
@@ -39,10 +40,12 @@ mod lightweight;
 mod s3_sync;
 mod sync_encryption;
 mod usage;
+mod usage_export;
 mod webdav_sync;
 mod workspace;
 
 pub use auth::*;
+pub use backup_folder::*;
 pub use balance::*;
 pub(crate) use blocking::{run_blocking, run_blocking_with_state};
 pub use budget::*;
@@ -78,5 +81,6 @@ pub use lightweight::*;
 pub use s3_sync::*;
 pub use sync_encryption::*;
 pub use usage::*;
+pub use usage_export::*;
 pub use webdav_sync::*;
 pub use workspace::*;

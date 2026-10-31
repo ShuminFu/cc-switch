@@ -305,6 +305,29 @@ describe("useSettings hook", () => {
     expect(syncCurrentProvidersLiveMock).toHaveBeenCalledTimes(1);
   });
 
+  it("reports unsaved Advanced edits only when directories differ (FE-UI-07)", () => {
+    const clean = renderHook(() => useSettings());
+    expect(clean.result.current.hasUnsavedAdvancedChanges).toBe(false);
+    clean.unmount();
+
+    settingsFormMock = createSettingsFormMock({
+      settings: { ...serverSettings, claudeConfigDir: "/edited/claude" },
+    });
+    const dirtyDir = renderHook(() => useSettings());
+    expect(dirtyDir.result.current.hasUnsavedAdvancedChanges).toBe(true);
+    dirtyDir.unmount();
+
+    settingsFormMock = createSettingsFormMock({
+      settings: { ...serverSettings, claudeConfigDir: " /server/claude " },
+    });
+    directorySettingsMock = createDirectorySettingsMock({
+      appConfigDir: "/new/app",
+      initialAppConfigDir: "/old/app",
+    });
+    const dirtyApp = renderHook(() => useSettings());
+    expect(dirtyApp.result.current.hasUnsavedAdvancedChanges).toBe(true);
+  });
+
   it("saves settings without restart when directory unchanged", async () => {
     // 确保服务器和本地状态一致，不触发 API 调用
     serverSettings = {

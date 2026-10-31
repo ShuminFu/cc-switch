@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/accordion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { settingsApi } from "@/lib/api";
+import { backupsApi, settingsApi } from "@/lib/api";
 import { LanguageSettings } from "@/components/settings/LanguageSettings";
 import { ThemeSettings } from "@/components/settings/ThemeSettings";
 import { WindowSettings } from "@/components/settings/WindowSettings";
@@ -58,6 +58,7 @@ import { useInstalledSkills } from "@/hooks/useSkills";
 import { useSettings } from "@/hooks/useSettings";
 import { directoryValuesByApp } from "@/hooks/settingsDirectoryFields";
 import { useImportExport } from "@/hooks/useImportExport";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { SettingsFormState } from "@/hooks/useSettings";
 
@@ -93,6 +94,8 @@ export function SettingsPage({
     autoSaveSettings,
     requiresRestart,
     acknowledgeRestart,
+    hasUnsavedAdvancedChanges,
+    resetSettings,
   } = useSettings();
 
   const {
@@ -109,6 +112,34 @@ export function SettingsPage({
   } = useImportExport({ onImportSuccess });
 
   const { data: installedSkills } = useInstalledSkills();
+  const queryClient = useQueryClient();
+
+  // FE-UI-55: one-click rollback to the safety backup taken by the import.
+  const revertImport = useCallback(
+    async (id: string) => {
+      try {
+        await backupsApi.restoreDbBackup(id.endsWith(".db") ? id : `${id}.db`);
+        // The whole database was replaced, so every cached query is stale.
+        await queryClient.invalidateQueries();
+        toast.success(
+          t("settings.revertImportSuccess", {
+            defaultValue: "Import reverted",
+          }),
+          { closeButton: true },
+        );
+        await onImportSuccess?.();
+      } catch (error) {
+        toast.error(
+          t("settings.revertImportFailed", {
+            defaultValue: "Failed to revert the import: {{message}}",
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        throw error;
+      }
+    },
+    [onImportSuccess, queryClient, t],
+  );
 
   const [activeTab, setActiveTab] = useState<string>("general");
   const [showRestartPrompt, setShowRestartPrompt] = useState(false);
@@ -200,17 +231,14 @@ export function SettingsPage({
         await autoSaveSettings(updates);
         return true;
       } catch (error) {
+        // The save hook already reported the failure (with its reason);
+        // only roll the optimistic change back here (FE-UI-09).
         console.error("[SettingsPage] Failed to autosave settings", error);
         updateSettings(previousValues);
-        toast.error(
-          t("settings.saveFailedGeneric", {
-            defaultValue: "保存失败，请重试",
-          }),
-        );
         return false;
       }
     },
-    [autoSaveSettings, settings, t, updateSettings],
+    [autoSaveSettings, settings, updateSettings],
   );
 
   const isBusy = useMemo(() => isLoading && !settings, [isLoading, settings]);
@@ -392,6 +420,7 @@ export function SettingsPage({
                             onImport={importConfig}
                             onExport={exportConfig}
                             onClear={clearSelection}
+                            onRevertImport={revertImport}
                           />
                           <div className="mt-4">
                             <SecretsVaultSettings />
@@ -529,7 +558,31 @@ export function SettingsPage({
                 style={{ backgroundColor: "hsl(var(--background))" }}
               >
                 <div className="px-6 flex items-center justify-end gap-3">
-                  <Button onClick={handleSave} disabled={isSaving}>
+                  {hasUnsavedAdvancedChanges && (
+                    <>
+                      <span
+                        className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300"
+                        data-testid="unsaved-changes"
+                      >
+                        {t("settings.unsavedChanges", {
+                          defaultValue: "Unsaved changes",
+                        })}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        onClick={resetSettings}
+                        disabled={isSaving}
+                      >
+                        {t("settings.discardChanges", {
+                          defaultValue: "Discard",
+                        })}
+                      </Button>
+                    </>
+                  )}
+                  <Button
+                    onClick={handleSave}
+                    disabled={isSaving || !hasUnsavedAdvancedChanges}
+                  >
                     {isSaving ? (
                       <span className="inline-flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />

@@ -274,13 +274,9 @@ describe("SettingsPage integration", () => {
     );
     fireEvent.click(screen.getByText("settings.exportConfig"));
 
-    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
-    const cancelMessage = toastErrorMock.mock.calls.at(-1)?.[0] as string;
-    expect(cancelMessage).toMatch(
-      /settings\.selectFileFailed|请选择.*保存路径/,
-    );
-
-    toastErrorMock.mockClear();
+    // Cancelling the save dialog is not an error (FE-UI-08).
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(toastErrorMock).not.toHaveBeenCalled();
 
     server.use(
       http.post("http://tauri.local/save_file_dialog", () =>

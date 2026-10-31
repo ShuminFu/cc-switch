@@ -42,6 +42,7 @@ interface SettingsMock {
   isLoading: boolean;
   isSaving: boolean;
   isPortable: boolean;
+  hasUnsavedAdvancedChanges: boolean;
   appConfigDir?: string;
   resolvedDirs: Record<string, string>;
   requiresRestart: boolean;
@@ -87,6 +88,7 @@ const createSettingsMock = (overrides: Partial<SettingsMock> = {}) => {
     saveSettings: vi.fn().mockResolvedValue({ requiresRestart: false }),
     autoSaveSettings: vi.fn().mockResolvedValue({ requiresRestart: false }),
     resetSettings: vi.fn(),
+    hasUnsavedAdvancedChanges: true,
     acknowledgeRestart: vi.fn(),
   };
 
@@ -343,8 +345,13 @@ describe("SettingsPage Component", () => {
     expect(screen.getByText("webdav-sync-section:none")).toBeInTheDocument();
     fireEvent.click(screen.getByText("settings.advanced.data.title"));
 
-    // 有文件时，点击导入按钮执行 importConfig
+    // 有文件时，点击导入按钮先确认（FE-UI-55），确认后执行 importConfig
     fireEvent.click(screen.getByRole("button", { name: /settings\.import/ }));
+    expect(importExportMock.importConfig).not.toHaveBeenCalled();
+    const confirmButtons = screen.getAllByRole("button", {
+      name: "settings.import",
+    });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
     expect(importExportMock.importConfig).toHaveBeenCalled();
 
     fireEvent.click(
@@ -355,6 +362,22 @@ describe("SettingsPage Component", () => {
     // 清除选择按钮
     fireEvent.click(screen.getByRole("button", { name: "common.clear" }));
     expect(importExportMock.clearSelection).toHaveBeenCalled();
+  });
+
+  it("rolls back a failed autosave without adding a second toast (FE-UI-09)", async () => {
+    settingsMock = createSettingsMock();
+    settingsMock.autoSaveSettings.mockRejectedValue(new Error("disk full"));
+    renderSettingsPage();
+
+    fireEvent.click(screen.getByText("change-language"));
+
+    await waitFor(() =>
+      expect(settingsMock.updateSettings).toHaveBeenLastCalledWith({
+        language: "zh",
+      }),
+    );
+    // useSettings (mocked here) owns the failure toast; the page adds none.
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
   it("should reset tab content scroll position when switching settings tabs", () => {
@@ -385,6 +408,30 @@ describe("SettingsPage Component", () => {
       await lastUseImportExportOptions.onImportSuccess();
     }
     expect(onImportSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables Save when the Advanced tab has nothing to save (FE-UI-07)", () => {
+    settingsMock = createSettingsMock({ hasUnsavedAdvancedChanges: false });
+    renderSettingsPage();
+    fireEvent.click(screen.getByText("settings.tabAdvanced"));
+
+    expect(screen.getByRole("button", { name: /common\.save/ })).toBeDisabled();
+    expect(screen.queryByTestId("unsaved-changes")).toBeNull();
+  });
+
+  it("flags unsaved Advanced edits and can discard them (FE-UI-07)", () => {
+    settingsMock = createSettingsMock({ hasUnsavedAdvancedChanges: true });
+    renderSettingsPage();
+    fireEvent.click(screen.getByText("settings.tabAdvanced"));
+
+    expect(screen.getByTestId("unsaved-changes")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /common\.save/ }),
+    ).not.toBeDisabled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "settings.discardChanges" }),
+    );
+    expect(settingsMock.resetSettings).toHaveBeenCalledTimes(1);
   });
 
   it("should call saveSettings and close dialog when clicking save", async () => {

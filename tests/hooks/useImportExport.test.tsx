@@ -211,7 +211,7 @@ describe("useImportExport Hook", () => {
     );
   });
 
-  it("should show error and return when user cancels save dialog during export", async () => {
+  it("returns silently when the user cancels the save dialog during export", async () => {
     saveFileDialogMock.mockResolvedValue(null);
 
     const { result } = renderHook(() => useImportExport());
@@ -221,7 +221,8 @@ describe("useImportExport Hook", () => {
     });
 
     expect(exportConfigMock).not.toHaveBeenCalled();
-    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    expect(toastErrorMock).not.toHaveBeenCalled();
+    expect(toastSuccessMock).not.toHaveBeenCalled();
   });
 
   it("should restore initial values when clearing selection and resetting status", async () => {
