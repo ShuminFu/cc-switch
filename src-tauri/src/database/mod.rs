@@ -49,6 +49,8 @@ mod usage_writer;
 mod tests;
 
 // DAO 类型导出供外部使用
+pub(crate) use dao::pricing as dao_pricing;
+pub use dao::pricing::ModelPricingInfo;
 pub(crate) use dao::providers_seed::{
     is_official_seed_id, CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID, CODEX_OFFICIAL_PROVIDER_ID,
 };
@@ -408,6 +410,27 @@ impl Database {
             Some(pool) => pool.get().map(ReadConn::pooled),
             None => Ok(ReadConn::main(lock_conn!(self.conn))),
         }
+    }
+
+    /// Run a read-only closure on a read connection (the WAL read pool when
+    /// available, else the main connection) (DB-15). Callers outside
+    /// `database/` should prefer this (or a DAO method) over locking `conn`.
+    pub(crate) fn read<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> Result<T, AppError>,
+    ) -> Result<T, AppError> {
+        let conn = self.read_conn()?;
+        f(&conn)
+    }
+
+    /// Run a closure on the main (read-write) connection (DB-15). For
+    /// all-or-nothing multi-statement writes use [`Self::with_transaction`].
+    pub(crate) fn write<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> Result<T, AppError>,
+    ) -> Result<T, AppError> {
+        let conn = lock_conn!(self.conn);
+        f(&conn)
     }
 
     /// Config-change counter bumped by the update hook (tests only).
