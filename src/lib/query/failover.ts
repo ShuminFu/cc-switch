@@ -6,6 +6,7 @@ import { extractErrorMessage } from "@/utils/errorUtils";
 import { getAppLabel } from "@/config/proxyApps";
 import { useCachedProxyRunning } from "./proxy";
 import { queryKeys } from "./keys";
+import type { ProviderHealth } from "@/types/proxy";
 
 /**
  * Health / circuit-breaker state only changes while the proxy handles requests,
@@ -35,6 +36,36 @@ export function useProviderHealth(
   });
 }
 
+/**
+ * Health of every provider in a list, in one `get_providers_health` call per
+ * poll instead of one query per row (FE-UI-22). Keyed by provider id.
+ */
+export function useProvidersHealthMap(
+  appType: string,
+  providerIds: readonly string[],
+) {
+  const proxyRunning = useCachedProxyRunning();
+  return useQuery({
+    queryKey: queryKeys.failover.providersHealth(appType, providerIds),
+    queryFn: async () => {
+      const entries = await failoverApi.getProvidersHealth(appType, [
+        ...providerIds,
+      ]);
+      return Object.fromEntries(
+        entries.map((health, i) => [
+          providerIds[i] ?? health.provider_id,
+          health,
+        ]),
+      ) as Record<string, ProviderHealth>;
+    },
+    enabled: !!appType && providerIds.length > 0,
+    refetchInterval: proxyRunning ? HEALTH_REFETCH_MS : false,
+    refetchIntervalInBackground: false,
+    retry: false,
+    placeholderData: (previousData) => previousData,
+  });
+}
+
 // ========== 故障转移队列 Hooks（新） ==========
 
 /**
@@ -58,6 +89,9 @@ export function useResetCircuitBreaker() {
           variables.providerId,
           variables.appType,
         ),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.failover.providersHealthByApp(variables.appType),
       });
       // 刷新供应商列表（因为可能发生了自动恢复切换）
       queryClient.invalidateQueries({

@@ -187,6 +187,8 @@ export const queryKeys = {
   /** Request-log retention window, PRODUCT-31. */
   logRetention: {
     status: ["requestLogRetention"] as const,
+    /** Stream-check (connectivity probe) log retention, DB-25. */
+    streamCheck: ["streamCheckRetention"] as const,
   },
 
   proxy: {
@@ -206,6 +208,11 @@ export const queryKeys = {
     providerHealthAll: ["providerHealth"] as const,
     providerHealth: (providerId: string, appType: string) =>
       ["providerHealth", providerId, appType] as const,
+    /** One batched `get_providers_health` query per app (FE-UI-22). */
+    providersHealthByApp: (appType: string) =>
+      ["providerHealth", "batch", appType] as const,
+    providersHealth: (appType: string, providerIds: readonly string[]) =>
+      ["providerHealth", "batch", appType, ...providerIds] as const,
     circuitBreakerConfig: ["circuitBreakerConfig"] as const,
     circuitBreakerStatsAll: ["circuitBreakerStats"] as const,
     circuitBreakerStats: (providerId: string, appType: string) =>

@@ -7,7 +7,7 @@
  * - 每项显示健康状态与最近一次失败原因，可连通性检查与重置熔断（FE-UI-24）
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -33,7 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { FailoverQueueItem } from "@/types/proxy";
+import type { FailoverQueueItem, ProviderHealth } from "@/types/proxy";
 import { providersApi, type AppId } from "@/lib/api";
 import { queryKeys } from "@/lib/query/keys";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
@@ -46,7 +46,7 @@ import {
   useRemoveFromFailoverQueue,
   useAutoFailoverEnabled,
   useSetAutoFailoverEnabled,
-  useProviderHealth,
+  useProvidersHealthMap,
   useResetCircuitBreaker,
 } from "@/lib/query/failover";
 
@@ -72,6 +72,11 @@ export function FailoverQueueManager({
     isLoading: isQueueLoading,
     error: queueError,
   } = useFailoverQueue(appType);
+  const queueProviderIds = useMemo(
+    () => (queue ?? []).map((item) => item.providerId),
+    [queue],
+  );
+  const { data: healthMap } = useProvidersHealthMap(appType, queueProviderIds);
   const { data: availableProviders, isLoading: isProvidersLoading } =
     useAvailableProvidersForFailover(appType);
 
@@ -290,11 +295,11 @@ export function FailoverQueueManager({
             <QueueItem
               key={item.providerId}
               item={item}
+              health={healthMap?.[item.providerId]}
               index={index}
               disabled={disabled}
               onRemove={handleRemoveProvider}
               isRemoving={removeFromQueue.isPending}
-              appType={appType}
               canMoveUp={
                 !isReordering && !!swapQueueSortIndex(queue, index, index - 1)
               }
@@ -329,11 +334,11 @@ export function FailoverQueueManager({
 
 interface QueueItemProps {
   item: FailoverQueueItem;
+  health?: ProviderHealth;
   index: number;
   disabled: boolean;
   onRemove: (providerId: string) => void;
   isRemoving: boolean;
-  appType: AppId;
   canMoveUp: boolean;
   canMoveDown: boolean;
   onMoveUp: () => void;
@@ -346,11 +351,11 @@ interface QueueItemProps {
 
 function QueueItem({
   item,
+  health,
   index,
   disabled,
   onRemove,
   isRemoving,
-  appType,
   canMoveUp,
   canMoveDown,
   onMoveUp,
@@ -361,7 +366,6 @@ function QueueItem({
   isResetting,
 }: QueueItemProps) {
   const { t, i18n } = useTranslation();
-  const { data: health } = useProviderHealth(item.providerId, appType);
   const lastFailure =
     health?.last_error && health.last_failure_at
       ? {

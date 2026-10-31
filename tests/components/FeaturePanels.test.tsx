@@ -86,16 +86,21 @@ describe("FailoverQueueManager", () => {
         { providerId: "p2", providerName: "Backup", sortIndex: 7 },
       ],
       get_available_providers_for_failover: [],
-      get_provider_health: ({ providerId }: Record<string, unknown>) => ({
-        provider_id: providerId,
-        app_type: "claude",
-        is_healthy: providerId !== "p2",
-        consecutive_failures: providerId === "p2" ? 4 : 0,
-        last_success_at: null,
-        last_failure_at: providerId === "p2" ? "2026-01-01T00:00:00Z" : null,
-        last_error: providerId === "p2" ? "HTTP 529 overloaded" : null,
-        updated_at: "2026-01-01T00:00:00Z",
-      }),
+      // One batched health call for the whole queue (FE-UI-22).
+      get_providers_health: ({ providerIds }: Record<string, unknown>) =>
+        (providerIds as string[]).map((providerId) => ({
+          provider_id: providerId,
+          app_type: "claude",
+          is_healthy: providerId !== "p2",
+          consecutive_failures: providerId === "p2" ? 4 : 0,
+          last_success_at: null,
+          last_failure_at: providerId === "p2" ? "2026-01-01T00:00:00Z" : null,
+          last_error: providerId === "p2" ? "HTTP 529 overloaded" : null,
+          updated_at: "2026-01-01T00:00:00Z",
+        })),
+      get_provider_health: () => {
+        throw new Error("per-provider health must not be queried");
+      },
       update_providers_sort_order: true,
       reset_circuit_breaker: null,
       stream_check_provider: {
@@ -109,6 +114,14 @@ describe("FailoverQueueManager", () => {
     });
     renderWithQuery(<FailoverQueueManager appType="claude" />);
 
+    await waitFor(() =>
+      expect(api.callsTo("get_providers_health")).toHaveLength(1),
+    );
+    expect(api.callsTo("get_providers_health")[0].args).toEqual({
+      appType: "claude",
+      providerIds: ["p1", "p2"],
+    });
+    expect(api.callsTo("get_provider_health")).toHaveLength(0);
     expect(await screen.findByTestId("queue-last-error-p2")).toHaveAttribute(
       "title",
       "HTTP 529 overloaded",
