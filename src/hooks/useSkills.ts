@@ -14,7 +14,10 @@ import {
   type SkillsShSearchResult,
 } from "@/lib/api/skills";
 import type { AppId } from "@/lib/api/types";
-import { mergeImportedSkills } from "@/hooks/useSkills.helpers";
+import {
+  mergeImportedSkills,
+  upsertInstalledSkill,
+} from "@/hooks/useSkills.helpers";
 import { queryKeys } from "@/lib/query/keys";
 
 /**
@@ -77,34 +80,13 @@ export function useInstallSkill() {
       skill: DiscoverableSkill;
       currentApp: AppId;
     }) => skillsApi.installUnified(skill, currentApp),
-    onSuccess: (installedSkill, _vars, _ctx) => {
-      const { skill } = _vars;
-      // 直接更新 installed 缓存
+    onSuccess: (installedSkill) => {
+      // Upsert by id: a reinstall/repair or a double click must not add a
+      // second entry with the same id (FE-ARCH-44). Discoverable skills carry
+      // no `installed` flag; install state is derived from this list.
       queryClient.setQueryData<InstalledSkill[]>(
         queryKeys.skills.installed,
-        (oldData) => {
-          if (!oldData) return [installedSkill];
-          return [...oldData, installedSkill];
-        },
-      );
-
-      // 更新 discoverable 缓存中对应技能的 installed 状态
-      const installName =
-        skill.directory.split(/[/\\]/).pop()?.toLowerCase() ||
-        skill.directory.toLowerCase();
-      const skillKey = `${installName}:${skill.repoOwner.toLowerCase()}:${skill.repoName.toLowerCase()}`;
-
-      queryClient.setQueryData<DiscoverableSkill[]>(
-        queryKeys.skills.discoverable,
-        (oldData) => {
-          if (!oldData) return oldData;
-          return oldData.map((s) => {
-            if (s.key === skillKey) {
-              return { ...s, installed: true };
-            }
-            return s;
-          });
-        },
+        (oldData) => upsertInstalledSkill(oldData, installedSkill),
       );
     },
   });
@@ -117,32 +99,11 @@ export function useInstallSkill() {
 export function useUninstallSkill() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, skillKey }: { id: string; skillKey: string }) =>
-      skillsApi
-        .uninstallUnified(id)
-        .then((result) => ({ ...result, skillKey })),
-    onSuccess: ({ skillKey }, _vars) => {
-      // 直接更新 installed 缓存，移除该 skill
+    mutationFn: ({ id }: { id: string }) => skillsApi.uninstallUnified(id),
+    onSuccess: (_result, { id }) => {
       queryClient.setQueryData<InstalledSkill[]>(
         queryKeys.skills.installed,
-        (oldData) => {
-          if (!oldData) return oldData;
-          return oldData.filter((s) => s.id !== _vars.id);
-        },
-      );
-
-      // 更新 discoverable 缓存中对应技能的 installed 状态
-      queryClient.setQueryData<DiscoverableSkill[]>(
-        queryKeys.skills.discoverable,
-        (oldData) => {
-          if (!oldData) return oldData;
-          return oldData.map((s) => {
-            if (s.key === skillKey) {
-              return { ...s, installed: false };
-            }
-            return s;
-          });
-        },
+        (oldData) => oldData?.filter((s) => s.id !== id),
       );
     },
   });

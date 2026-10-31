@@ -17,3 +17,19 @@ export function mergeImportedSkills(
   const preserved = existing.filter((s) => !importedIds.has(s.id));
   return [...preserved, ...imported];
 }
+
+/**
+ * Insert or replace one installed skill by id (FE-ARCH-44). An existing
+ * entry keeps its position so the list does not jump on reinstall.
+ */
+export function upsertInstalledSkill(
+  existing: InstalledSkill[] | undefined,
+  skill: InstalledSkill,
+): InstalledSkill[] {
+  if (!existing) return [skill];
+  const index = existing.findIndex((s) => s.id === skill.id);
+  if (index === -1) return [...existing, skill];
+  const next = [...existing];
+  next[index] = skill;
+  return next;
+}
