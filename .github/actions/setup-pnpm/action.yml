@@ -1,0 +1,55 @@
+name: Setup Node.js and pnpm
+description: >-
+  Node from .node-version, pnpm from package.json "packageManager", a cached
+  pnpm store and (optionally) `pnpm install --frozen-lockfile`. Shared by
+  ci.yml and release.yml so every leg, including Windows ARM64 (where
+  pnpm/action-setup does not work and corepack is used instead), installs the
+  same toolchain the same way (CI-25).
+
+inputs:
+  install:
+    description: Run `pnpm install --frozen-lockfile` after setup
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      with:
+        node-version-file: .node-version
+
+    - name: Setup pnpm
+      if: runner.os != 'Windows' || runner.arch != 'ARM64'
+      uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      with:
+        run_install: false
+
+    - name: Setup pnpm via corepack (Windows ARM64)
+      if: runner.os == 'Windows' && runner.arch == 'ARM64'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $pm = node -p "require('./package.json').packageManager"
+        corepack enable
+        corepack prepare $pm --activate
+        node --version
+        pnpm --version
+
+    - name: Get pnpm store directory
+      id: pnpm-store
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache pnpm store
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      with:
+        path: ${{ steps.pnpm-store.outputs.path }}
+        key: ${{ runner.os }}-${{ runner.arch }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+        restore-keys: ${{ runner.os }}-${{ runner.arch }}-pnpm-store-
+
+    - name: Install dependencies
+      if: inputs.install == 'true'
+      shell: bash
+      run: pnpm install --frozen-lockfile
