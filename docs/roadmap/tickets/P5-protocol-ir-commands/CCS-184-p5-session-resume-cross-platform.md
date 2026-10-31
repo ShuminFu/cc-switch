@@ -106,4 +106,14 @@ stays Partial until the manual resume runs on real Windows and Linux desktops.
 - Blocked: Manual resume on a real Windows desktop (cmd /K, PowerShell -NoExit, Windows Terminal, real npm claude.cmd shim). Needs a Windows machine; Wine cannot stand in for start/wt/PowerShell.
 - Blocked: Manual resume on real gnome-terminal/konsole. Needs an interactive Linux desktop; CCS-248 covers most of it.
 - Follow-up [CCS-248](../P5-protocol-ir-commands/CCS-248-p5-e2e-session-resume-linux.md): Automate the Linux session-resume check under xvfb with a fake claude.
+
+### Automated Linux check (CCS-248)
+
+`e2e/specs/session-resume.e2e.mjs` now runs the Linux resume check in the tauri-driver suite (`xvfb-run -a pnpm --dir e2e test`, CI and release e2e legs) against the real binary, with xterm as the preferred terminal and a fake `claude` first on PATH. It clicks Resume on a seeded Claude session whose cwd is `ccs248 resume (dir) XXXXXX` and asserts the following:
+- the fake ran in that dir with exactly `--resume <id>`;
+- "Terminal launched" is shown and there is no error toast;
+- the `cc_switch_resume_*.sh` script is deleted;
+- xterm stays open on the user shell in the session dir.
+
+Locally: 3 passing, and the full suite has 4/4 spec files passing. Dropping the `exec` line from the resume script makes it fail. Real gnome-terminal/konsole on a desktop session and the Windows manual check remain open.
 - Follow-up [CCS-249](../P5-protocol-ir-commands/CCS-249-p5-terminal-resume-bat-wine.md): Run the generated Windows resume .bat under Wine cmd.
