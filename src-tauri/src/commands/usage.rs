@@ -291,7 +291,7 @@ pub async fn set_model_pricing_metadata(
     currency: String,
     input_modalities: Option<Vec<String>>,
 ) -> Result<(), AppError> {
-    run_blocking_with_state(handle, move |state| {
+    timed_blocking_with_state("set_model_pricing_metadata", handle, move |state| {
         state
             .db
             .set_model_pricing_metadata(&model_id, &currency, input_modalities.as_deref())?;
@@ -308,7 +308,10 @@ pub async fn set_model_pricing_metadata(
 pub async fn get_pricing_fx_rates(
     handle: AppHandle,
 ) -> Result<std::collections::BTreeMap<String, String>, AppError> {
-    run_blocking_with_state(handle, |state| state.db.get_pricing_fx_rates()).await
+    timed_blocking_with_state("get_pricing_fx_rates", handle, |state| {
+        state.db.get_pricing_fx_rates()
+    })
+    .await
 }
 
 /// Store FX rates (units per 1 USD) used to convert non-USD pricing rows.
@@ -317,7 +320,10 @@ pub async fn set_pricing_fx_rates(
     handle: AppHandle,
     rates: std::collections::BTreeMap<String, String>,
 ) -> Result<(), AppError> {
-    run_blocking_with_state(handle, move |state| state.db.set_pricing_fx_rates(&rates)).await
+    timed_blocking_with_state("set_pricing_fx_rates", handle, move |state| {
+        state.db.set_pricing_fx_rates(&rates)
+    })
+    .await
 }
 
 /// 手动触发会话日志同步
