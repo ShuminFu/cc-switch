@@ -458,20 +458,25 @@ fn keychain_allowed() -> bool {
         .unwrap_or(true)
 }
 
+/// 探测 `service` 对应的钥匙串，可用时返回其实例
+fn probe_keychain(service: &str) -> Option<Arc<dyn SecretStore>> {
+    match KeyringSecretStore::probe(service) {
+        Ok(()) => {
+            log::info!("凭据存储：使用系统钥匙串");
+            Some(Arc::new(KeyringSecretStore::new(service)))
+        }
+        Err(e) => {
+            log::warn!("系统钥匙串不可用，回退到 {SECRET_FILE_NAME}（0600）: {e}");
+            None
+        }
+    }
+}
+
 /// 进程级的钥匙串实例（探测只做一次）；不可用时为 None
 fn keychain() -> Option<Arc<dyn SecretStore>> {
     static KEYCHAIN: OnceLock<Option<Arc<dyn SecretStore>>> = OnceLock::new();
     KEYCHAIN
-        .get_or_init(|| match KeyringSecretStore::probe(KEYCHAIN_SERVICE) {
-            Ok(()) => {
-                log::info!("凭据存储：使用系统钥匙串");
-                Some(Arc::new(KeyringSecretStore::new(KEYCHAIN_SERVICE)))
-            }
-            Err(e) => {
-                log::warn!("系统钥匙串不可用，回退到 {SECRET_FILE_NAME}（0600）: {e}");
-                None
-            }
-        })
+        .get_or_init(|| probe_keychain(KEYCHAIN_SERVICE))
         .clone()
 }
 
@@ -486,18 +491,26 @@ pub fn policy_for_dir(dir: &Path) -> SecretPolicy {
     if let Some(policy) = SCOPED_POLICY.with(|scoped| scoped.borrow().clone()) {
         return policy;
     }
-    let mode = mode_from_env();
+    select_policy(dir, mode_from_env(), || {
+        if keychain_allowed() {
+            keychain()
+        } else {
+            None
+        }
+    })
+}
+
+/// 按模式选择后端：`keychain` 返回 None（不可用或不允许）时回退到 `dir` 下的 secrets.json
+fn select_policy(
+    dir: &Path,
+    mode: Mode,
+    keychain: impl FnOnce() -> Option<Arc<dyn SecretStore>>,
+) -> SecretPolicy {
     let file_store =
         || -> Arc<dyn SecretStore> { Arc::new(FileSecretStore::new(dir.join(SECRET_FILE_NAME))) };
     let store = match mode {
         Mode::File => file_store(),
-        Mode::Auto | Mode::Plaintext => {
-            if keychain_allowed() {
-                keychain().unwrap_or_else(file_store)
-            } else {
-                file_store()
-            }
-        }
+        Mode::Auto | Mode::Plaintext => keychain().unwrap_or_else(file_store),
     };
     SecretPolicy::new(store, mode == Mode::Plaintext)
 }
@@ -653,5 +666,167 @@ mod tests {
             assert_eq!(policy_for_dir(temp.path()).store().backend(), "memory");
         }
         assert_eq!(policy_for_dir(temp.path()).store().backend(), "file");
+    }
+
+    #[test]
+    fn select_policy_falls_back_to_file_when_keychain_is_unavailable() {
+        let temp = tempfile::tempdir().unwrap();
+        let auto = select_policy(temp.path(), Mode::Auto, || None);
+        assert_eq!(auto.store().backend(), "file");
+        assert!(!auto.is_inline());
+        let plaintext = select_policy(temp.path(), Mode::Plaintext, || None);
+        assert_eq!(plaintext.store().backend(), "file");
+        assert!(plaintext.is_inline());
+
+        let memory: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::new());
+        let chosen = select_policy(temp.path(), Mode::Auto, || Some(memory.clone()));
+        assert_eq!(chosen.store().backend(), "memory");
+        let file_only = select_policy(temp.path(), Mode::File, || {
+            panic!("file mode must not probe the keychain")
+        });
+        assert_eq!(file_only.store().backend(), "file");
+    }
+}
+
+/// 真实钥匙串检查（Linux Secret Service），默认忽略，由
+/// `scripts/check-linux-secret-service.sh` 运行：
+/// - 在 `dbus-run-session` + 已解锁的 gnome-keyring 下运行除 `probe_fails_without_dbus` 外的测试；
+/// - 在没有 D-Bus 会话总线的环境中单独运行 `probe_fails_without_dbus`。
+///
+/// 服务名取 `CC_SWITCH_KEYRING_TEST_SERVICE`（默认 `cc-switch-test-<pid>`），不会触碰 `cc-switch` 条目。
+#[cfg(all(test, target_os = "linux"))]
+mod keyring_live {
+    use super::*;
+
+    fn service() -> String {
+        std::env::var("CC_SWITCH_KEYRING_TEST_SERVICE")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| format!("cc-switch-test-{}", std::process::id()))
+    }
+
+    /// 绕过进程内缓存，直接查询钥匙串
+    fn fresh_get(key: &str) -> Option<String> {
+        KeyringSecretStore::new(service()).get(key).unwrap()
+    }
+
+    #[test]
+    #[ignore = "needs a D-Bus session with an unlocked Secret Service (scripts/check-linux-secret-service.sh)"]
+    fn probe_and_round_trip() {
+        let service = service();
+        KeyringSecretStore::probe(&service).expect("Secret Service should be reachable");
+
+        let store = KeyringSecretStore::new(service.as_str());
+        let key = "test.round_trip";
+        assert_eq!(store.backend(), "keychain");
+        assert_eq!(store.get(key).unwrap(), None);
+        store.set(key, "one").unwrap();
+        assert_eq!(store.get(key).unwrap().as_deref(), Some("one"));
+        assert_eq!(fresh_get(key).as_deref(), Some("one"));
+        store.set(key, "two").unwrap();
+        assert_eq!(fresh_get(key).as_deref(), Some("two"));
+        store.delete(key).unwrap();
+        store.delete(key).unwrap();
+        assert_eq!(store.get(key).unwrap(), None);
+        assert_eq!(fresh_get(key), None);
+    }
+
+    #[test]
+    #[ignore = "needs a D-Bus session with an unlocked Secret Service (scripts/check-linux-secret-service.sh)"]
+    fn policy_externalizes_hydrates_and_forgets() {
+        let store: Arc<dyn SecretStore> = Arc::new(KeyringSecretStore::new(service()));
+        let policy = SecretPolicy::new(store, false);
+        let copilot = copilot_token_key("acct");
+
+        for (key, secret) in [(WEBDAV_PASSWORD_KEY, "dav-pw"), (copilot.as_str(), "gho_x")] {
+            assert_eq!(policy.externalize(key, secret), "", "{key} moves out");
+            assert_eq!(fresh_get(key).as_deref(), Some(secret));
+
+            let mut blank = String::new();
+            assert!(!policy.hydrate(key, &mut blank));
+            assert_eq!(blank, secret);
+
+            let mut inline = secret.to_string();
+            assert!(
+                policy.hydrate(key, &mut inline),
+                "an inline {key} must be migrated"
+            );
+        }
+
+        policy.forget(&copilot);
+        assert_eq!(fresh_get(&copilot), None);
+
+        assert_eq!(policy.externalize(WEBDAV_PASSWORD_KEY, ""), "");
+        assert_eq!(fresh_get(WEBDAV_PASSWORD_KEY), None);
+    }
+
+    #[test]
+    #[ignore = "needs a D-Bus session with an unlocked Secret Service (scripts/check-linux-secret-service.sh)"]
+    fn plaintext_mode_writes_back_and_releases() {
+        let key = copilot_token_key("downgrade");
+        KeyringSecretStore::new(service())
+            .set(&key, "gho_downgrade")
+            .unwrap();
+
+        let store: Arc<dyn SecretStore> = Arc::new(KeyringSecretStore::new(service()));
+        let policy = SecretPolicy::new(store, true);
+        let mut value = String::new();
+        assert!(
+            policy.hydrate(&key, &mut value),
+            "plaintext mode rewrites the file"
+        );
+        assert_eq!(value, "gho_downgrade");
+        assert_eq!(policy.externalize(&key, &value), "gho_downgrade");
+        assert_eq!(fresh_get(&key).as_deref(), Some("gho_downgrade"));
+
+        policy.release([key.as_str()]);
+        assert_eq!(fresh_get(&key), None);
+    }
+
+    #[test]
+    #[ignore = "needs a D-Bus session with an unlocked Secret Service (scripts/check-linux-secret-service.sh)"]
+    fn cache_masks_an_out_of_band_delete() {
+        let key = "test.out_of_band";
+        let cached = KeyringSecretStore::new(service());
+        cached.set(key, "v").unwrap();
+
+        // 另一个实例（如 secret-tool / Seahorse）删除条目：缓存实例仍返回旧值，
+        // 新实例看到条目已不存在；缓存实例的 delete 仍会成功（NoEntry 视为成功）
+        KeyringSecretStore::new(service()).delete(key).unwrap();
+        assert_eq!(cached.get(key).unwrap().as_deref(), Some("v"));
+        assert_eq!(fresh_get(key), None);
+        cached.delete(key).unwrap();
+        assert_eq!(cached.get(key).unwrap(), None);
+    }
+
+    #[test]
+    #[ignore = "must run without a D-Bus session bus (scripts/check-linux-secret-service.sh)"]
+    fn probe_fails_without_dbus() {
+        assert!(
+            std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none(),
+            "run with DBUS_SESSION_BUS_ADDRESS unset"
+        );
+        let service = service();
+        assert!(KeyringSecretStore::probe(&service).is_err());
+
+        let temp = tempfile::tempdir().unwrap();
+        let policy = select_policy(temp.path(), Mode::Auto, || probe_keychain(&service));
+        assert_eq!(policy.store().backend(), "file");
+        assert!(!policy.is_inline());
+        assert_eq!(policy.externalize(WEBDAV_PASSWORD_KEY, "dav-pw"), "");
+
+        let path = temp.path().join(SECRET_FILE_NAME);
+        assert_eq!(
+            FileSecretStore::new(&path)
+                .get(WEBDAV_PASSWORD_KEY)
+                .unwrap()
+                .as_deref(),
+            Some("dav-pw")
+        );
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 }
