@@ -15,6 +15,7 @@ import {
   useState,
   type CSSProperties,
   type ReactNode,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -125,7 +126,7 @@ export function ProviderList({
   const stableOnOpenTerminal = useStableCallback(onOpenTerminal);
   const stableOnSetAsDefault = useStableCallback(onSetAsDefault);
   const { checkProvider, isChecking } = useStreamCheck(appId);
-  const { sortedProviders, sensors, handleDragEnd } = useDragSort(
+  const { sortedProviders, sensors, handleDragEnd, reorder } = useDragSort(
     providers,
     appId,
   );
@@ -593,6 +594,24 @@ export function ProviderList({
     );
   };
 
+  // PRODUCT-28: Alt+Up / Alt+Down moves the focused card among the visible
+  // ones, the keyboard alternative to drag-and-drop.
+  const handleReorderKey = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown"))
+      return;
+    const card = (event.target as HTMLElement).closest<HTMLElement>(
+      "[data-provider-id]",
+    );
+    const id = card?.dataset.providerId;
+    if (!id) return;
+    const index = filteredProviders.findIndex((provider) => provider.id === id);
+    const target =
+      filteredProviders[index + (event.key === "ArrowUp" ? -1 : 1)];
+    if (index === -1 || !target) return;
+    event.preventDefault();
+    void reorder(id, target.id);
+  };
+
   const renderProviderList = () => (
     <DndContext
       sensors={sensors}
@@ -606,6 +625,7 @@ export function ProviderList({
         {shouldVirtualize ? (
           <div
             ref={listRef}
+            onKeyDown={handleReorderKey}
             data-testid="provider-list-virtual"
             style={{
               height: virtualizer.getTotalSize(),
@@ -631,7 +651,7 @@ export function ProviderList({
             })}
           </div>
         ) : (
-          <div ref={listRef} className="space-y-3">
+          <div ref={listRef} className="space-y-3" onKeyDown={handleReorderKey}>
             {filteredProviders.map(renderCard)}
           </div>
         )}
@@ -953,7 +973,7 @@ const SortableProviderCard = memo(function SortableProviderCard({
   );
 
   return (
-    <div ref={setNodeRef} style={style}>
+    <div ref={setNodeRef} style={style} data-provider-id={provider.id}>
       <ProviderCard
         provider={provider}
         isCurrent={isCurrent}

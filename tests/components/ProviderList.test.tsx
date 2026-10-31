@@ -554,4 +554,38 @@ describe("ProviderList Component", () => {
     expect(screen.queryByTestId("provider-card-o1")).not.toBeInTheDocument();
     expect(screen.queryAllByTestId(/^provider-card-/)).toHaveLength(1);
   });
+
+  it("moves the focused card with Alt+Up / Alt+Down as a keyboard alternative to dragging (PRODUCT-28)", () => {
+    const a = createProvider({ id: "a", name: "A", sortIndex: 0 });
+    const b = createProvider({ id: "b", name: "B", sortIndex: 1 });
+    const reorder = vi.fn(async () => {});
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [a, b],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+      reorder,
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={{ a, b }}
+        currentProviderId="a"
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+      />,
+    );
+
+    const editB = screen.getByTestId("edit-b");
+    fireEvent.keyDown(editB, { key: "ArrowUp", altKey: true });
+    expect(reorder).toHaveBeenCalledWith("b", "a");
+
+    // Without Alt, or past the end of the list, nothing moves.
+    fireEvent.keyDown(editB, { key: "ArrowUp" });
+    fireEvent.keyDown(editB, { key: "ArrowDown", altKey: true });
+    expect(reorder).toHaveBeenCalledTimes(1);
+  });
 });
