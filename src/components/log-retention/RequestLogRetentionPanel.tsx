@@ -29,7 +29,18 @@ export const logRetentionApi = {
   set: (days: number) =>
     invoke<RequestLogRetention>("set_request_log_retention", { days }),
   pruneNow: () => invoke<number>("prune_request_logs_now"),
+  getStreamCheck: () =>
+    invoke<StreamCheckRetention>("get_stream_check_retention"),
+  setStreamCheck: (days: number) =>
+    invoke<StreamCheckRetention>("set_stream_check_retention", { days }),
 };
+
+/** Mirrors `StreamCheckRetention` in `features/log_retention.rs`; 0 = forever. */
+export interface StreamCheckRetention {
+  retentionDays: number;
+}
+
+const STREAM_CHECK_PRESETS = [1, 3, 7, 14, 30, 90, 0];
 
 const PRESETS = [7, 14, 30, 90, 180, 365];
 
@@ -50,6 +61,22 @@ export function RequestLogRetentionPanel() {
     queryKey: queryKeys.logRetention.status,
     queryFn: logRetentionApi.get,
   });
+
+  const { data: streamCheck } = useQuery({
+    queryKey: queryKeys.logRetention.streamCheck,
+    queryFn: logRetentionApi.getStreamCheck,
+  });
+  const saveStreamCheck = useMutation({
+    mutationFn: logRetentionApi.setStreamCheck,
+    onSuccess: (next) =>
+      queryClient.setQueryData(queryKeys.logRetention.streamCheck, next),
+    onError: (error) =>
+      toast.error(extractErrorMessage(error) || String(error)),
+  });
+  const streamCheckDays = streamCheck?.retentionDays ?? 7;
+  const streamCheckOptions = STREAM_CHECK_PRESETS.includes(streamCheckDays)
+    ? STREAM_CHECK_PRESETS
+    : [...STREAM_CHECK_PRESETS, streamCheckDays];
 
   const save = useMutation({
     mutationFn: logRetentionApi.set,
@@ -144,6 +171,47 @@ export function RequestLogRetentionPanel() {
             })}
           </span>
         )}
+      </div>
+      <div className="space-y-1.5 border-t border-border/60 pt-3">
+        <h4 className="text-sm font-medium">
+          {t("logRetention.streamCheckTitle", {
+            defaultValue: "Connectivity check log retention",
+          })}
+        </h4>
+        <p className="text-xs text-muted-foreground">
+          {t("logRetention.streamCheckDescription", {
+            defaultValue:
+              "Results of provider connectivity checks are deleted after this many days.",
+          })}
+        </p>
+        <Select
+          value={String(streamCheckDays)}
+          onValueChange={(v) => saveStreamCheck.mutate(Number(v))}
+          disabled={!streamCheck || saveStreamCheck.isPending}
+        >
+          <SelectTrigger
+            className="w-40"
+            aria-label={t("logRetention.streamCheckTitle", {
+              defaultValue: "Connectivity check log retention",
+            })}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {streamCheckOptions.map((n) => (
+              <SelectItem key={n} value={String(n)}>
+                {n === 0
+                  ? t("logRetention.keepForever", {
+                      defaultValue: "Keep forever",
+                    })
+                  : t("logRetention.days", {
+                      defaultValue: "{{count}} days",
+                      count: n,
+                    })}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       <ConfirmDialog
         isOpen={confirming}
