@@ -200,9 +200,11 @@ mod tests {
     /// bridge, then the flavor's compat pass.
     #[test]
     fn golden_bridge_requests_per_flavor() {
+        // `*.source.json`, not `*.input.json`: these cases are not part of the
+        // generic bridge corpus checked by `corpus_is_fully_wired`.
         let dir = fixtures_root().join("upstream_compat").join("request");
         let input: Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.join("anthropic.input.json")).expect("input fixture"),
+            &std::fs::read_to_string(dir.join("anthropic.source.json")).expect("input fixture"),
         )
         .unwrap();
         for (name, flavor) in [
