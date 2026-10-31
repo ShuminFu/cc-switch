@@ -293,10 +293,11 @@ jobs:
       # E2E smoke (CCS-201): drive the debug binary through tauri-driver +
       # WebdriverIO under xvfb: first run, add a preset, switch providers and
       # check ~/.claude/settings.json, proxy takeover on and restore. The app
-      # runs with a temp HOME. release.yml runs the same spec on the AppImage.
+      # runs with a temp HOME. release.yml runs the same specs on the AppImage.
+      # xterm is the terminal the session-resume spec (CCS-248) launches.
       - name: Install E2E system deps
         run: |
-          sudo apt-get install -y --no-install-recommends webkit2gtk-driver xvfb
+          sudo apt-get install -y --no-install-recommends webkit2gtk-driver xvfb xterm
           cargo install tauri-driver --version 2.1.0 --locked
 
       - name: Install E2E dependencies

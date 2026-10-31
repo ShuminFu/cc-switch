@@ -348,7 +348,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          sudo apt-get install -y --no-install-recommends webkit2gtk-driver xvfb
+          sudo apt-get install -y --no-install-recommends webkit2gtk-driver xvfb xterm
           cargo install tauri-driver --version 2.1.0 --locked
           pnpm install --dir e2e --frozen-lockfile --ignore-workspace
 

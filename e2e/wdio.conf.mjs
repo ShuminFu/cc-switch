@@ -45,6 +45,10 @@ if (!process.env.CC_SWITCH_E2E_HOME) {
   );
 }
 const e2eHome = process.env.CC_SWITCH_E2E_HOME;
+// First on the app's PATH, so a spec can put stub CLIs (e.g. a fake `claude`)
+// in front of anything installed on the runner. Empty unless a spec fills it.
+process.env.CC_SWITCH_E2E_BIN ??= path.join(e2eHome, "bin");
+const e2eBin = process.env.CC_SWITCH_E2E_BIN;
 const artifactsDir = path.join(here, "artifacts");
 
 // Environment for tauri-driver -> WebKitWebDriver -> the app. Provider env vars
@@ -57,6 +61,7 @@ function appEnv() {
   }
   return {
     ...env,
+    PATH: [e2eBin, env.PATH].filter(Boolean).join(path.delimiter),
     HOME: e2eHome,
     CC_SWITCH_TEST_HOME: e2eHome,
     XDG_CONFIG_HOME: path.join(e2eHome, ".config"),
