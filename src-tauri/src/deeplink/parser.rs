@@ -117,10 +117,10 @@ pub(crate) fn parse_params(
 
     // Dispatch to appropriate parser based on resource type
     match resource.as_str() {
-        "provider" => parse_provider_deeplink(&params, version, resource),
-        "prompt" => parse_prompt_deeplink(&params, version, resource),
-        "mcp" => parse_mcp_deeplink(&params, version, resource),
-        "skill" => parse_skill_deeplink(&params, version, resource),
+        "provider" => parse_provider_deeplink(params, version, resource),
+        "prompt" => parse_prompt_deeplink(params, version, resource),
+        "mcp" => parse_mcp_deeplink(params, version, resource),
+        "skill" => parse_skill_deeplink(params, version, resource),
         _ => Err(AppError::InvalidInput(format!(
             "Unsupported resource type: {resource}"
         ))),
