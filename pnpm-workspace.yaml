@@ -1,7 +1,7 @@
 packages: []
 
+# Tailwind is v3 (package.json); the v4 @tailwindcss/oxide entry was residue (CI-16).
 onlyBuiltDependencies:
-  - '@tailwindcss/oxide'
   - esbuild
 
 ignoredBuiltDependencies:

@@ -19,7 +19,10 @@ Fixes #
 
 ## Checklist / 检查清单
 
-- [ ] `pnpm typecheck` passes / 通过 TypeScript 类型检查
-- [ ] `pnpm format:check` passes / 通过代码格式检查
-- [ ] `cargo clippy` passes (if Rust code changed) / 通过 Clippy 检查（如修改了 Rust 代码）
-- [ ] Updated i18n files if user-facing text changed / 如修改了用户可见文本，已更新国际化文件
+- [ ] PR title follows Conventional Commits (`feat(scope): ...`, `fix(scope): ...`) / PR 标题符合 Conventional Commits 规范
+- [ ] `pnpm check` passes (typecheck, lint, format, i18n, repo checks, unit tests) / 通过 `pnpm check`
+- [ ] `pnpm check:rust` passes if Rust code changed (fmt, clippy `-D warnings`, `cargo test`) / 如修改了 Rust 代码，通过 `pnpm check:rust`
+- [ ] Tests added or updated for the change / 已为改动添加或更新测试
+- [ ] User-facing text: all four locale files updated (`en`, `zh`, `zh-TW`, `ja`) / 用户可见文本已同步更新四个语言文件
+- [ ] User-visible change noted under `## [Unreleased]` in `CHANGELOG.md` / 用户可见的改动已记录到 `CHANGELOG.md` 的 `## [Unreleased]`
+- [ ] Docs updated if behaviour changed (user manual, README) / 行为变化时已更新文档

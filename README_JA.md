@@ -203,7 +203,7 @@ TeamoRouter は、集中請求、チーム管理、BYOK、スマートルーテ�
 - **手動編集は不要** -- AWS Bedrock、NVIDIA NIM、コミュニティリレーなど 50 以上のプロバイダプリセットを内蔵。選んで切り替えるだけ
 - **統一 MCP・Skills 管理** -- 1 つのパネルで Claude、Codex、Gemini、Grok Build、OpenCode、Hermes の MCP サーバーと Skills を双方向同期で管理
 - **システムトレイでクイック切り替え** -- トレイメニューから即座にプロバイダを切り替え。アプリを開く必要なし
-- **クラウド同期** -- Dropbox、OneDrive、iCloud、または WebDAV サーバー経由でデバイス間のプロバイダデータを同期
+- **クラウド同期** -- Dropbox、OneDrive、iCloud、WebDAV サーバー、S3 互換ストレージ（AWS S3、Cloudflare R2、Aliyun OSS など）経由で（エンドツーエンド暗号化も可）デバイス間のプロバイダデータを同期
 - **クロスプラットフォーム** -- Tauri 2 で構築された Windows、macOS、Linux 対応のネイティブデスクトップアプリ
 - **便利ツール内蔵** -- Claude Code の初回起動確認のスキップ、共通設定スニペットによる Claude Code のコミット `Co-Authored-By` 表記の無効化、プロキシモードでの thinking 署名エラーの自動修正（Thinking 署名整流）、Claude Code VS Code 拡張へのプロバイダ同期など、さまざまなユーティリティを搭載
 
@@ -245,7 +245,7 @@ TeamoRouter は、集中請求、チーム管理、BYOK、スマートルーテ�
 
 ### システム & プラットフォーム
 
-- **クラウド同期** -- カスタム設定ディレクトリ（Dropbox、OneDrive、iCloud、NAS）および WebDAV サーバー同期
+- **クラウド同期** -- カスタム設定ディレクトリ（Dropbox、OneDrive、iCloud、NAS）、WebDAV サーバー同期、S3 互換オブジェクトストレージ同期（エンドツーエンド暗号化も可）
 - **Deep Link** (`ccswitch://`) -- URL 経由でプロバイダ、MCP サーバー、Prompts、Skills をワンクリックインポート
 - ダーク / ライト / システムテーマ、自動起動、自動アップデーター、アトミック書き込み、自動バックアップ、多言語対応（簡体中文/繁體中文/英/日）
 
@@ -325,6 +325,11 @@ CC_SWITCH_GDK_BACKEND=wayland ./CC-Switch-*.AppImage
 - **[ディープリンク仕様](docs/deeplink-spec.md)**（英語）— リンク作成者向けの `ccswitch://` インポートプロトコル
 - **[リリースノート](docs/release-notes/README.md)** — バージョンごとの英語・中国語・日本語のリリースノート
 - **[スポンサーポリシー（提案）](docs/sponsor-policy.md)**（英語）— スポンサープリセットの掲載・審査・削除のルール
+- **[ガイド](docs/guides/README.md)** — 手順付きのハウツー（Codex から Claude / Kimi / DeepSeek へのルーティング、公式ログインの保持、セッション履歴の統合）
+- **[トラブルシューティング](docs/user-manual/ja/5-faq/5.6-troubleshooting.md)** — OS ごとの対処法とログ・クラッシュログの場所
+- **[セキュリティモデル](docs/security/model.md)**（英語）— データの保存場所、ローカルプロキシが公開するもの、アップデートの署名方法
+- **[ディープリンク生成ツール](https://farion1231.github.io/cc-switch/deplink.html)** — ブラウザで `ccswitch://` インポートリンクを作成
+- **[開発者向けドキュメント](docs/dev/architecture.md)**（英語）— アーキテクチャ、モジュールマップ、テスト、[リリース手順](RELEASING.md)
 
 ## クイックスタート
 
@@ -350,13 +355,18 @@ CC_SWITCH_GDK_BACKEND=wayland ./CC-Switch-*.AppImage
 
 ### システム要件
 
-- **Windows**: Windows 10 以上
-- **macOS**: macOS 12 (Monterey) 以上
-- **Linux**: Ubuntu 22.04+ / Debian 11+ / Fedora 34+ など主要ディストリビューション
+- **Windows**: Windows 10 以上、x64 または ARM64
+- **macOS**: macOS 12 (Monterey) 以上、Apple Silicon または Intel（Universal ビルド）
+- **Linux**: x86_64 または ARM64、glibc 2.35 以上と WebKitGTK 4.1 が必要（例: Ubuntu 22.04+、Debian 12+、Fedora 36+）。Linux パッケージは Ubuntu 22.04 でビルドされているため、Debian 11 などの古いディストリビューションでは動作しません
 
 ### Windows ユーザー
 
-[Releases](../../releases) ページから最新版の `CC-Switch-v{version}-Windows.msi` インストーラー、またはポータブル版 `CC-Switch-v{version}-Windows-Portable.zip` をダウンロード。
+[Releases ページ](https://github.com/farion1231/cc-switch/releases/latest) からダウンロード：
+
+- `CC-Switch-v{version}-Windows.msi`（インストーラー）または `CC-Switch-v{version}-Windows-Portable.zip`（ポータブル版）、x64 向け
+- `CC-Switch-v{version}-Windows-arm64.msi` または `CC-Switch-v{version}-Windows-arm64-Portable.zip`、ネイティブ ARM64 版
+
+> **注意**: Windows 版にはまだ Authenticode 署名がない場合があり、SmartScreen が「Windows によって PC が保護されました」と表示することがあります。「詳細情報」→「実行」を選んでください。実行前に `SHA256SUMS` でダウンロードを検証できます。[ダウンロードの検証](SECURITY.md#verifying-a-download)（英語）を参照してください。
 
 ### macOS ユーザー
 
@@ -374,9 +384,9 @@ brew upgrade --cask cc-switch
 
 **方法 2: 手動ダウンロード**
 
-[Releases](../../releases) から `CC-Switch-v{version}-macOS.zip` をダウンロードして展開。
+[Releases ページ](https://github.com/farion1231/cc-switch/releases/latest) から `CC-Switch-v{version}-macOS.dmg`（推奨）または `CC-Switch-v{version}-macOS.zip` をダウンロード。Apple Silicon と Intel の両方に対応した Universal ビルドです。
 
-> **注意**: 開発者アカウント未登録のため、初回起動時に「開発元を確認できません」と表示される場合があります。一度閉じてから「システム設定」→「プライバシーとセキュリティ」→「このまま開く」をクリックしてください。以降は通常通り起動できます。
+> **注意**: macOS 版の CC Switch は Apple のコード署名と公証を受けているため、そのままインストールして開けます。
 
 ### Arch Linux ユーザー
 
@@ -388,193 +398,17 @@ paru -S cc-switch-bin
 
 ### Linux ユーザー
 
-[Releases](../../releases) から最新版の Linux ビルドをダウンロード：
+[Releases ページ](https://github.com/farion1231/cc-switch/releases/latest) からアーキテクチャ（`x86_64` または `arm64`）に合った最新の Linux ビルドをダウンロード：
 
-- `CC-Switch-v{version}-Linux.deb`（Debian/Ubuntu）
-- `CC-Switch-v{version}-Linux.rpm`（Fedora/RHEL/openSUSE）
-- `CC-Switch-v{version}-Linux.AppImage`（汎用）
+- `CC-Switch-v{version}-Linux-x86_64.deb` / `CC-Switch-v{version}-Linux-arm64.deb`（Debian/Ubuntu）
+- `CC-Switch-v{version}-Linux-x86_64.rpm` / `CC-Switch-v{version}-Linux-arm64.rpm`（Fedora/RHEL/openSUSE）
+- `CC-Switch-v{version}-Linux-x86_64.AppImage` / `CC-Switch-v{version}-Linux-arm64.AppImage`（汎用。アプリ内アップデートに対応する唯一の Linux 形式）
 
-> **Flatpak**：公式リリースには含まれていません。`.deb` から自分でビルドできます — 手順は [`flatpak/README.md`](flatpak/README.md) を参照してください。
+> **Flatpak**：公式リリースには含まれていません。`.deb` から自分でビルドできます — 手順と既知の制限は [`flatpak/README.md`](flatpak/README.md) を参照してください。
 
-<details>
-<summary><strong>アーキテクチャ概要</strong></summary>
+起動しない、動作がおかしいといった場合は[トラブルシューティング](docs/user-manual/ja/5-faq/5.6-troubleshooting.md)（OS ごとのログの場所、クラッシュログの取得方法）を参照してください。
 
-### 設計原則
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Frontend (React + TS)                    │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐    │
-│  │ Components  │  │    Hooks     │  │  TanStack Query  │    │
-│  │   (UI)      │──│ (Bus. Logic) │──│   (Cache/Sync)   │    │
-│  └─────────────┘  └──────────────┘  └──────────────────┘    │
-└────────────────────────┬────────────────────────────────────┘
-                         │ Tauri IPC
-┌────────────────────────▼────────────────────────────────────┐
-│                  Backend (Tauri + Rust)                     │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐    │
-│  │  Commands   │  │   Services   │  │  Models/Config   │    │
-│  │ (API Layer) │──│ (Bus. Layer) │──│     (Data)       │    │
-│  └─────────────┘  └──────────────┘  └──────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**コア設計パターン**
-
-- **SSOT** (Single Source of Truth): すべてのデータを `~/.cc-switch/cc-switch.db`（SQLite）に集約
-- **二層ストレージ**: 同期データは SQLite、デバイスデータは JSON
-- **双方向同期**: 切り替え時はライブファイルへ書き込み、編集時はアクティブプロバイダから逆同期
-- **アトミック書き込み**: 一時ファイル + rename パターンで設定破損を防止
-- **並行安全**: Mutex で保護された DB 接続でレースコンディションを防止
-- **レイヤードアーキテクチャ**: Commands → Services → DAO → Database を明確に分離
-
-**主要コンポーネント**
-
-- **ProviderService**: プロバイダの CRUD、切り替え、バックフィル、ソート
-- **McpService**: MCP サーバー管理、インポート/エクスポート、ライブファイル同期
-- **ProxyService**: ローカル Proxy モードのホットスイッチとフォーマット変換
-- **SessionManager**: 対応する全アプリの会話履歴閲覧
-- **ConfigService**: 設定のインポート/エクスポート、バックアップローテーション
-- **SpeedtestService**: API エンドポイントの遅延計測
-
-</details>
-
-<details>
-<summary><strong>開発ガイド</strong></summary>
-
-### 開発環境
-
-- Node.js `^20.19.0` または `>=22.12.0`（`.node-version` は 22.12.0 を指定）
-- pnpm 10（CI は 10.12.3 を使用）
-- Rust：`rust-toolchain.toml`（1.95）に従い rustup が自動でインストール
-- Tauri CLI 2.8+（開発依存として同梱）
-
-### 開発コマンド
-
-```bash
-# 依存関係をインストール
-pnpm install
-
-# ホットリロード付き開発モード
-pnpm dev
-
-# 型チェック
-pnpm typecheck
-
-# Lint（ESLint）
-pnpm lint
-
-# コード整形
-pnpm format
-
-# フォーマット検証
-pnpm format:check
-
-# フロントエンド単体テスト
-pnpm test:unit
-
-# ウォッチモード（開発に推奨）
-pnpm test:unit:watch
-
-# アプリをビルド
-pnpm build
-
-# デバッグビルド
-pnpm tauri build --debug
-```
-
-### Rust バックエンド開発
-
-```bash
-cd src-tauri
-
-# Rust コード整形
-cargo fmt
-
-# clippy チェック
-cargo clippy
-
-# バックエンドテスト
-cargo test
-
-# 特定テストのみ実行
-cargo test test_name
-
-# test-hooks フィーチャー付きでテスト
-cargo test --features test-hooks
-```
-
-### テストガイド
-
-**フロントエンドテスト**:
-
-- テストフレームワークに **vitest** を使用
-- **MSW (Mock Service Worker)** で Tauri API 呼び出しをモック
-- コンポーネントテストに **@testing-library/react** を採用
-
-**テスト実行**:
-
-```bash
-# 全テストを実行
-pnpm test:unit
-
-# ウォッチモード（自動再実行）
-pnpm test:unit:watch
-
-# カバレッジレポート付き
-pnpm test:unit --coverage
-```
-
-### 技術スタック
-
-**フロントエンド**: React 18 · TypeScript · Vite · TailwindCSS 3.4 · TanStack Query v5 · react-i18next · react-hook-form · zod · shadcn/ui · @dnd-kit
-
-**バックエンド**: Tauri 2.8 · Rust · serde · tokio · thiserror · tauri-plugin-updater/process/dialog/store/log
-
-**テスト**: vitest · MSW · @testing-library/react
-
-</details>
-
-<details>
-<summary><strong>プロジェクト構成</strong></summary>
-
-```
-├── src/                        # フロントエンド (React + TypeScript)
-│   ├── components/
-│   │   ├── providers/          # プロバイダ管理
-│   │   ├── mcp/                # MCP パネル
-│   │   ├── prompts/            # Prompts 管理
-│   │   ├── skills/             # Skills 管理
-│   │   ├── sessions/           # Session Manager
-│   │   ├── proxy/              # Proxy モードパネル
-│   │   ├── openclaw/           # OpenClaw 設定パネル
-│   │   ├── settings/           # 設定 (Terminal/Backup/About)
-│   │   ├── deeplink/           # Deep Link インポート
-│   │   ├── env/                # 環境変数管理
-│   │   ├── universal/          # クロスアプリ設定
-│   │   ├── usage/              # 使用量統計
-│   │   └── ui/                 # shadcn/ui コンポーネントライブラリ
-│   ├── hooks/                  # カスタムフック（ビジネスロジック）
-│   ├── lib/
-│   │   ├── api/                # Tauri API ラッパー（型安全）
-│   │   └── query/              # TanStack Query 設定
-│   ├── i18n/locales/           # 翻訳 (en/zh/zh-TW/ja)
-│   ├── config/                 # プリセット (providers/mcp)
-│   └── types/                  # TypeScript 型定義
-├── src-tauri/                  # バックエンド (Rust)
-│   └── src/
-│       ├── commands/           # Tauri コマンド層（ドメイン別）
-│       ├── services/           # ビジネスロジック層
-│       ├── database/           # SQLite DAO 層
-│       ├── proxy/              # Proxy モジュール
-│       ├── session_manager/    # セッション管理
-│       ├── deeplink/           # Deep Link 処理
-│       └── mcp/                # MCP 同期モジュール
-├── tests/                      # フロントエンドテスト
-└── assets/                     # スクリーンショット & パートナーリソース
-```
-
-</details>
+**開発者向け**: アーキテクチャ概要、モジュールマップ、すべての変更が守るべき不変条件は [docs/dev/architecture.md](docs/dev/architecture.md)（英語）に、開発環境・コマンド・CI が実行するチェックは [CONTRIBUTING.md](CONTRIBUTING.md) と [docs/dev/testing.md](docs/dev/testing.md)（英語）に、リリース手順は [RELEASING.md](RELEASING.md)（英語）にあります。
 
 ## 貢献
 

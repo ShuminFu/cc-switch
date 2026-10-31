@@ -20,10 +20,12 @@ There are many ways to contribute:
 
 ### Prerequisites
 
-- **Node.js** `^20.19.0` or `>=22.12.0` (required by Vite 7). `.node-version` pins `22.12.0`; CI runs Node 20.
+- **Node.js** `>=22.12.0` (`package.json` engines; Vite 7 also accepts `^20.19.0`). `.node-version` pins `22.12.0`, which is what CI uses.
 - **pnpm 10** — CI uses `10.12.3` (`pnpm-lock.yaml` is lockfile v9, which pnpm 8 cannot read). With corepack: `corepack prepare pnpm@10.12.3 --activate`.
 - **Rust** via [rustup](https://rustup.rs/). You do not need to pick a version: `rust-toolchain.toml` pins channel `1.95` (with `rustfmt` and `clippy`), and rustup installs it automatically on the first `cargo` command.
-- [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS (WebView2 on Windows, `webkit2gtk` etc. on Linux, Xcode Command Line Tools on macOS). The Tauri CLI comes from `devDependencies` (`@tauri-apps/cli` 2.8+), so no global install is needed.
+- [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS (WebView2 on Windows, `webkit2gtk` etc. on Linux, Xcode Command Line Tools on macOS). On Debian/Ubuntu, `scripts/install-linux-deps.sh` installs exactly what CI installs. The Tauri CLI comes from `devDependencies` (`@tauri-apps/cli` 2.8+), so no global install is needed.
+
+New here? [docs/dev/architecture.md](docs/dev/architecture.md) maps the codebase and lists the invariants every change must keep; [AGENTS.md](AGENTS.md) is the short rulebook (also used by the automated PR review).
 
 ### Quick Start
 
@@ -46,16 +48,22 @@ pnpm dev
 | `pnpm test:unit` | Run unit tests (Vitest, `tests/`) |
 | `pnpm test:unit:watch` | Run unit tests in watch mode |
 | `pnpm lint` | ESLint check |
-| `pnpm format` | Format code (Prettier, `src/**`) |
+| `pnpm format` | Format code (Prettier: `src/**`, `scripts/**`, `.github/**`) |
 | `pnpm format:check` | Check code formatting |
+| `pnpm i18n:check` | Check the four locale files are complete and consistent |
+| `pnpm check:repo` | Repository checks: labeler globs, release asset names in docs, README parity, image sizes |
+| `pnpm test:coverage` | Unit tests with a coverage report in `coverage/` |
+| `pnpm check` | Everything the CI frontend job runs, in one command |
+| `pnpm check:rust` | Everything the CI backend job runs (creates `dist/` if missing) |
+| `pnpm bundle:report` | Build the renderer and print JS/CSS sizes against the budget |
 
 For Rust backend:
 
 ```bash
 cd src-tauri
 cargo fmt                                # Format Rust code
-cargo clippy --all-targets -- -D warnings # Run linter (same flags as CI)
-cargo test                               # Run tests
+cargo clippy --all-targets --all-features -- -D warnings # Run linter (same flags as CI)
+cargo test --locked                      # Run tests
 ```
 
 `pnpm build` and `cargo` builds need a `dist/` directory at the repo root; run `pnpm build:renderer` (or `mkdir -p dist`) first if `cargo test` complains it is missing.
@@ -66,11 +74,11 @@ cargo test                               # Run tests
 - **Backend**: `cargo fmt` for formatting, `cargo clippy` for linting
 - **Tauri commands**: command functions are `snake_case` in Rust (e.g. `get_stream_check_config`) and are invoked with that same name from the frontend. Argument keys on the JS side are camelCase (Tauri converts them; some commands set `#[tauri::command(rename_all = "camelCase")]` explicitly).
 
-Run all checks before submitting:
+Run all checks before submitting (these are the same steps `.github/workflows/ci.yml` runs; see [docs/dev/testing.md](docs/dev/testing.md)):
 
 ```bash
-pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:unit
-cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+pnpm check        # typecheck, lint, format:check, i18n:check, check:repo, test:unit
+pnpm check:rust   # cargo fmt --check, clippy --all-targets --all-features -D warnings, cargo test --locked
 ```
 
 ## Pull Request Guidelines
@@ -82,12 +90,12 @@ cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings &
 
 ### PR Checklist
 
-- [ ] `pnpm typecheck` passes
-- [ ] `pnpm lint` passes
-- [ ] `pnpm format:check` passes
-- [ ] `pnpm test:unit` passes
-- [ ] `cargo clippy` passes (if Rust code changed)
+- [ ] PR title follows Conventional Commits (checked automatically)
+- [ ] `pnpm check` passes
+- [ ] `pnpm check:rust` passes (if Rust code changed)
+- [ ] Tests added or updated
 - [ ] Updated all four locale files if user-facing text changed
+- [ ] User-visible change noted under `## [Unreleased]` in `CHANGELOG.md`
 
 ### Commit Convention
 
@@ -128,6 +136,10 @@ CC Switch ships four UI languages. English is the source language and the fallba
 3. Keep `{{placeholders}}`, brand and product names (Claude Code, Codex, Gemini CLI, OpenCode, ...), and Markdown/HTML tags unchanged in every translation.
 4. Adding a new locale means adding a JSON file next to the others and registering it in `src/i18n/index.ts`; open an issue first.
 
+## Releases
+
+Maintainers cut releases with [RELEASING.md](RELEASING.md) (version bump, changelog, release notes, tag, package channels, rollback).
+
 ## Questions?
 
 - [Open a question](https://github.com/farion1231/cc-switch/issues/new?template=question.yml)
@@ -157,10 +169,12 @@ CC Switch ships four UI languages. English is the source language and the fallba
 
 ### 前提条件
 
-- **Node.js** `^20.19.0` 或 `>=22.12.0`（Vite 7 的要求）。`.node-version` 固定为 `22.12.0`，CI 使用 Node 20。
+- **Node.js** `>=22.12.0`（`package.json` engines；Vite 7 也支持 `^20.19.0`）。`.node-version` 固定为 `22.12.0`，CI 使用的就是这个版本。
 - **pnpm 10** — CI 使用 `10.12.3`（`pnpm-lock.yaml` 为 v9 格式，pnpm 8 无法读取）。使用 corepack：`corepack prepare pnpm@10.12.3 --activate`。
 - **Rust**：通过 [rustup](https://rustup.rs/) 安装即可，无需手动选择版本。`rust-toolchain.toml` 固定了 `1.95` 工具链（含 `rustfmt` 与 `clippy`），首次运行 `cargo` 时 rustup 会自动安装。
-- 对应操作系统的 [Tauri 2 开发环境](https://v2.tauri.app/start/prerequisites/)（Windows 需 WebView2，Linux 需 `webkit2gtk` 等，macOS 需 Xcode Command Line Tools）。Tauri CLI 已在 `devDependencies`（`@tauri-apps/cli` 2.8+）中，无需全局安装。
+- 对应操作系统的 [Tauri 2 开发环境](https://v2.tauri.app/start/prerequisites/)（Windows 需 WebView2，Linux 需 `webkit2gtk` 等，macOS 需 Xcode Command Line Tools）。Debian/Ubuntu 上可运行 `scripts/install-linux-deps.sh`，安装的依赖与 CI 完全一致。Tauri CLI 已在 `devDependencies`（`@tauri-apps/cli` 2.8+）中，无需全局安装。
+
+第一次参与？[docs/dev/architecture.md](docs/dev/architecture.md)（英文）介绍了代码结构以及每次改动都必须遵守的约束；[AGENTS.md](AGENTS.md)（英文）是简短的规则清单（自动 PR 审查也使用它）。
 
 ### 快速开始
 
@@ -183,16 +197,22 @@ pnpm dev
 | `pnpm test:unit` | 运行单元测试（Vitest，`tests/`） |
 | `pnpm test:unit:watch` | 以监听模式运行单元测试 |
 | `pnpm lint` | ESLint 检查 |
-| `pnpm format` | 格式化代码（Prettier，`src/**`） |
+| `pnpm format` | 格式化代码（Prettier：`src/**`、`scripts/**`、`.github/**`） |
 | `pnpm format:check` | 检查代码格式 |
+| `pnpm i18n:check` | 检查四个语言文件是否完整一致 |
+| `pnpm check:repo` | 仓库检查：labeler 规则、文档中的发布文件名、README 结构一致性、图片大小 |
+| `pnpm test:coverage` | 运行单元测试并在 `coverage/` 生成覆盖率报告 |
+| `pnpm check` | 一条命令运行 CI 前端任务的全部检查 |
+| `pnpm check:rust` | 一条命令运行 CI 后端任务的全部检查（缺少 `dist/` 时会自动创建） |
+| `pnpm bundle:report` | 构建前端并按预算输出 JS/CSS 体积 |
 
 Rust 后端命令：
 
 ```bash
 cd src-tauri
 cargo fmt                                # 格式化 Rust 代码
-cargo clippy --all-targets -- -D warnings # 运行 Clippy 检查（与 CI 参数一致）
-cargo test                               # 运行测试
+cargo clippy --all-targets --all-features -- -D warnings # 运行 Clippy 检查（与 CI 参数一致）
+cargo test --locked                      # 运行测试
 ```
 
 `pnpm build` 和 `cargo` 构建需要仓库根目录存在 `dist/` 目录；如果 `cargo test` 提示缺失，请先运行 `pnpm build:renderer`（或 `mkdir -p dist`）。
@@ -203,11 +223,11 @@ cargo test                               # 运行测试
 - **后端**：使用 `cargo fmt` 格式化、`cargo clippy` 检查
 - **Tauri 命令**：Rust 中的命令函数使用 `snake_case`（如 `get_stream_check_config`），前端以相同名称调用；JS 侧的参数键使用 camelCase（Tauri 会自动转换，部分命令显式声明了 `#[tauri::command(rename_all = "camelCase")]`）。
 
-提交前运行所有检查：
+提交前运行所有检查（与 `.github/workflows/ci.yml` 执行的步骤相同，详见 [docs/dev/testing.md](docs/dev/testing.md)，英文）：
 
 ```bash
-pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:unit
-cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+pnpm check        # typecheck、lint、format:check、i18n:check、check:repo、test:unit
+pnpm check:rust   # cargo fmt --check、clippy --all-targets --all-features -D warnings、cargo test --locked
 ```
 
 ## Pull Request 指南
@@ -219,12 +239,12 @@ cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings &
 
 ### PR 检查清单
 
-- [ ] `pnpm typecheck` 通过
-- [ ] `pnpm lint` 通过
-- [ ] `pnpm format:check` 通过
-- [ ] `pnpm test:unit` 通过
-- [ ] `cargo clippy` 通过（如修改了 Rust 代码）
+- [ ] PR 标题符合 Conventional Commits（会自动检查）
+- [ ] `pnpm check` 通过
+- [ ] `pnpm check:rust` 通过（如修改了 Rust 代码）
+- [ ] 已添加或更新测试
 - [ ] 如修改了用户可见文本，已同步更新四个语言文件
+- [ ] 用户可见的改动已记录到 `CHANGELOG.md` 的 `## [Unreleased]`
 
 ### 提交信息规范
 
@@ -264,6 +284,10 @@ CC Switch 提供四种界面语言。英文是源语言，也是回退语言（`
 2. 所有 UI 文本使用 react-i18next 的 `t()` 函数，不要硬编码用户可见的字符串。如果无法翻译某条文本，请先把英文原文填入其他语言文件，不要缺少键，并在 PR 中注明。
 3. 所有译文中保持 `{{占位符}}`、品牌与产品名称（Claude Code、Codex、Gemini CLI、OpenCode 等）以及 Markdown/HTML 标签不变。
 4. 新增语言需要在同目录添加 JSON 文件，并在 `src/i18n/index.ts` 中注册；请先开 Issue 讨论。
+
+## 发版
+
+维护者按照 [RELEASING.md](RELEASING.md)（英文）发版：版本号、更新日志、发布说明、打标签、各安装渠道与回滚。
 
 ## 有疑问？
 

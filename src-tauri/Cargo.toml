@@ -1,7 +1,7 @@
 [package]
 name = "cc-switch"
 version = "3.17.0"
-description = "All-in-One Assistant for Claude Code, Codex & Gemini CLI"
+description = "All-in-one manager for Claude Code, Claude Desktop, Codex, Gemini CLI, Grok Build, OpenCode, OpenClaw and Hermes Agent"
 authors = ["Jason Young"]
 license = "MIT"
 repository = "https://github.com/farion1231/cc-switch"
@@ -13,7 +13,10 @@ default-run = "cc-switch"
 
 [lib]
 name = "cc_switch_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop only: the Tauri mobile template's "staticlib"/"cdylib" outputs cost an
+# extra (LTO) link on every build and no mobile target is shipped (CI-13).
+# Re-add them if Android/iOS is ever pursued.
+crate-type = ["rlib"]
 doctest = false
 
 # PRODUCT-11: `ccs` command-line companion over the same SQLite store.
@@ -33,7 +36,8 @@ serde_json = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
-tauri = { version = "2.8.2", features = ["tray-icon", "protocol-asset", "image-png"] }
+# No "protocol-asset": the asset:// protocol is unused (CI-43).
+tauri = { version = "2.8.2", features = ["tray-icon", "image-png"] }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
@@ -137,7 +141,10 @@ lto = "thin"
 opt-level = "s"
 # 使用 unwind 以便 panic hook 能捕获 backtrace（abort 会直接终止无法捕获）
 panic = "unwind"
-strip = "symbols"
+# Strip debug info but keep the symbol table, so the backtrace that
+# panic_hook.rs force-captures into crash.log shows function names instead of
+# bare addresses (CI-13). Costs ~1-2 MB of binary size.
+strip = "debuginfo"
 
 [dev-dependencies]
 proptest = { version = "1", default-features = false, features = ["std"] }

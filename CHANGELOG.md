@@ -5,6 +5,14 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+New entries go under **[Unreleased]** using the Keep a Changelog sections (Added, Changed,
+Deprecated, Removed, Fixed, Security). The git-cliff tool (configuration in
+[`cliff.toml`](cliff.toml)) drafts that section from the Conventional Commit subjects; edit the
+draft, then move it under the new version heading when releasing (see
+[RELEASING.md](RELEASING.md)).
+
+## [Unreleased]
+
 ## [3.17.0] - 2026-07-13
 
 Development since v3.16.5 is headlined by project profiles — named snapshots of provider/MCP/Skills/prompt state, switchable per scope from a new header switcher or the tray (schema v12) — and a deep Codex push: official ChatGPT-subscription sessions can now route through the local proxy takeover with a corrected client identity, gpt-5.6 lands across context-window injection and Sol/Terra/Luna pricing with 1.25× cache-write rates, and a native Anthropic Messages upstream joins the Codex format options. A proxy-correctness wave makes the Responses↔Anthropic bridges fail closed and round-trip reasoning/tool results losslessly, strengthens prompt-cache breakpoint injection, and fixes cache-write accounting across historical token semantics (schema v13); a config.toml hardening batch stops deleted MCP servers from resurrecting, fails MCP sync closed on unparseable files, extends switch-time common-config autosync to Codex, and moves the common-config merge to backend toml_edit. Usage tooling gains Zhipu team-plan quota queries, Codex sub-agent and free-plan accounting, and transient-failure retry, while Kimi For Coding's 256K window finally takes effect — rounded out by a Codex default-model form field, renamed-session titles, OpenCode form and live-sync fixes, and preset updates (SudoCode sponsorship, LongCat-2.0, GPT-5.6 defaults, Hunyuan Hy3 pricing).
@@ -2277,3 +2285,7 @@ For users upgrading from v2.x (Electron version):
 - Basic provider management
 - Claude Code integration
 - Configuration file handling
+
+[Unreleased]: https://github.com/farion1231/cc-switch/compare/v3.17.0...HEAD
+[3.17.0]: https://github.com/farion1231/cc-switch/compare/v3.16.5...v3.17.0
+[3.16.5]: https://github.com/farion1231/cc-switch/compare/v3.16.4...v3.16.5

@@ -1,39 +1,95 @@
+# Dependency update policy (CI-17).
+#
+# - minor/patch updates are grouped per ecosystem (and per domain for the big
+#   families) so one PR per week carries the low-risk bumps;
+# - every major update gets its own PR so one breaking upgrade never blocks the
+#   security patches grouped with it;
+# - a cooldown keeps freshly published (possibly compromised or yanked)
+#   releases out for a few days;
+# - GitHub Actions are pinned to commit SHAs (CI-18) and bumped weekly in one
+#   group.
+#
+# Dependabot cannot update rust-toolchain.toml, .node-version or the
+# package.json "packageManager" pin. Those are reviewed monthly as part of the
+# release checklist in RELEASING.md ("Toolchain pins").
 version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     labels:
       - "dependencies"
       - "frontend"
     commit-message:
       prefix: "chore(deps)"
     groups:
-      frontend-deps:
+      tauri:
+        patterns:
+          - "@tauri-apps/*"
+        update-types: ["minor", "patch"]
+      radix:
+        patterns:
+          - "@radix-ui/*"
+        update-types: ["minor", "patch"]
+      codemirror:
+        patterns:
+          - "@codemirror/*"
+          - "codemirror"
+        update-types: ["minor", "patch"]
+      testing:
+        patterns:
+          - "@testing-library/*"
+          - "vitest"
+          - "@vitest/*"
+          - "msw"
+          - "jsdom"
+        update-types: ["minor", "patch"]
+      frontend-minor-and-patch:
         patterns:
           - "*"
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: "cargo"
     directory: "/src-tauri"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     labels:
       - "dependencies"
       - "backend"
     commit-message:
       prefix: "chore(deps)"
     groups:
-      cargo-deps:
+      tauri-crates:
+        patterns:
+          - "tauri"
+          - "tauri-*"
+        update-types: ["minor", "patch"]
+      cargo-minor-and-patch:
         patterns:
           - "*"
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: "github-actions"
-    directory: "/"
+    # "/" covers .github/workflows; the composite actions are listed explicitly.
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
-      interval: "monthly"
+      interval: "weekly"
+    open-pull-requests-limit: 2
     labels:
       - "dependencies"
       - "actions"
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

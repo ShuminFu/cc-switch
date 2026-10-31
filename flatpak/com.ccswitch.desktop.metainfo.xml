@@ -2,16 +2,17 @@
 <component type="desktop-application">
   <id>com.ccswitch.desktop</id>
   <name>CC Switch</name>
-  <summary>All-in-One Assistant for Claude Code, Codex &amp; Gemini CLI</summary>
+  <summary>All-in-one manager for AI coding CLIs and their providers</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
 
   <description>
-    <p>CC Switch is a cross-platform desktop app for managing and switching provider configurations for Claude Code, Codex, and Gemini CLI.</p>
+    <p>CC Switch is a cross-platform desktop app for managing and switching provider configurations for Claude Code, Claude Desktop, Codex, Gemini CLI, Grok Build, OpenCode, OpenClaw and Hermes Agent.</p>
     <ul>
       <li>Manage multiple provider configurations and endpoints</li>
       <li>One-click switch and sync to client live configurations</li>
       <li>MCP servers and Prompt/Skills management</li>
+      <li>Local proxy with failover, usage and cost tracking</li>
     </ul>
   </description>
 
@@ -20,6 +21,25 @@
     <binary>cc-switch</binary>
   </provides>
 
-  <url type="homepage">https://github.com/farion1231/cc-switch</url>
+  <developer id="io.ccswitch">
+    <name>Jason Young</name>
+  </developer>
+
+  <content_rating type="oars-1.1" />
+
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/farion1231/cc-switch/main/assets/screenshots/main-en.png</image>
+    </screenshot>
+  </screenshots>
+
+  <url type="homepage">https://ccswitch.io</url>
+  <url type="vcs-browser">https://github.com/farion1231/cc-switch</url>
   <url type="bugtracker">https://github.com/farion1231/cc-switch/issues</url>
+  <releases>
+    <!-- Newest first. Update on every release (RELEASING.md, "Flatpak"). -->
+    <release version="3.17.0" date="2026-07-13">
+      <url>https://github.com/farion1231/cc-switch/releases/tag/v3.17.0</url>
+    </release>
+  </releases>
 </component>

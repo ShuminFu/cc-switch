@@ -13,7 +13,8 @@
 │   ├── 1.3 界面概览
 │   ├── 1.4 快速上手
 │   ├── 1.5 个性化配置
-│   └── 1.6 项目
+│   ├── 1.6 项目
+│   └── 1.7 各应用支持的功能
 │
 ├── 2. 供应商管理
 │   ├── 2.1 添加供应商
@@ -36,13 +37,15 @@
 │   ├── 4.2 应用接管
 │   ├── 4.3 故障转移
 │   ├── 4.4 用量统计
-│   └── 4.5 模型检查
+│   ├── 4.5 模型检查
+│   └── 4.6 代理行为说明
 │
 └── 5. 常见问题
     ├── 5.1 配置文件说明
     ├── 5.2 FAQ
     ├── 5.3 深度链接协议
-    └── 5.4 环境变量冲突
+    ├── 5.4 环境变量冲突
+    └── 5.6 故障排查
 ```
 
 ## 文件列表
@@ -57,6 +60,7 @@
 | [1.4-quickstart.md](./1-getting-started/1.4-quickstart.md) | 5 分钟快速上手教程 |
 | [1.5-settings.md](./1-getting-started/1.5-settings.md) | 语言、主题、目录、备份、WebDAV / S3 云同步 |
 | [1.6-projects.md](./1-getting-started/1.6-projects.md) | 项目：保存并切换供应商 / MCP / Skills / 提示词快照 |
+| [1.7-capabilities.md](./1-getting-started/1.7-capabilities.md) | 各功能（MCP、提示词、Skills、接管、项目、深度链接）适用于哪些应用 |
 
 ### 2. 供应商管理
 
@@ -89,6 +93,7 @@
 | [4.3-failover.md](./4-proxy/4.3-failover.md) | 故障转移队列、熔断器、健康状态 |
 | [4.4-usage.md](./4-proxy/4.4-usage.md) | 用量统计、趋势图表、定价配置 |
 | [4.5-model-test.md](./4-proxy/4.5-model-test.md) | 模型检查、健康检测、延迟测试 |
+| [4.6-semantics.md](./4-proxy/4.6-semantics.md) | 哪些错误会故障转移、超时、熔断规则、接管对磁盘的修改 |
 
 ### 5. 常见问题
 
@@ -98,6 +103,7 @@
 | [5.2-questions.md](./5-faq/5.2-questions.md) | 常见问题解答 |
 | [5.3-deeplink.md](./5-faq/5.3-deeplink.md) | 深度链接协议、生成和使用方法 |
 | [5.4-env-conflict.md](./5-faq/5.4-env-conflict.md) | 环境变量冲突检测与处理 |
+| [5.6-troubleshooting.md](./5-faq/5.6-troubleshooting.md) | 各系统的故障排查、日志与崩溃日志位置、如何提交 Bug |
 
 ## 快速链接
 

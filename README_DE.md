@@ -203,7 +203,7 @@ Modernes KI-gestütztes Programmieren stützt sich auf Werkzeuge wie Claude Code
 - **Kein manuelles Bearbeiten mehr** — 50+ Anbieter-Presets einschließlich AWS Bedrock, NVIDIA NIM und Community-Relays; einfach auswählen und umschalten
 - **Einheitliche MCP- & Skills-Verwaltung** — Ein Panel zur Verwaltung von MCP-Servern und Skills für Claude, Codex, Gemini, Grok Build, OpenCode und Hermes mit bidirektionaler Synchronisierung
 - **Schnellumschaltung über System-Tray** — Wechseln Sie Anbieter sofort über das Tray-Menü, ohne die vollständige App öffnen zu müssen
-- **Cloud-Synchronisierung** — Synchronisieren Sie Anbieterdaten geräteübergreifend über Dropbox, OneDrive, iCloud oder WebDAV-Server
+- **Cloud-Synchronisierung** — Synchronisieren Sie Anbieterdaten geräteübergreifend über Dropbox, OneDrive, iCloud, WebDAV-Server oder S3-kompatiblen Speicher (AWS S3, Cloudflare R2, Aliyun OSS, ...), optional Ende-zu-Ende-verschlüsselt
 - **Plattformübergreifend** — Native Desktop-App für Windows, macOS und Linux, gebaut mit Tauri 2
 - **Integrierte Hilfsprogramme** — Überspringen der Erststart-Bestätigung von Claude Code, Abschalten der `Co-Authored-By`-Commit-Angabe von Claude Code über das gemeinsame Konfigurations-Snippet, automatisches Beheben von Thinking-Signatur-Fehlern im Proxy-Modus (Thinking-Signatur-Gleichrichter), Synchronisierung des Anbieters mit der Claude Code VS-Code-Erweiterung und mehr
 
@@ -245,7 +245,7 @@ Modernes KI-gestütztes Programmieren stützt sich auf Werkzeuge wie Claude Code
 
 ### System & Plattform
 
-- **Cloud-Synchronisierung** — Eigenes Konfigurationsverzeichnis (Dropbox, OneDrive, iCloud, NAS) und WebDAV-Server-Synchronisierung
+- **Cloud-Synchronisierung** — Eigenes Konfigurationsverzeichnis (Dropbox, OneDrive, iCloud, NAS), WebDAV-Server-Synchronisierung und Synchronisierung mit S3-kompatiblem Objektspeicher, optional Ende-zu-Ende-verschlüsselt
 - **Deep Link** (`ccswitch://`) — Importieren Sie Anbieter, MCP-Server, Prompts und Skills per URL
 - Dunkles / Helles / System-Theme, automatischer Start, automatischer Updater, atomare Schreibvorgänge, automatische Backups, i18n (zh/zh-TW/en/ja)
 
@@ -319,12 +319,17 @@ Wenn Sie über ein Desktop-Symbol starten, fügen Sie es der `Exec=`-Zeile der `
 
 ## Dokumentation
 
-Ausführliche Anleitungen zu jeder Funktion finden Sie im **[Benutzerhandbuch](docs/user-manual/en/README.md)** — es deckt Anbieterverwaltung, MCP/Prompts/Skills, Proxy & Failover und mehr ab.
+Ausführliche Anleitungen zu jeder Funktion finden Sie im **[Benutzerhandbuch](docs/user-manual/en/README.md)** (Englisch; ein deutsches Handbuch gibt es noch nicht) — es deckt Anbieterverwaltung, MCP/Prompts/Skills, Proxy & Failover und mehr ab.
 
 - **[Datenschutz & Datenflüsse](PRIVACY.md)** (Englisch) — was lokal gespeichert wird und welche Netzwerkanfragen die App stellt
 - **[Deep-Link-Spezifikation](docs/deeplink-spec.md)** (Englisch) — das `ccswitch://`-Importprotokoll für Link-Ersteller
 - **[Release Notes](docs/release-notes/README.md)** — Notizen pro Version auf Englisch, Chinesisch und Japanisch
 - **[Sponsoren-Richtlinie (Vorschlag)](docs/sponsor-policy.md)** (Englisch) — wie gesponserte Presets aufgenommen, geprüft und entfernt werden
+- **[Anleitungen](docs/guides/README.md)** (Englisch) — Schritt-für-Schritt-Anleitungen (Codex-Routing zu Claude / Kimi / DeepSeek, offizielles Login erhalten, einheitlicher Sitzungsverlauf)
+- **[Fehlerbehebung](docs/user-manual/en/5-faq/5.6-troubleshooting.md)** (Englisch) — Lösungen je Betriebssystem und wo Logs und Absturzprotokoll liegen
+- **[Sicherheitsmodell](docs/security/model.md)** (Englisch) — was wo gespeichert wird, was der lokale Proxy anbietet, wie Updates signiert sind
+- **[Deep-Link-Generator](https://farion1231.github.io/cc-switch/deplink.html)** — `ccswitch://`-Importlinks im Browser erstellen
+- **[Entwicklerdokumentation](docs/dev/architecture.md)** (Englisch) — Architektur, Modulübersicht, Tests und [Release-Ablauf](RELEASING.md)
 
 ## Schnellstart
 
@@ -350,13 +355,18 @@ Ausführliche Anleitungen zu jeder Funktion finden Sie im **[Benutzerhandbuch](d
 
 ### Systemanforderungen
 
-- **Windows**: Windows 10 und höher
-- **macOS**: macOS 12 (Monterey) und höher
-- **Linux**: Ubuntu 22.04+ / Debian 11+ / Fedora 34+ und andere gängige Distributionen
+- **Windows**: Windows 10 und höher, x64 oder ARM64
+- **macOS**: macOS 12 (Monterey) und höher, Apple Silicon oder Intel (Universal-Build)
+- **Linux**: x86_64 oder ARM64 mit glibc 2.35+ und WebKitGTK 4.1, z. B. Ubuntu 22.04+, Debian 12+, Fedora 36+ (die Linux-Pakete werden unter Ubuntu 22.04 gebaut, ältere Distributionen wie Debian 11 können sie nicht ausführen)
 
 ### Windows-Nutzer
 
-Laden Sie das neueste Installationsprogramm `CC-Switch-v{version}-Windows.msi` oder die portable Version `CC-Switch-v{version}-Windows-Portable.zip` von der Seite [Releases](../../releases) herunter.
+Laden Sie von der [Releases-Seite](https://github.com/farion1231/cc-switch/releases/latest) herunter:
+
+- `CC-Switch-v{version}-Windows.msi` (Installationsprogramm) oder `CC-Switch-v{version}-Windows-Portable.zip` (portabel), für x64
+- `CC-Switch-v{version}-Windows-arm64.msi` oder `CC-Switch-v{version}-Windows-arm64-Portable.zip`, native ARM64-Builds
+
+> **Hinweis**: Die Windows-Builds tragen möglicherweise noch keine Authenticode-Signatur, daher kann SmartScreen „Der Computer wurde durch Windows geschützt“ anzeigen. Wählen Sie „Weitere Informationen“ und dann „Trotzdem ausführen“. Sie können den Download vorher mit `SHA256SUMS` prüfen, siehe [Download prüfen](SECURITY.md#verifying-a-download) (Englisch).
 
 ### macOS-Nutzer
 
@@ -374,7 +384,7 @@ brew upgrade --cask cc-switch
 
 **Methode 2: Manueller Download**
 
-Laden Sie `CC-Switch-v{version}-macOS.dmg` (empfohlen) oder `.zip` von der Seite [Releases](../../releases) herunter.
+Laden Sie `CC-Switch-v{version}-macOS.dmg` (empfohlen) oder `CC-Switch-v{version}-macOS.zip` von der [Releases-Seite](https://github.com/farion1231/cc-switch/releases/latest) herunter. Es ist ein Universal-Build für Apple Silicon und Intel.
 
 > **Hinweis**: CC Switch für macOS ist von Apple code-signiert und notarisiert. Sie können es direkt installieren und öffnen.
 
@@ -388,193 +398,17 @@ paru -S cc-switch-bin
 
 ### Linux-Nutzer
 
-Laden Sie den neuesten Linux-Build von der Seite [Releases](../../releases) herunter:
+Laden Sie den neuesten Linux-Build für Ihre Architektur (`x86_64` oder `arm64`) von der [Releases-Seite](https://github.com/farion1231/cc-switch/releases/latest) herunter:
 
-- `CC-Switch-v{version}-Linux.deb` (Debian/Ubuntu)
-- `CC-Switch-v{version}-Linux.rpm` (Fedora/RHEL/openSUSE)
-- `CC-Switch-v{version}-Linux.AppImage` (universell)
+- `CC-Switch-v{version}-Linux-x86_64.deb` / `CC-Switch-v{version}-Linux-arm64.deb` (Debian/Ubuntu)
+- `CC-Switch-v{version}-Linux-x86_64.rpm` / `CC-Switch-v{version}-Linux-arm64.rpm` (Fedora/RHEL/openSUSE)
+- `CC-Switch-v{version}-Linux-x86_64.AppImage` / `CC-Switch-v{version}-Linux-arm64.AppImage` (universell; das einzige Linux-Format, das der In-App-Updater aktualisieren kann)
 
-> **Flatpak**: Nicht in den offiziellen Releases enthalten. Sie können es selbst aus dem `.deb` bauen — eine Anleitung finden Sie unter [`flatpak/README.md`](flatpak/README.md).
+> **Flatpak**: Nicht in den offiziellen Releases enthalten. Sie können es selbst aus dem `.deb` bauen — Anleitung und bekannte Einschränkungen unter [`flatpak/README.md`](flatpak/README.md).
 
-<details>
-<summary><strong>Architekturüberblick</strong></summary>
+Startet die App nicht oder verhält sie sich seltsam, lesen Sie die [Fehlerbehebung](docs/user-manual/en/5-faq/5.6-troubleshooting.md) (Englisch; Log-Pfade je Betriebssystem, Absturzprotokoll sammeln).
 
-### Designprinzipien
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Frontend (React + TS)                    │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐    │
-│  │ Components  │  │    Hooks     │  │  TanStack Query  │    │
-│  │   (UI)      │──│ (Bus. Logic) │──│   (Cache/Sync)   │    │
-│  └─────────────┘  └──────────────┘  └──────────────────┘    │
-└────────────────────────┬────────────────────────────────────┘
-                         │ Tauri IPC
-┌────────────────────────▼────────────────────────────────────┐
-│                  Backend (Tauri + Rust)                     │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐    │
-│  │  Commands   │  │   Services   │  │  Models/Config   │    │
-│  │ (API Layer) │──│ (Bus. Layer) │──│     (Data)       │    │
-│  └─────────────┘  └──────────────┘  └──────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Kern-Designmuster**
-
-- **SSOT** (Single Source of Truth): Alle Daten werden in `~/.cc-switch/cc-switch.db` (SQLite) gespeichert
-- **Zweischichtiger Speicher**: SQLite für synchronisierbare Daten, JSON für gerätebezogene Einstellungen
-- **Bidirektionale Synchronisierung**: Schreiben in Live-Dateien beim Umschalten, Backfill aus den Live-Dateien beim Bearbeiten des aktiven Anbieters
-- **Atomare Schreibvorgänge**: Das Muster aus temporärer Datei + Umbenennen verhindert die Beschädigung von Konfigurationen
-- **Nebenläufigkeitssicher**: Eine durch Mutex geschützte Datenbankverbindung vermeidet Race Conditions
-- **Geschichtete Architektur**: Klare Trennung (Commands → Services → DAO → Database)
-
-**Schlüsselkomponenten**
-
-- **ProviderService**: Anbieter-CRUD, Umschaltung, Backfill, Sortierung
-- **McpService**: Verwaltung von MCP-Servern, Import/Export, Synchronisierung von Live-Dateien
-- **ProxyService**: Lokaler Proxy-Modus mit Hot-Switching und Formatkonvertierung
-- **SessionManager**: Durchsuchen des Gesprächsverlaufs über alle unterstützten Apps hinweg
-- **ConfigService**: Konfigurations-Import/-Export, Backup-Rotation
-- **SpeedtestService**: Messung der Latenz von API-Endpunkten
-
-</details>
-
-<details>
-<summary><strong>Entwicklungsleitfaden</strong></summary>
-
-### Umgebungsanforderungen
-
-- Node.js `^20.19.0` oder `>=22.12.0` (`.node-version` legt 22.12.0 fest)
-- pnpm 10 (CI verwendet 10.12.3)
-- Rust: wird von rustup anhand von `rust-toolchain.toml` (1.95) automatisch installiert
-- Tauri CLI 2.8+ (als Dev-Abhängigkeit enthalten)
-
-### Entwicklungsbefehle
-
-```bash
-# Abhängigkeiten installieren
-pnpm install
-
-# Entwicklungsmodus (Hot Reload)
-pnpm dev
-
-# Typprüfung
-pnpm typecheck
-
-# Linting (ESLint)
-pnpm lint
-
-# Code formatieren
-pnpm format
-
-# Codeformatierung prüfen
-pnpm format:check
-
-# Frontend-Unit-Tests ausführen
-pnpm test:unit
-
-# Tests im Watch-Modus ausführen (für die Entwicklung empfohlen)
-pnpm test:unit:watch
-
-# Anwendung bauen
-pnpm build
-
-# Debug-Version bauen
-pnpm tauri build --debug
-```
-
-### Entwicklung des Rust-Backends
-
-```bash
-cd src-tauri
-
-# Rust-Code formatieren
-cargo fmt
-
-# Clippy-Prüfungen ausführen
-cargo clippy
-
-# Backend-Tests ausführen
-cargo test
-
-# Bestimmte Tests ausführen
-cargo test test_name
-
-# Tests mit dem Feature test-hooks ausführen
-cargo test --features test-hooks
-```
-
-### Testleitfaden
-
-**Frontend-Tests**:
-
-- Verwendet **vitest** als Test-Framework
-- Verwendet **MSW (Mock Service Worker)**, um Tauri-API-Aufrufe zu mocken
-- Verwendet **@testing-library/react** für Komponententests
-
-**Tests ausführen**:
-
-```bash
-# Alle Tests ausführen
-pnpm test:unit
-
-# Watch-Modus (automatische erneute Ausführung)
-pnpm test:unit:watch
-
-# Mit Coverage-Bericht
-pnpm test:unit --coverage
-```
-
-### Tech-Stack
-
-**Frontend**: React 18 · TypeScript · Vite · TailwindCSS 3.4 · TanStack Query v5 · react-i18next · react-hook-form · zod · shadcn/ui · @dnd-kit
-
-**Backend**: Tauri 2.8 · Rust · serde · tokio · thiserror · tauri-plugin-updater/process/dialog/store/log
-
-**Testing**: vitest · MSW · @testing-library/react
-
-</details>
-
-<details>
-<summary><strong>Projektstruktur</strong></summary>
-
-```
-├── src/                        # Frontend (React + TypeScript)
-│   ├── components/
-│   │   ├── providers/          # Anbieterverwaltung
-│   │   ├── mcp/                # MCP-Panel
-│   │   ├── prompts/            # Prompts-Verwaltung
-│   │   ├── skills/             # Skills-Verwaltung
-│   │   ├── sessions/           # Session Manager
-│   │   ├── proxy/              # Proxy-Modus-Panel
-│   │   ├── openclaw/           # OpenClaw-Konfigurationspanels
-│   │   ├── settings/           # Einstellungen (Terminal/Backup/About)
-│   │   ├── deeplink/           # Deep-Link-Import
-│   │   ├── env/                # Verwaltung von Umgebungsvariablen
-│   │   ├── universal/          # App-übergreifende Konfiguration
-│   │   ├── usage/              # Nutzungsstatistik
-│   │   └── ui/                 # shadcn/ui-Komponentenbibliothek
-│   ├── hooks/                  # Eigene Hooks (Geschäftslogik)
-│   ├── lib/
-│   │   ├── api/                # Tauri-API-Wrapper (typsicher)
-│   │   └── query/              # TanStack-Query-Konfiguration
-│   ├── i18n/locales/           # Übersetzungen (en/zh/zh-TW/ja)
-│   ├── config/                 # Presets (providers/mcp)
-│   └── types/                  # TypeScript-Definitionen
-├── src-tauri/                  # Backend (Rust)
-│   └── src/
-│       ├── commands/           # Tauri-Befehlsschicht (nach Domäne)
-│       ├── services/           # Geschäftslogikschicht
-│       ├── database/           # SQLite-DAO-Schicht
-│       ├── proxy/              # Proxy-Modul
-│       ├── session_manager/    # Sitzungsverwaltung
-│       ├── deeplink/           # Deep-Link-Verarbeitung
-│       └── mcp/                # MCP-Synchronisierungsmodul
-├── tests/                      # Frontend-Tests
-└── assets/                     # Screenshots & Partnerressourcen
-```
-
-</details>
+**Für Entwickler**: Architekturüberblick, Modulübersicht und die Invarianten, die jede Änderung einhalten muss, stehen in [docs/dev/architecture.md](docs/dev/architecture.md) (Englisch); Umgebung, Befehle und die exakten CI-Prüfungen in [CONTRIBUTING.md](CONTRIBUTING.md) und [docs/dev/testing.md](docs/dev/testing.md) (Englisch); der Release-Ablauf in [RELEASING.md](RELEASING.md) (Englisch).
 
 ## Mitwirken
 

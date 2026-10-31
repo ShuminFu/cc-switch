@@ -1,11 +1,15 @@
 # Configuration for actions/labeler v5
-# Automatically labels PRs based on changed file paths
+# Automatically labels PRs based on changed file paths.
+#
+# Prefer directory/wildcard globs over single file names so the rules do not
+# rot when files move. `pnpm check:repo` (scripts/check-repo.mjs) fails CI when
+# a glob below no longer matches any tracked file (CI-31).
 
 frontend:
   - changed-files:
       - any-glob-to-any-file:
           - "src/**"
-          - "index.html"
+          - "src/index.html"
           - "vite.config.ts"
           - "vitest.config.ts"
           - "tailwind.config.cjs"
@@ -57,18 +61,18 @@ mcp:
           - "src/components/mcp/**"
           - "src/lib/api/mcp.ts"
           - "src-tauri/src/mcp/**"
-          - "src-tauri/src/claude_mcp.rs"
-          - "src-tauri/src/gemini_mcp.rs"
+          - "src-tauri/src/*_mcp.rs"
           - "src-tauri/src/commands/mcp.rs"
+          - "src-tauri/src/services/mcp.rs"
 
 skills:
   - changed-files:
       - any-glob-to-any-file:
           - "src/components/skills/**"
           - "src/lib/api/skills.ts"
-          - "src-tauri/src/commands/skill.rs"
-          - "src-tauri/src/services/skill.rs"
-          - "src-tauri/src/database/dao/skills.rs"
+          - "src-tauri/src/commands/skill*.rs"
+          - "src-tauri/src/services/skill*.rs"
+          - "src-tauri/src/database/dao/skill*.rs"
 
 proxy:
   - changed-files:

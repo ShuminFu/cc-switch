@@ -203,7 +203,7 @@ Modern AI-powered coding relies on tools like Claude Code, Claude Desktop, Codex
 - **No More Manual Editing** — 50+ provider presets including AWS Bedrock, NVIDIA NIM, and community relays; just pick and switch
 - **Unified MCP & Skills Management** — One panel to manage MCP servers and Skills across Claude, Codex, Gemini, Grok Build, OpenCode, and Hermes with bidirectional sync
 - **System Tray Quick Switch** — Switch providers instantly from the tray menu, no need to open the full app
-- **Cloud Sync** — Sync provider data across devices via Dropbox, OneDrive, iCloud, or WebDAV servers
+- **Cloud Sync** — Sync provider data across devices via Dropbox, OneDrive, iCloud, WebDAV servers or S3-compatible storage (AWS S3, Cloudflare R2, Aliyun OSS, ...), optionally end-to-end encrypted
 - **Cross-Platform** — Native desktop app for Windows, macOS, and Linux, built with Tauri 2
 - **Built-in Utilities** — Skip Claude Code's first-run confirmation, turn off Claude Code's `Co-Authored-By` commit attribution via the common config snippet, automatically repair thinking-signature errors in proxy mode (thinking-signature rectifier), sync the provider to the Claude Code VS Code extension, and more
 
@@ -245,7 +245,7 @@ Modern AI-powered coding relies on tools like Claude Code, Claude Desktop, Codex
 
 ### System & Platform
 
-- **Cloud sync** — Custom config directory (Dropbox, OneDrive, iCloud, NAS) and WebDAV server sync
+- **Cloud sync** — Custom config directory (Dropbox, OneDrive, iCloud, NAS), WebDAV server sync and S3-compatible object storage sync, with optional end-to-end encryption
 - **Deep Link** (`ccswitch://`) — Import providers, MCP servers, prompts, and skills via URL
 - Dark / Light / System theme, auto-launch, auto-updater, atomic writes, auto-backups, i18n (zh/zh-TW/en/ja)
 
@@ -325,6 +325,11 @@ For detailed guides on every feature, check out the **[User Manual](docs/user-ma
 - **[Deep Link Specification](docs/deeplink-spec.md)** — the `ccswitch://` import protocol for link authors
 - **[Release Notes](docs/release-notes/README.md)** — per-version notes in English, Chinese and Japanese
 - **[Sponsor Policy (proposal)](docs/sponsor-policy.md)** — how sponsored presets are listed, reviewed and removed
+- **[Guides](docs/guides/README.md)** — step-by-step how-tos (Codex routing to Claude / Kimi / DeepSeek, official login preservation, unified session history)
+- **[Troubleshooting](docs/user-manual/en/5-faq/5.6-troubleshooting.md)** — per-OS fixes and where the logs and crash log are
+- **[Security Model](docs/security/model.md)** — what is stored where, what the local proxy exposes, how updates are signed
+- **[Deep Link Generator](https://farion1231.github.io/cc-switch/deplink.html)** — build `ccswitch://` import links in the browser
+- **[Developer Docs](docs/dev/architecture.md)** — architecture, module map, testing and [release process](RELEASING.md)
 
 ## Quick Start
 
@@ -350,13 +355,18 @@ For detailed guides on every feature, check out the **[User Manual](docs/user-ma
 
 ### System Requirements
 
-- **Windows**: Windows 10 and above
-- **macOS**: macOS 12 (Monterey) and above
-- **Linux**: Ubuntu 22.04+ / Debian 11+ / Fedora 34+ and other mainstream distributions
+- **Windows**: Windows 10 and above, x64 or ARM64
+- **macOS**: macOS 12 (Monterey) and above, Apple Silicon or Intel (Universal build)
+- **Linux**: x86_64 or ARM64 with glibc 2.35+ and WebKitGTK 4.1, e.g. Ubuntu 22.04+, Debian 12+, Fedora 36+ (the Linux packages are built on Ubuntu 22.04, so older distributions such as Debian 11 cannot run them)
 
 ### Windows Users
 
-Download the latest `CC-Switch-v{version}-Windows.msi` installer or `CC-Switch-v{version}-Windows-Portable.zip` portable version from the [Releases](../../releases) page.
+Download from the [Releases page](https://github.com/farion1231/cc-switch/releases/latest):
+
+- `CC-Switch-v{version}-Windows.msi` (installer) or `CC-Switch-v{version}-Windows-Portable.zip` (portable), for x64
+- `CC-Switch-v{version}-Windows-arm64.msi` or `CC-Switch-v{version}-Windows-arm64-Portable.zip`, native ARM64 builds
+
+> **Note**: The Windows builds may not carry an Authenticode signature yet, so SmartScreen can show "Windows protected your PC". Choose "More info", then "Run anyway". You can check the download against `SHA256SUMS` first, see [Verifying a download](SECURITY.md#verifying-a-download).
 
 ### macOS Users
 
@@ -374,7 +384,7 @@ brew upgrade --cask cc-switch
 
 **Method 2: Manual Download**
 
-Download `CC-Switch-v{version}-macOS.dmg` (recommended) or `.zip` from the [Releases](../../releases) page.
+Download `CC-Switch-v{version}-macOS.dmg` (recommended) or `CC-Switch-v{version}-macOS.zip` from the [Releases page](https://github.com/farion1231/cc-switch/releases/latest). It is a Universal build for Apple Silicon and Intel Macs.
 
 > **Note**: CC Switch for macOS is code-signed and notarized by Apple. You can install and open it directly.
 
@@ -388,193 +398,17 @@ paru -S cc-switch-bin
 
 ### Linux Users
 
-Download the latest Linux build from the [Releases](../../releases) page:
+Download the latest Linux build for your architecture (`x86_64` or `arm64`) from the [Releases page](https://github.com/farion1231/cc-switch/releases/latest):
 
-- `CC-Switch-v{version}-Linux.deb` (Debian/Ubuntu)
-- `CC-Switch-v{version}-Linux.rpm` (Fedora/RHEL/openSUSE)
-- `CC-Switch-v{version}-Linux.AppImage` (Universal)
+- `CC-Switch-v{version}-Linux-x86_64.deb` / `CC-Switch-v{version}-Linux-arm64.deb` (Debian/Ubuntu)
+- `CC-Switch-v{version}-Linux-x86_64.rpm` / `CC-Switch-v{version}-Linux-arm64.rpm` (Fedora/RHEL/openSUSE)
+- `CC-Switch-v{version}-Linux-x86_64.AppImage` / `CC-Switch-v{version}-Linux-arm64.AppImage` (universal; the only Linux format the in-app updater can update)
 
-> **Flatpak**: Not included in official releases. You can build it yourself from the `.deb` — see [`flatpak/README.md`](flatpak/README.md) for instructions.
+> **Flatpak**: Not included in official releases. You can build it yourself from the `.deb` — see [`flatpak/README.md`](flatpak/README.md) for instructions and its known limitations.
 
-<details>
-<summary><strong>Architecture Overview</strong></summary>
+If the app does not start or something looks wrong, see [Troubleshooting](docs/user-manual/en/5-faq/5.6-troubleshooting.md) (log locations per OS, how to collect a crash log).
 
-### Design Principles
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Frontend (React + TS)                    │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐    │
-│  │ Components  │  │    Hooks     │  │  TanStack Query  │    │
-│  │   (UI)      │──│ (Bus. Logic) │──│   (Cache/Sync)   │    │
-│  └─────────────┘  └──────────────┘  └──────────────────┘    │
-└────────────────────────┬────────────────────────────────────┘
-                         │ Tauri IPC
-┌────────────────────────▼────────────────────────────────────┐
-│                  Backend (Tauri + Rust)                     │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐    │
-│  │  Commands   │  │   Services   │  │  Models/Config   │    │
-│  │ (API Layer) │──│ (Bus. Layer) │──│     (Data)       │    │
-│  └─────────────┘  └──────────────┘  └──────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Core Design Patterns**
-
-- **SSOT** (Single Source of Truth): All data stored in `~/.cc-switch/cc-switch.db` (SQLite)
-- **Dual-layer Storage**: SQLite for syncable data, JSON for device-level settings
-- **Dual-way Sync**: Write to live files on switch, backfill from live when editing active provider
-- **Atomic Writes**: Temp file + rename pattern prevents config corruption
-- **Concurrency Safe**: Mutex-protected database connection avoids race conditions
-- **Layered Architecture**: Clear separation (Commands → Services → DAO → Database)
-
-**Key Components**
-
-- **ProviderService**: Provider CRUD, switching, backfill, sorting
-- **McpService**: MCP server management, import/export, live file sync
-- **ProxyService**: Local proxy mode with hot-switching and format conversion
-- **SessionManager**: Conversation history browsing across supported session sources
-- **ConfigService**: Config import/export, backup rotation
-- **SpeedtestService**: API endpoint latency measurement
-
-</details>
-
-<details>
-<summary><strong>Development Guide</strong></summary>
-
-### Environment Requirements
-
-- Node.js `^20.19.0` or `>=22.12.0` (`.node-version` pins 22.12.0)
-- pnpm 10 (CI uses 10.12.3)
-- Rust: installed automatically by rustup from `rust-toolchain.toml` (1.95)
-- Tauri CLI 2.8+ (bundled as a dev dependency)
-
-### Development Commands
-
-```bash
-# Install dependencies
-pnpm install
-
-# Dev mode (hot reload)
-pnpm dev
-
-# Type check
-pnpm typecheck
-
-# Lint (ESLint)
-pnpm lint
-
-# Format code
-pnpm format
-
-# Check code format
-pnpm format:check
-
-# Run frontend unit tests
-pnpm test:unit
-
-# Run tests in watch mode (recommended for development)
-pnpm test:unit:watch
-
-# Build application
-pnpm build
-
-# Build debug version
-pnpm tauri build --debug
-```
-
-### Rust Backend Development
-
-```bash
-cd src-tauri
-
-# Format Rust code
-cargo fmt
-
-# Run clippy checks
-cargo clippy
-
-# Run backend tests
-cargo test
-
-# Run specific tests
-cargo test test_name
-
-# Run tests with test-hooks feature
-cargo test --features test-hooks
-```
-
-### Testing Guide
-
-**Frontend Testing**:
-
-- Uses **vitest** as test framework
-- Uses **MSW (Mock Service Worker)** to mock Tauri API calls
-- Uses **@testing-library/react** for component testing
-
-**Running Tests**:
-
-```bash
-# Run all tests
-pnpm test:unit
-
-# Watch mode (auto re-run)
-pnpm test:unit:watch
-
-# With coverage report
-pnpm test:unit --coverage
-```
-
-### Tech Stack
-
-**Frontend**: React 18 · TypeScript · Vite · TailwindCSS 3.4 · TanStack Query v5 · react-i18next · react-hook-form · zod · shadcn/ui · @dnd-kit
-
-**Backend**: Tauri 2.8 · Rust · serde · tokio · thiserror · tauri-plugin-updater/process/dialog/store/log
-
-**Testing**: vitest · MSW · @testing-library/react
-
-</details>
-
-<details>
-<summary><strong>Project Structure</strong></summary>
-
-```
-├── src/                        # Frontend (React + TypeScript)
-│   ├── components/
-│   │   ├── providers/          # Provider management
-│   │   ├── mcp/                # MCP panel
-│   │   ├── prompts/            # Prompts management
-│   │   ├── skills/             # Skills management
-│   │   ├── sessions/           # Session Manager
-│   │   ├── proxy/              # Proxy mode panel
-│   │   ├── openclaw/           # OpenClaw config panels
-│   │   ├── settings/           # Settings (Terminal/Backup/About)
-│   │   ├── deeplink/           # Deep Link import
-│   │   ├── env/                # Environment variable management
-│   │   ├── universal/          # Cross-app configuration
-│   │   ├── usage/              # Usage statistics
-│   │   └── ui/                 # shadcn/ui component library
-│   ├── hooks/                  # Custom hooks (business logic)
-│   ├── lib/
-│   │   ├── api/                # Tauri API wrapper (type-safe)
-│   │   └── query/              # TanStack Query config
-│   ├── i18n/locales/           # Translations (en/zh/zh-TW/ja)
-│   ├── config/                 # Presets (providers/mcp)
-│   └── types/                  # TypeScript definitions
-├── src-tauri/                  # Backend (Rust)
-│   └── src/
-│       ├── commands/           # Tauri command layer (by domain)
-│       ├── services/           # Business logic layer
-│       ├── database/           # SQLite DAO layer
-│       ├── proxy/              # Proxy module
-│       ├── session_manager/    # Session management
-│       ├── deeplink/           # Deep Link handling
-│       └── mcp/                # MCP sync module
-├── tests/                      # Frontend tests
-└── assets/                     # Screenshots & partner resources
-```
-
-</details>
+**For developers**: the architecture overview, module map and the invariants every change must keep are in [docs/dev/architecture.md](docs/dev/architecture.md); environment setup, commands and the exact checks CI runs are in [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/dev/testing.md](docs/dev/testing.md); cutting a release is described in [RELEASING.md](RELEASING.md).
 
 ## Contributing
 
