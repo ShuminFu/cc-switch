@@ -170,8 +170,16 @@ describe("ProfileSwitcher", () => {
 });
 
 describe("AgentsPanel", () => {
-  it("renders the coming-soon placeholder", () => {
-    render(<AgentsPanel onOpenChange={() => {}} />);
-    expect(screen.getByText("Coming Soon")).toBeInTheDocument();
+  // The coming-soon stub became a real subagents panel (PRODUCT-42); see
+  // tests/components/AgentsPanel.test.tsx for its behaviour.
+  it("renders the empty subagents list instead of a placeholder", async () => {
+    mockInvoke({ list_claude_agents: [] });
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AgentsPanel onOpenChange={() => {}} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText(/No subagents yet/)).toBeInTheDocument();
+    expect(screen.queryByText("Coming Soon")).not.toBeInTheDocument();
   });
 });

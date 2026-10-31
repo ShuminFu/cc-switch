@@ -75,6 +75,19 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/restore_db_backup_with_options`, () =>
     success("safety-backup"),
   ),
+  http.post(`${TAURI_ENDPOINT}/list_claude_agents`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/create_claude_agent`, async ({ request }) => {
+    const { agent } = await withJson<{
+      agent: { name: string; description: string; prompt: string };
+    }>(request);
+    return success({
+      fileName: `${agent.name}.md`,
+      path: `/home/mock/.claude/agents/${agent.name}.md`,
+      name: agent.name,
+      description: agent.description,
+      prompt: agent.prompt,
+    });
+  }),
   // Proxy request inspector (FE-UI-39) reads the request log while running.
   http.post(`${TAURI_ENDPOINT}/get_request_logs`, () =>
     success({ data: [], total: 0, page: 0, pageSize: 10 }),

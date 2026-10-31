@@ -974,6 +974,8 @@ pub fn run() {
             commands::list_db_backups,
             commands::restore_db_backup,
             commands::restore_db_backup_with_options,
+            commands::list_claude_agents,
+            commands::create_claude_agent,
             commands::rename_db_backup,
             commands::delete_db_backup,
             commands::sync_current_providers_live,

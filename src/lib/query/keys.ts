@@ -179,6 +179,11 @@ export const queryKeys = {
     all: ["profiles"] as const,
   },
 
+  /** Claude Code subagents in ~/.claude/agents, PRODUCT-42. */
+  claudeAgents: {
+    all: ["claudeAgents"] as const,
+  },
+
   /** Managed (team) policy file state, PRODUCT-24. */
   policy: {
     status: ["managedPolicyStatus"] as const,
