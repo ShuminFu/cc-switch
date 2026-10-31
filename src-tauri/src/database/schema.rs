@@ -218,6 +218,13 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         breaks_sync: false,
         up: Database::migrate_v21_to_v22,
     },
+    Migration {
+        version: 23,
+        name: "drop_unused_request_log_indexes",
+        checksum: "fdae083415f5ef63c63cac6382c2ee821631388d240757ede64392b7f6938ba7",
+        breaks_sync: false,
+        up: Database::migrate_v22_to_v23,
+    },
 ];
 
 /// 注册表中最新的 schema 版本（即 `SCHEMA_VERSION`）。
@@ -1993,6 +2000,20 @@ impl Database {
         Ok(())
     }
 
+    /// v22 → v23 (PERF-36): drop the single-column `session_id` and
+    /// `status_code` indexes on the append-only `proxy_request_logs` table.
+    /// No query filters on `session_id`, and the request-log status filter
+    /// always runs with the `(app_type, created_at)` / `created_at` ordering
+    /// indexes, so both only cost a B-tree update per insert. Indexes are not
+    /// part of the sync dump, so this does not affect sync compatibility.
+    fn migrate_v22_to_v23(conn: &Connection) -> Result<(), AppError> {
+        for index in ["idx_request_logs_session", "idx_request_logs_status"] {
+            conn.execute(&format!("DROP INDEX IF EXISTS {index}"), [])
+                .map_err(|e| AppError::Database(format!("删除索引 {index} 失败: {e}")))?;
+        }
+        Ok(())
+    }
+
     /// v21 → v22 (DB-20, first increment): per-row `sync_rev` /
     /// `sync_updated_at` (Unix ms) on the synced entity tables and a local
     /// `sync_tombstones` table recording deletions, maintained by the app's
@@ -2462,7 +2483,7 @@ mod tests {
                 SCHEMA_VERSION,
                 crate::services::sync_protocol::DB_COMPAT_VERSION
             ),
-            (22, 6),
+            (23, 6),
             "SCHEMA_VERSION changed without reviewing DB_COMPAT_VERSION (or vice versa)"
         );
         assert_eq!(
@@ -2617,15 +2638,33 @@ mod tests {
         Ok(names)
     }
 
-    const EXPECTED_REQUEST_LOG_INDEXES: [&str; 7] = [
+    /// PERF-36: `idx_request_logs_session` / `_status` are dropped by v23.
+    const EXPECTED_REQUEST_LOG_INDEXES: [&str; 5] = [
         "idx_request_logs_app_created_at",
         "idx_request_logs_created_at",
         "idx_request_logs_dedup_lookup_expr",
         "idx_request_logs_provider_created_at",
-        "idx_request_logs_session",
-        "idx_request_logs_status",
         "idx_request_logs_zero_cost",
     ];
+
+    /// PERF-36: the status-filtered request-log list still reads through an
+    /// index after the single-column status index is gone.
+    #[test]
+    fn status_filtered_request_log_list_uses_an_index_after_v23() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        Database::create_tables_on_conn(&conn)?;
+        Database::apply_schema_migrations_on_conn(&conn)?;
+        let plan: Vec<String> = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT request_id FROM proxy_request_logs l
+                 WHERE l.status_code = 500 ORDER BY l.created_at DESC LIMIT 20",
+            )?
+            .query_map([], |row| row.get::<_, String>(3))?
+            .collect::<Result<_, _>>()?;
+        let plan = plan.join("\n");
+        assert!(plan.contains("INDEX"), "{plan}");
+        Ok(())
+    }
 
     #[test]
     fn fresh_schema_has_expected_request_log_indexes_and_triggers() -> Result<(), AppError> {

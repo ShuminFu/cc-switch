@@ -25,8 +25,8 @@ const CC_SWITCH_SQL_EXPORT_HEADER: &str = "-- CC Switch SQLite 导出";
 /// that new tables are classified deliberately.
 ///
 /// `settings` and `proxy_config` are synced, but their device-local keys and
-/// columns are kept from the importing device (see [`DEVICE_SETTINGS_KEYS`],
-/// [`DEVICE_SETTINGS_KEY_PREFIXES`] and [`PROXY_CONFIG_DEVICE_COLUMNS`]).
+/// columns are kept from the importing device (see the device-scoped keys in
+/// [`super::setting_keys::SETTING_KEYS`] and [`PROXY_CONFIG_DEVICE_COLUMNS`]).
 pub(crate) const SYNC_SYNCED_TABLES: &[&str] = &[
     "providers",
     "provider_endpoints",
@@ -98,23 +98,8 @@ const PROXY_CONFIG_DEVICE_COLUMNS: &[&str] = &[
 /// counterpart, so a download never turns takeover on by itself.
 const PROXY_CONFIG_TAKEOVER_FLAGS: &[&str] = &["enabled", "proxy_enabled", "live_takeover_active"];
 
-/// Device-local `settings` keys (exact match).
-const DEVICE_SETTINGS_KEYS: &[&str] = &[
-    // Per-device Claude Desktop gateway credential (SEC-20): never shared.
-    "claude_desktop_gateway_token",
-    "global_proxy_url",
-    // Which built-in pricing list this device applied (DB-19).
-    super::pricing_seed::SEED_VERSION_SETTING,
-    // Retention windows of this device's usage history (DB-25).
-    super::sync_rows::USAGE_RETENTION_DAYS_KEY,
-    super::sync_rows::STREAM_CHECK_RETENTION_DAYS_KEY,
-    "project_bindings",
-    "skills_ssot_migration_pending",
-    "skills_ssot_migration_snapshot",
-];
-
-/// Device-local `settings` key prefixes.
-const DEVICE_SETTINGS_KEY_PREFIXES: &[&str] = &["current_profile_id_", "profile_baseline_"];
+// Device-local `settings` keys and prefixes come from the key registry
+// (`super::setting_keys`, DB-28).
 
 /// Built-in SQL functions an imported script may reference (expression
 /// indexes and column defaults in the app schema).
@@ -204,13 +189,12 @@ fn is_backup_timestamp_suffix(rest: &str) -> bool {
 
 /// SQL predicate (on column `key`) selecting device-local settings keys.
 fn device_settings_predicate() -> String {
-    let keys = DEVICE_SETTINGS_KEYS
-        .iter()
+    let keys = super::setting_keys::device_keys()
         .map(|k| format!("'{k}'"))
         .collect::<Vec<_>>()
         .join(", ");
     let mut clauses = vec![format!("key IN ({keys})")];
-    for prefix in DEVICE_SETTINGS_KEY_PREFIXES {
+    for prefix in super::setting_keys::device_prefixes() {
         let escaped = prefix.replace('_', "\\_");
         clauses.push(format!("key LIKE '{escaped}%' ESCAPE '\\'"));
     }
@@ -297,6 +281,45 @@ pub struct BackupEntry {
     pub created_at: String, // ISO 8601
 }
 
+/// Rewrite a `sqlite_master` CREATE TABLE / CREATE [UNIQUE] INDEX statement so
+/// the object is created in `schema` (DB-43). SQLite stores these statements
+/// normalized (`CREATE` uppercase, no `IF NOT EXISTS`, no `TEMP`), so the
+/// object name follows the keyword prefix; unqualified table references in an
+/// index resolve to the index's own schema.
+fn qualify_create_statement(sql: &str, kind: &str, name: &str, schema: &str) -> Option<String> {
+    let prefixes: &[&str] = match kind {
+        "table" => &["CREATE TABLE "],
+        "index" => &["CREATE UNIQUE INDEX ", "CREATE INDEX "],
+        _ => return None,
+    };
+    let trimmed = sql.trim_start();
+    let prefix = prefixes.iter().find(|p| {
+        trimmed
+            .get(..p.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(p))
+    })?;
+    let rest = trimmed[prefix.len()..].trim_start();
+    // The object name (bare or quoted with "", [] or ``) must come next.
+    let quoted = name.replace('"', "\"\"");
+    let names_match = [
+        name.to_string(),
+        format!("\"{quoted}\""),
+        format!("[{name}]"),
+        format!("`{name}`"),
+    ]
+    .iter()
+    .any(|candidate| {
+        rest.get(..candidate.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(candidate))
+    });
+    if !names_match {
+        return None;
+    }
+    // Keep the name token as written: SQLite stores the statement from the
+    // unqualified name on, so the copy's DDL text matches the original.
+    Some(format!("{prefix}{schema}.{rest}"))
+}
+
 impl Database {
     /// 导出为 SQLite 兼容的 SQL 文本（内存字符串，完整导出）
     pub fn export_sql_string(&self) -> Result<String, AppError> {
@@ -321,7 +344,10 @@ impl Database {
 
     /// Export SQL for sync (WebDAV), skipping local-only tables' data
     pub fn export_sql_string_for_sync(&self) -> Result<String, AppError> {
-        let snapshot = self.snapshot_to_memory()?;
+        // DB-43: copy only the synced tables' rows (log tables are skipped by
+        // the dump anyway), so the main lock is held for the config tables,
+        // not for the whole database.
+        let snapshot = self.snapshot_to_memory_without_rows_of(SYNC_SKIP_TABLES)?;
         // Device-local settings (outbound proxy URL, profile pointers, one-shot
         // migration state) never leave this device.
         if Self::table_exists(&snapshot, "settings")? {
@@ -559,19 +585,27 @@ impl Database {
 
     /// 从 SQL 字符串导入，返回生成的备份 ID（若无备份则为空字符串）
     pub fn import_sql_string(&self, sql_raw: &str) -> Result<String, AppError> {
-        self.import_sql_string_inner(sql_raw, &[])
+        self.import_sql_string_inner(sql_raw, &[], true)
     }
 
     /// Import SQL generated for sync, then restore local-only tables from the
     /// current device snapshot before replacing the main database.
     pub(crate) fn import_sql_string_for_sync(&self, sql_raw: &str) -> Result<String, AppError> {
-        self.import_sql_string_inner(sql_raw, SYNC_PRESERVE_TABLES)
+        self.import_sql_string_inner(sql_raw, SYNC_PRESERVE_TABLES, true)
+    }
+
+    /// Import into a scratch database (sync preview): same validation and
+    /// authorizer, but no safety backup of the app's database file.
+    pub(crate) fn import_sql_string_inner_no_backup(&self, sql_raw: &str) -> Result<(), AppError> {
+        self.import_sql_string_inner(sql_raw, &[], false)
+            .map(|_| ())
     }
 
     fn import_sql_string_inner(
         &self,
         sql_raw: &str,
         preserve_tables: &[&str],
+        make_backup: bool,
     ) -> Result<String, AppError> {
         let sql_content = sql_raw.trim_start_matches('\u{feff}');
         Self::validate_cc_switch_sql_export(sql_content)?;
@@ -598,7 +632,11 @@ impl Database {
         Self::validate_basic_state(&temp_conn)?;
 
         // 导入前备份现有数据库（校验通过后再备份，失败的导入不会占用备份轮换名额）
-        let backup_path = self.backup_database_file_of_kind(BackupKind::Safety, None)?;
+        let backup_path = if make_backup {
+            self.backup_database_file_of_kind(BackupKind::Safety, None)?
+        } else {
+            None
+        };
 
         // DB-35: copy the preserved local-only tables from the LIVE connection
         // and overwrite the main database inside one critical section, so rows
@@ -631,6 +669,97 @@ impl Database {
             .unwrap_or_default();
 
         Ok(backup_id)
+    }
+
+    /// An in-memory copy of the schema (tables and indexes) of the main
+    /// database plus the rows of every table not in `skip_rows` (DB-43).
+    ///
+    /// The copy is built in a temporary `:memory:` schema attached to the main
+    /// connection inside one read transaction (a consistent view) and then
+    /// handed to a standalone connection, so the cost under the main lock is
+    /// proportional to the copied tables, not to the log tables.
+    pub(crate) fn snapshot_to_memory_without_rows_of(
+        &self,
+        skip_rows: &[&str],
+    ) -> Result<Connection, AppError> {
+        const SNAP: &str = "cc_switch_sync_snapshot";
+        let db_err = |e: rusqlite::Error| AppError::Database(e.to_string());
+        let conn = lock_conn!(self.conn);
+        conn.execute(&format!("ATTACH DATABASE ':memory:' AS {SNAP}"), [])
+            .map_err(db_err)?;
+
+        let copy = (|| -> Result<Connection, AppError> {
+            let user_version: i64 = conn
+                .query_row("PRAGMA main.user_version", [], |row| row.get(0))
+                .map_err(db_err)?;
+            let objects: Vec<(String, String, String)> = conn
+                .prepare(
+                    "SELECT type, name, sql FROM main.sqlite_master
+                     WHERE sql NOT NULL AND type IN ('table', 'index')
+                       AND name NOT LIKE 'sqlite_%'
+                     ORDER BY type = 'table' DESC, name",
+                )
+                .and_then(|mut stmt| {
+                    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                        .collect()
+                })
+                .map_err(db_err)?;
+
+            let tx = conn.unchecked_transaction().map_err(db_err)?;
+            // Rows are copied table by table; foreign keys are checked once at
+            // the end (the source is consistent).
+            tx.execute_batch("PRAGMA defer_foreign_keys = ON;")
+                .map_err(db_err)?;
+            for (kind, name, sql) in &objects {
+                let ddl = qualify_create_statement(sql, kind, name, SNAP).ok_or_else(|| {
+                    AppError::Database(format!("无法复制 schema 对象 {name}: {sql}"))
+                })?;
+                tx.execute_batch(&ddl).map_err(db_err)?;
+            }
+            for (kind, name, _) in &objects {
+                if kind != "table" || skip_rows.contains(&name.as_str()) {
+                    continue;
+                }
+                let columns = Self::get_table_columns(&tx, name)?
+                    .iter()
+                    .map(|c| format!("\"{}\"", c.replace('"', "\"\"")))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if columns.is_empty() {
+                    continue;
+                }
+                let table = name.replace('"', "\"\"");
+                tx.execute(
+                    &format!(
+                        "INSERT INTO {SNAP}.\"{table}\" ({columns}) SELECT {columns} FROM main.\"{table}\""
+                    ),
+                    [],
+                )
+                .map_err(db_err)?;
+            }
+            tx.commit().map_err(db_err)?;
+
+            let mut snapshot = Connection::open_in_memory().map_err(db_err)?;
+            {
+                let backup = Backup::new_with_names(
+                    &conn,
+                    rusqlite::DatabaseName::Attached(SNAP),
+                    &mut snapshot,
+                    rusqlite::DatabaseName::Main,
+                )
+                .map_err(db_err)?;
+                backup.step(-1).map_err(db_err)?;
+            }
+            snapshot
+                .execute_batch(&format!("PRAGMA user_version = {user_version};"))
+                .map_err(db_err)?;
+            Ok(snapshot)
+        })();
+
+        if let Err(e) = conn.execute(&format!("DETACH DATABASE {SNAP}"), []) {
+            log::warn!("Failed to detach the sync snapshot schema: {e}");
+        }
+        copy
     }
 
     /// 创建内存快照以避免长时间持有数据库锁
@@ -1651,6 +1780,89 @@ mod tests {
         .expect("seed provider");
     }
 
+    /// DB-43: the sync snapshot copies schema for every table but rows only
+    /// for synced tables, and dumps exactly like the full snapshot did.
+    #[test]
+    fn sync_snapshot_skips_log_rows_and_dumps_like_a_full_snapshot() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        seed_provider(&db, "p1");
+        {
+            let conn = db.conn.lock().unwrap();
+            for i in 0..50 {
+                conn.execute(
+                    "INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model,
+                        input_tokens, output_tokens, total_cost_usd, latency_ms, status_code, created_at)
+                     VALUES (?1, 'p1', 'claude', 'm', 1, 1, '0.1', 1, 200, ?2)",
+                    rusqlite::params![format!("log-{i}"), 1_000 + i],
+                )?;
+            }
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('synced_key', 'v')",
+                [],
+            )?;
+        }
+
+        let generation = db.config_generation_for_test();
+        let lean = db.snapshot_to_memory_without_rows_of(SYNC_SKIP_TABLES)?;
+        assert_eq!(
+            db.config_generation_for_test(),
+            generation,
+            "copying into the scratch schema is not a data change (no auto-sync signal)"
+        );
+        let logs: i64 =
+            lean.query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |r| r.get(0))?;
+        assert_eq!(logs, 0, "log rows are not copied");
+        let providers: i64 = lean.query_row("SELECT COUNT(*) FROM providers", [], |r| r.get(0))?;
+        assert_eq!(providers, 1);
+
+        let full = db.snapshot_to_memory()?;
+        let strip_time = |sql: String| {
+            sql.lines()
+                .filter(|l| !l.starts_with("-- 生成时间"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        assert_eq!(
+            strip_time(Database::dump_sql(&lean, SYNC_SKIP_TABLES)?),
+            strip_time(Database::dump_sql(&full, SYNC_SKIP_TABLES)?)
+        );
+
+        // The temporary schema is detached again.
+        let conn = db.conn.lock().unwrap();
+        let attached: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_database_list WHERE name = 'cc_switch_sync_snapshot'",
+            [],
+            |r| r.get(0),
+        )?;
+        assert_eq!(attached, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn qualify_create_statement_handles_quoting_and_unique_indexes() {
+        use super::qualify_create_statement as q;
+        assert_eq!(
+            q(
+                "CREATE TABLE providers (id TEXT)",
+                "table",
+                "providers",
+                "s"
+            )
+            .as_deref(),
+            Some("CREATE TABLE s.providers (id TEXT)")
+        );
+        assert_eq!(
+            q("CREATE TABLE \"a b\"(x)", "table", "a b", "s").as_deref(),
+            Some("CREATE TABLE s.\"a b\"(x)")
+        );
+        assert_eq!(
+            q("CREATE UNIQUE INDEX idx_u ON t(a)", "index", "idx_u", "s").as_deref(),
+            Some("CREATE UNIQUE INDEX s.idx_u ON t(a)")
+        );
+        assert_eq!(q("CREATE VIEW v AS SELECT 1", "view", "v", "s"), None);
+        assert_eq!(q("CREATE TABLE other (x)", "table", "providers", "s"), None);
+    }
+
     #[test]
     fn every_table_is_classified_for_sync() -> Result<(), AppError> {
         let db = Database::memory()?;
@@ -1812,6 +2024,47 @@ mod tests {
         assert_eq!(
             query_i64(&local_db, "SELECT COUNT(*) FROM session_log_sync"),
             1
+        );
+        Ok(())
+    }
+
+    /// DB-28: the local proxy's access token, this device's prompt-file
+    /// hashes and repo-check caches are device-local (registry scope): not
+    /// exported, and an import keeps the local values.
+    #[test]
+    fn sync_keeps_registry_device_keys_local() -> Result<(), AppError> {
+        let remote_db = Database::memory()?;
+        seed_provider(&remote_db, "remote-provider");
+        remote_db.set_setting("proxy_access_token", "remote-proxy-token")?;
+        remote_db.set_setting("prompt_live_written_hash_claude", "remote-hash")?;
+        remote_db.set_setting("skill_repo_check:o/r/main", "{\"remote\":true}")?;
+        remote_db.set_setting("stream_check_config", "{\"remote\":1}")?;
+        let remote_sql = remote_db.export_sql_string_for_sync()?;
+        for secret in ["remote-proxy-token", "remote-hash", "\"remote\":true"] {
+            assert!(
+                !remote_sql.contains(secret),
+                "{secret} must not be exported"
+            );
+        }
+        assert!(remote_sql.contains("stream_check_config"));
+
+        let local_db = Database::memory()?;
+        local_db.set_setting("proxy_access_token", "local-proxy-token")?;
+        local_db.set_setting("prompt_live_written_hash_claude", "local-hash")?;
+        local_db.import_sql_string_for_sync(&remote_sql)?;
+        assert_eq!(
+            local_db.get_setting("proxy_access_token")?.as_deref(),
+            Some("local-proxy-token")
+        );
+        assert_eq!(
+            local_db
+                .get_setting("prompt_live_written_hash_claude")?
+                .as_deref(),
+            Some("local-hash")
+        );
+        assert_eq!(
+            local_db.get_setting("stream_check_config")?.as_deref(),
+            Some("{\"remote\":1}")
         );
         Ok(())
     }

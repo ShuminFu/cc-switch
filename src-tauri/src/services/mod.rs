@@ -13,6 +13,7 @@ pub mod mcp;
 pub mod model_fetch;
 pub mod notifications;
 pub mod omo;
+pub mod operation_log;
 pub mod profile;
 pub mod project_binding;
 pub mod prompt;

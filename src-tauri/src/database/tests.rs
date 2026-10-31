@@ -1805,6 +1805,12 @@ fn drop_columns(conn: &Connection, table: &str, columns: &[&str]) {
 /// `create_tables` stay in place, as they did in real installations).
 fn undo_migration(conn: &Connection, version: i32) {
     match version {
+        23 => conn
+            .execute_batch(
+                "CREATE INDEX idx_request_logs_session ON proxy_request_logs(session_id);
+                 CREATE INDEX idx_request_logs_status ON proxy_request_logs(status_code);",
+            )
+            .expect("undo v23"),
         22 => {
             for table in ["providers", "mcp_servers", "prompts", "skills", "profiles"] {
                 for kind in ["insert", "update", "delete"] {
@@ -2206,7 +2212,8 @@ fn baseline_schema_checksum_is_pinned() {
     // fresh databases and the pre-v17 upgrade path, so it must never change: add a
     // migration instead. The hash covers the fresh schema, i.e. the baseline plus
     // later migrations (v18 added session_log_sync.byte_offset / prefix_hash; v19-v22
-    // added the endpoint unique index, pricing source, CHECK-free proxy_config and row versions).
+    // added the endpoint unique index, pricing source, CHECK-free proxy_config and row versions;
+    // v23 dropped the unused session/status request-log indexes).
     let conn = Connection::open_in_memory().expect("open memory db");
     Database::create_tables_on_conn(&conn).expect("create fresh schema");
     let objects = query_strings(
@@ -2222,7 +2229,7 @@ fn baseline_schema_checksum_is_pinned() {
     let checksum = format!("{:x}", Sha256::digest(text.as_bytes()));
     assert_eq!(
         checksum,
-        "aff743d9d734c2dc8fb9278898d4c0699c2325aea9cef9366036f38f7f2ae9f4",
+        "f99c90bd6943943f0b7bbf963693af4c8515a3c58cba043b7362db9cd363f190",
         "baseline schema changed; it is frozen at v{}:\n{text}",
         schema::BASELINE_SCHEMA_VERSION
     );

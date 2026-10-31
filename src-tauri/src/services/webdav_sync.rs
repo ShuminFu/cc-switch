@@ -3,7 +3,6 @@
 //! Implements manifest-based synchronization on top of the HTTP transport
 //! primitives in [`super::webdav`]. Artifact set: `db.sql` + `skills.zip`.
 
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::OnceLock;
 
@@ -16,17 +15,17 @@ use crate::services::webdav::{
 };
 use crate::settings::{update_webdav_sync_status, WebDavSyncSettings};
 
-use super::sync_transport::{self, PutResult, SyncTransport, TransportKeys, UploadOutcome};
+use super::sync_transport::{
+    self, PutResult, RemoteSnapshot, SyncTransport, TransportKeys, UploadOutcome,
+};
 
 use super::sync_protocol::{
-    apply_snapshot, capture_local_fingerprint, download_passphrase, effective_db_compat_version,
-    ensure_local_unchanged, evaluate_upload_precondition, is_insecure_remote_url, localized,
-    open_artifact, persist_sync_success_best_effort, remote_encryption_info, sha256_hex,
-    sync_status_from_baseline, unlock_remote, validate_artifact_size_limit,
-    validate_manifest_compat, verify_artifact, warn_if_insecure, ArtifactMeta, RemoteLayout,
-    RemoteManifestView, SyncBaseline, SyncManifest, DB_COMPAT_VERSION, MAX_MANIFEST_BYTES,
-    MAX_SYNC_ARTIFACT_BYTES, PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
+    ensure_local_unchanged, is_insecure_remote_url, persist_sync_success_best_effort,
+    sync_status_from_baseline, warn_if_insecure, RemoteLayout, SyncBaseline, DB_COMPAT_VERSION,
+    PROTOCOL_VERSION,
 };
+#[cfg(test)]
+use super::sync_protocol::{sha256_hex, SyncManifest, REMOTE_DB_SQL};
 
 pub(crate) mod archive;
 
@@ -45,12 +44,6 @@ where
     operation.await
 }
 
-struct RemoteSnapshot {
-    layout: RemoteLayout,
-    manifest: SyncManifest,
-    manifest_bytes: Vec<u8>,
-    manifest_etag: Option<String>,
-}
 // ─── Public API ──────────────────────────────────────────────
 
 /// Check WebDAV connectivity and ensure remote directory structure.
@@ -123,24 +116,30 @@ static WEBDAV_KEYS: TransportKeys = TransportKeys {
     remote_missing_artifact: "webdav.sync.remote_missing_artifact",
 };
 
-/// WebDAV implementation of the shared sync engine's transport for the
-/// current layout (SVC-19). Downloads keep their own path because they also
-/// read the legacy layout.
+/// WebDAV implementation of the shared sync engine's transport (SVC-19).
+/// Uploads always use the current layout; downloads and remote info also
+/// read the legacy (pre-`db-v*`) layout through a second transport.
 struct WebDavTransport<'a> {
     settings: &'a WebDavSyncSettings,
     auth: WebDavAuth,
+    layout: RemoteLayout,
 }
 
 impl<'a> WebDavTransport<'a> {
     fn new(settings: &'a WebDavSyncSettings) -> Self {
+        Self::with_layout(settings, RemoteLayout::Current)
+    }
+
+    fn with_layout(settings: &'a WebDavSyncSettings, layout: RemoteLayout) -> Self {
         Self {
             settings,
             auth: auth_for(settings),
+            layout,
         }
     }
 
     fn url(&self, name: &str) -> Result<String, AppError> {
-        remote_file_url(self.settings, RemoteLayout::Current, name)
+        remote_file_url(self.settings, self.layout, name)
     }
 }
 
@@ -152,7 +151,7 @@ impl SyncTransport for WebDavTransport<'_> {
         &WEBDAV_KEYS
     }
     async fn ensure_root(&self) -> Result<(), AppError> {
-        let dir_segs = remote_dir_segments(self.settings, RemoteLayout::Current);
+        let dir_segs = remote_dir_segments(self.settings, self.layout);
         ensure_remote_directories(&self.settings.base_url, &dir_segs, &self.auth).await
     }
     async fn get(&self, name: &str, max_bytes: usize) -> Result<sync_transport::Fetched, AppError> {
@@ -177,6 +176,15 @@ impl SyncTransport for WebDavTransport<'_> {
     async fn head(&self, name: &str) -> Result<Option<String>, AppError> {
         head_etag(&self.url(name)?, &self.auth).await
     }
+    fn layout(&self) -> RemoteLayout {
+        self.layout
+    }
+    fn remote_path(&self) -> String {
+        remote_dir_display(self.settings, self.layout)
+    }
+    fn insecure(&self) -> bool {
+        is_insecure_remote_url(&self.settings.base_url)
+    }
 }
 
 /// Download remote snapshot and apply to local database + skills.
@@ -195,60 +203,42 @@ pub async fn download(
     )?;
     let insecure = warn_if_insecure("WebDAV", &settings.base_url);
     ensure_local_unchanged(db, &settings.status, force)?;
-    let auth = auth_for(settings);
-    let snapshot = find_remote_snapshot(settings, &auth)
+    let (transport, snapshot) = find_remote_snapshot(settings)
         .await?
-        .ok_or_else(|| {
-            localized(
-                "webdav.sync.remote_empty",
-                "远端没有可下载的同步数据",
-                "No downloadable sync data found on the remote.",
-            )
-        })?;
+        .ok_or_else(|| sync_transport::remote_empty_error(&WebDavTransport::new(settings)))?;
+    let layout = snapshot.layout;
+    let baseline = sync_transport::download_snapshot(&transport, db, snapshot).await?;
+    let source_path = transport.remote_path();
+    drop(transport);
 
-    validate_manifest_compat(&snapshot.manifest, snapshot.layout)?;
-    // Encrypted snapshot: check the passphrase before downloading artifacts.
-    let key = unlock_remote(&snapshot.manifest, download_passphrase().as_deref())?;
-
-    // Download and verify artifacts
-    let db_sql = download_and_verify(
-        settings,
-        &auth,
-        snapshot.layout,
-        REMOTE_DB_SQL,
-        &snapshot.manifest.artifacts,
-    )
-    .await?;
-    let skills_zip = download_and_verify(
-        settings,
-        &auth,
-        snapshot.layout,
-        REMOTE_SKILLS_ZIP,
-        &snapshot.manifest.artifacts,
-    )
-    .await?;
-    let db_sql = open_artifact(key.as_ref(), REMOTE_DB_SQL, db_sql)?;
-    let skills_zip = open_artifact(key.as_ref(), REMOTE_SKILLS_ZIP, skills_zip)?;
-
-    // Apply snapshot
-    apply_snapshot(db, &db_sql, &skills_zip)?;
-
-    let manifest_hash = sha256_hex(&snapshot.manifest_bytes);
-    let _persisted = persist_sync_success_best_effort(
-        settings,
-        SyncBaseline {
-            manifest_hash,
-            etag: snapshot.manifest_etag,
-            local_fingerprint: capture_local_fingerprint(db),
-        },
-        persist_sync_success,
-    );
+    let _persisted = persist_sync_success_best_effort(settings, baseline, persist_sync_success);
     Ok(serde_json::json!({
         "status": "downloaded",
         "insecureTransport": insecure,
-        "sourceLayout": snapshot.layout.as_str(),
-        "sourcePath": remote_dir_display(settings, snapshot.layout),
+        "sourceLayout": layout.as_str(),
+        "sourcePath": source_path,
     }))
+}
+
+/// Dry-run a download (SVC-27): what the remote snapshot would change
+/// locally, without applying it. `None` when the remote has no snapshot.
+/// Not exposed as a command yet (the IPC layer is owned separately).
+#[allow(dead_code)]
+pub(crate) async fn preview(
+    db: &crate::database::Database,
+    settings: &WebDavSyncSettings,
+) -> Result<Option<sync_transport::SyncPreview>, AppError> {
+    settings.validate()?;
+    crate::services::sync_protocol::validate_remote_layout(
+        &settings.remote_root,
+        &settings.profile,
+    )?;
+    let Some((transport, snapshot)) = find_remote_snapshot(settings).await? else {
+        return Ok(None);
+    };
+    sync_transport::preview_snapshot(&transport, db, &snapshot)
+        .await
+        .map(Some)
 }
 
 /// Fetch remote manifest info without downloading artifacts.
@@ -258,42 +248,14 @@ pub async fn fetch_remote_info(settings: &WebDavSyncSettings) -> Result<Option<V
         &settings.remote_root,
         &settings.profile,
     )?;
-    let auth = auth_for(settings);
-    let Some(snapshot) = find_remote_snapshot(settings, &auth).await? else {
+    let Some((transport, snapshot)) = find_remote_snapshot(settings).await? else {
         return Ok(None);
     };
-    let compatible = validate_manifest_compat(&snapshot.manifest, snapshot.layout).is_ok();
-    let db_compat_version = effective_db_compat_version(&snapshot.manifest, snapshot.layout);
-    let remote_changed = evaluate_upload_precondition(
+    Ok(Some(sync_transport::remote_info(
+        &transport,
         &settings.status,
-        Some(&RemoteManifestView {
-            bytes: &snapshot.manifest_bytes,
-            etag: snapshot.manifest_etag.as_deref(),
-            manifest: None,
-        }),
-        false,
-    )
-    .is_err();
-    let encryption = remote_encryption_info(&snapshot.manifest);
-
-    let payload = serde_json::json!({
-        "remoteChangedSinceLastSync": remote_changed,
-        "insecureTransport": is_insecure_remote_url(&settings.base_url),
-        "encrypted": encryption.encrypted,
-        "passphraseMatches": encryption.passphrase_matches,
-        "deviceName": snapshot.manifest.device_name,
-        "createdAt": snapshot.manifest.created_at,
-        "snapshotId": snapshot.manifest.snapshot_id,
-        "version": snapshot.manifest.version,
-        "protocolVersion": snapshot.manifest.version,
-        "dbCompatVersion": db_compat_version,
-        "compatible": compatible,
-        "artifacts": snapshot.manifest.artifacts.keys().collect::<Vec<_>>(),
-        "layout": snapshot.layout.as_str(),
-        "remotePath": remote_dir_display(settings, snapshot.layout),
-    });
-
-    Ok(Some(payload))
+        &snapshot,
+    )))
 }
 
 // ─── Sync status persistence ─────────────────────────────────
@@ -307,72 +269,18 @@ fn persist_sync_success(
     update_webdav_sync_status(status)
 }
 
+/// The manifest of the current layout, else of the legacy layout, with the
+/// transport that addresses it.
 async fn find_remote_snapshot(
     settings: &WebDavSyncSettings,
-    auth: &WebDavAuth,
-) -> Result<Option<RemoteSnapshot>, AppError> {
-    if let Some(snapshot) = fetch_remote_snapshot(settings, auth, RemoteLayout::Current).await? {
-        return Ok(Some(snapshot));
+) -> Result<Option<(WebDavTransport<'_>, RemoteSnapshot)>, AppError> {
+    for layout in [RemoteLayout::Current, RemoteLayout::Legacy] {
+        let transport = WebDavTransport::with_layout(settings, layout);
+        if let Some(snapshot) = sync_transport::fetch_manifest(&transport).await? {
+            return Ok(Some((transport, snapshot)));
+        }
     }
-    fetch_remote_snapshot(settings, auth, RemoteLayout::Legacy).await
-}
-
-async fn fetch_remote_snapshot(
-    settings: &WebDavSyncSettings,
-    auth: &WebDavAuth,
-    layout: RemoteLayout,
-) -> Result<Option<RemoteSnapshot>, AppError> {
-    let manifest_url = remote_file_url(settings, layout, REMOTE_MANIFEST)?;
-    let Some((manifest_bytes, manifest_etag)) =
-        get_bytes(&manifest_url, auth, MAX_MANIFEST_BYTES).await?
-    else {
-        return Ok(None);
-    };
-
-    let manifest: SyncManifest =
-        serde_json::from_slice(&manifest_bytes).map_err(|e| AppError::Json {
-            path: REMOTE_MANIFEST.to_string(),
-            source: e,
-        })?;
-
-    Ok(Some(RemoteSnapshot {
-        layout,
-        manifest,
-        manifest_bytes,
-        manifest_etag,
-    }))
-}
-// ─── Download & verify ───────────────────────────────────────
-
-async fn download_and_verify(
-    settings: &WebDavSyncSettings,
-    auth: &WebDavAuth,
-    layout: RemoteLayout,
-    artifact_name: &str,
-    artifacts: &BTreeMap<String, ArtifactMeta>,
-) -> Result<Vec<u8>, AppError> {
-    let meta = artifacts.get(artifact_name).ok_or_else(|| {
-        localized(
-            "webdav.sync.manifest_missing_artifact",
-            format!("manifest 中缺少 artifact: {artifact_name}"),
-            format!("Manifest missing artifact: {artifact_name}"),
-        )
-    })?;
-    validate_artifact_size_limit(artifact_name, meta.size)?;
-
-    let url = remote_file_url(settings, layout, artifact_name)?;
-    let (bytes, _) = get_bytes(&url, auth, MAX_SYNC_ARTIFACT_BYTES as usize)
-        .await?
-        .ok_or_else(|| {
-            localized(
-                "webdav.sync.remote_missing_artifact",
-                format!("远端缺少 artifact 文件: {artifact_name}"),
-                format!("Remote artifact file missing: {artifact_name}"),
-            )
-        })?;
-
-    verify_artifact(&bytes, artifact_name, meta)?;
-    Ok(bytes)
+    Ok(None)
 }
 
 // ─── Remote path helpers ─────────────────────────────────────

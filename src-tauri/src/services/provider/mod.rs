@@ -106,6 +106,8 @@ pub fn reapply_current_codex_official_live(state: &AppState) -> Result<bool, App
     Ok(true)
 }
 
+use crate::services::operation_log::{step as op_step, step_result as op_step_result, StepOutcome};
+
 /// Provider business logic service
 pub struct ProviderService;
 
@@ -2619,6 +2621,27 @@ impl ProviderService {
     ///    d. Write target provider config to live files
     ///    e. Sync MCP configuration
     pub fn switch(state: &AppState, app_type: AppType, id: &str) -> Result<SwitchResult, AppError> {
+        // SVC-23: one traced operation per switch; sub-steps attach to it.
+        let from = crate::settings::get_current_provider(&app_type).unwrap_or_default();
+        let op = crate::services::operation_log::Operation::start(
+            "switch",
+            &[("app", app_type.as_str()), ("from", &from), ("to", id)],
+        );
+        let result = op.in_scope(|| Self::switch_inner(state, app_type, id));
+        if let Ok(result) = &result {
+            for warning in &result.warnings {
+                op_step("warning", StepOutcome::Warning, Some(warning));
+            }
+        }
+        op.finish(&result);
+        result
+    }
+
+    fn switch_inner(
+        state: &AppState,
+        app_type: AppType,
+        id: &str,
+    ) -> Result<SwitchResult, AppError> {
         // Check if provider exists
         let providers = state.db.get_all_providers(app_type.as_str())?;
         let _provider = providers
@@ -2692,12 +2715,13 @@ impl ProviderService {
                 id
             );
 
-            block_on_async(
+            let hot = block_on_async(
                 state
                     .proxy_service
                     .hot_switch_provider_inner(app_type.as_str(), id),
-            )
-            .map_err(|e| AppError::Message(format!("热切换失败: {e}")))?;
+            );
+            op_step_result("hot_switch", &hot);
+            hot.map_err(|e| AppError::Message(format!("热切换失败: {e}")))?;
 
             // The proxy server will route requests to the new provider via is_current.
             // MCP sync is intentionally skipped while Live config is owned by takeover.
@@ -2811,6 +2835,11 @@ impl ProviderService {
                     match &live_read {
                         Err(AppError::Localized { key, .. }) if key.ends_with(".missing") => {
                             log::debug!("Backfill skipped: live config missing ({key})");
+                            op_step(
+                                "backfill",
+                                StepOutcome::Skipped,
+                                Some("live config missing"),
+                            );
                         }
                         Err(e) => {
                             // The live file is overwritten below (a backup is taken first),
@@ -2842,9 +2871,10 @@ impl ProviderService {
                                     &current_provider,
                                     live_config,
                                 );
-                            if let Err(e) =
-                                state.db.save_provider(app_type.as_str(), &current_provider)
-                            {
+                            let saved =
+                                state.db.save_provider(app_type.as_str(), &current_provider);
+                            op_step_result("backfill", &saved);
+                            if let Err(e) = saved {
                                 log::warn!("Backfill failed: {e}");
                                 result
                                     .warnings
@@ -2862,11 +2892,20 @@ impl ProviderService {
         // target provider: if they named the target while live still held the
         // previous provider, the next switch would backfill the previous
         // provider's credentials into the target's record (SVC-01).
-        write_live_with_common_config(state.db.as_ref(), &app_type, provider)?;
+        let written = write_live_with_common_config(state.db.as_ref(), &app_type, provider);
+        op_step_result("live_write", &written);
+        written?;
 
         // Additive mode apps skip setting is_current (no such concept)
         if !app_type.is_additive_mode() {
-            Self::commit_current_pointers(state, &app_type, id, previous_live_provider.as_ref())?;
+            let committed = Self::commit_current_pointers(
+                state,
+                &app_type,
+                id,
+                previous_live_provider.as_ref(),
+            );
+            op_step_result("commit_pointers", &committed);
+            committed?;
         }
 
         // Hermes is additive, so "switching" doesn't overwrite a live config file
@@ -2926,7 +2965,9 @@ impl ProviderService {
         // 走到这里 DB is_current 与 live 都已落盘，切换事实上已成功；
         // 投影失败上抛会让前端报"切换失败"制造分裂假象，故降级为警告
         // （MCP 投影可自愈：下次切换 / 任一 MCP 启停都会重新投影）。
-        if let Err(err) = McpService::sync_enabled_for_app(state, &app_type) {
+        let mcp = McpService::sync_enabled_for_app(state, &app_type);
+        op_step_result("mcp_projection", &mcp);
+        if let Err(err) = mcp {
             log::warn!("切换供应商后重投影 {app_type:?} MCP 失败（将在下次同步时自愈）: {err}");
         }
 
@@ -3556,29 +3597,15 @@ impl ProviderService {
         app_type: AppType,
         updates: Vec<ProviderSortUpdate>,
     ) -> Result<bool, AppError> {
-        let mut providers = state.db.get_all_providers(app_type.as_str())?;
-
-        // SVC-11: all-or-nothing. If the k-th save fails, the rows already
-        // saved are put back to their previous sort index.
-        let mut saved: Vec<(String, Option<usize>)> = Vec::new();
-        for update in updates {
-            if let Some(provider) = providers.get_mut(&update.id) {
-                let previous = provider.sort_index;
-                provider.sort_index = Some(update.sort_index);
-                if let Err(err) = state.db.save_provider(app_type.as_str(), provider) {
-                    for (id, previous) in saved.iter().rev() {
-                        if let Some(p) = providers.get_mut(id) {
-                            p.sort_index = *previous;
-                            if let Err(e) = state.db.save_provider(app_type.as_str(), p) {
-                                log::warn!("Failed to roll back sort index of {id}: {e}");
-                            }
-                        }
-                    }
-                    return Err(err);
-                }
-                saved.push((update.id, previous));
-            }
-        }
+        // SVC-11: all-or-nothing in one transaction; only `sort_index` is
+        // written, so the rest of each row is never rewritten from a copy.
+        let updates: Vec<(String, usize)> = updates
+            .into_iter()
+            .map(|update| (update.id, update.sort_index))
+            .collect();
+        state
+            .db
+            .update_provider_sort_indexes(app_type.as_str(), &updates)?;
 
         Ok(true)
     }

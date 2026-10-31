@@ -83,6 +83,21 @@ impl Database {
         Ok(())
     }
 
+    /// Make `id` the only enabled prompt of `app_type` in one statement (SVC-11).
+    ///
+    /// Only rows whose flag changes are touched; a failure leaves every row as
+    /// it was, so two prompts can never end up enabled.
+    pub fn set_enabled_prompt(&self, app_type: &str, id: &str) -> Result<usize, AppError> {
+        self.with_transaction(|tx| {
+            let changed = tx.execute(
+                "UPDATE prompts SET enabled = (id = ?1)
+                 WHERE app_type = ?2 AND enabled IS NOT (id = ?1)",
+                params![id, app_type],
+            )?;
+            Ok(changed)
+        })
+    }
+
     /// 删除提示词
     pub fn delete_prompt(&self, app_type: &str, id: &str) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);

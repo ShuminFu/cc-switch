@@ -419,6 +419,29 @@ impl Database {
         .and_then(|s| serde_json::from_str(&s).ok())
     }
 
+    /// Set the sort index of several providers in one transaction (SVC-11).
+    ///
+    /// Only `sort_index` is written, so a concurrent edit of the provider's
+    /// settings is never overwritten from a stale copy. Ids that do not exist
+    /// are ignored. Any failure rolls every row back.
+    pub fn update_provider_sort_indexes(
+        &self,
+        app_type: &str,
+        updates: &[(String, usize)],
+    ) -> Result<usize, AppError> {
+        self.with_transaction(|tx| {
+            let mut stmt = tx.prepare_cached(
+                "UPDATE providers SET sort_index = ?1
+                 WHERE id = ?2 AND app_type = ?3 AND sort_index IS NOT ?1",
+            )?;
+            let mut changed = 0;
+            for (id, sort_index) in updates {
+                changed += stmt.execute(params![*sort_index as i64, id, app_type])?;
+            }
+            Ok(changed)
+        })
+    }
+
     pub fn delete_provider(&self, app_type: &str, id: &str) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         let previous_config = Self::raw_settings_config(&conn, app_type, id);

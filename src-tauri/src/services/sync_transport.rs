@@ -12,15 +12,17 @@ use std::collections::BTreeMap;
 use std::future::Future;
 
 use crate::error::AppError;
+use crate::services::operation_log::{Operation, StepOutcome};
 use crate::settings::WebDavSyncStatus;
 
 use super::sync_protocol::{
     apply_snapshot, build_snapshot, capture_local_fingerprint, download_passphrase,
-    ensure_local_unchanged, ensure_no_encryption_downgrade, evaluate_upload_precondition,
-    local_unchanged_since_sync, open_artifact, remote_changed_error, sha256_hex, unlock_remote,
-    upload_key, upload_passphrase, validate_artifact_size_limit, validate_manifest_compat,
-    verify_artifact, ArtifactMeta, RemoteLayout, RemoteManifestView, SyncBaseline, SyncManifest,
-    MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES, REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
+    effective_db_compat_version, ensure_local_unchanged, ensure_no_encryption_downgrade,
+    evaluate_upload_precondition, local_unchanged_since_sync, open_artifact, remote_changed_error,
+    remote_encryption_info, sha256_hex, unlock_remote, upload_key, upload_passphrase,
+    validate_artifact_size_limit, validate_manifest_compat, verify_artifact, ArtifactMeta,
+    RemoteLayout, RemoteManifestView, SyncBaseline, SyncManifest, MAX_MANIFEST_BYTES,
+    MAX_SYNC_ARTIFACT_BYTES, REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
 };
 
 /// An object's bytes and ETag, or `None` when it does not exist.
@@ -71,6 +73,84 @@ pub(crate) trait SyncTransport: Sync {
     fn supports_conditional_put(&self) -> bool {
         true
     }
+    /// Remote directory layout this transport reads and writes (WebDAV can
+    /// also read the pre-`db-v*` legacy layout).
+    fn layout(&self) -> RemoteLayout {
+        RemoteLayout::Current
+    }
+    /// Human-readable remote location for status payloads.
+    fn remote_path(&self) -> String;
+    /// Whether the remote is reached over plain HTTP.
+    fn insecure(&self) -> bool;
+}
+
+/// A remote manifest with its raw bytes and ETag.
+pub(crate) struct RemoteSnapshot {
+    pub layout: RemoteLayout,
+    pub manifest: SyncManifest,
+    pub manifest_bytes: Vec<u8>,
+    pub manifest_etag: Option<String>,
+}
+
+/// Read and parse the remote manifest, or `None` when there is none.
+pub(crate) async fn fetch_manifest<T: SyncTransport>(
+    transport: &T,
+) -> Result<Option<RemoteSnapshot>, AppError> {
+    let Some((manifest_bytes, manifest_etag)) =
+        transport.get(REMOTE_MANIFEST, MAX_MANIFEST_BYTES).await?
+    else {
+        return Ok(None);
+    };
+    let manifest: SyncManifest =
+        serde_json::from_slice(&manifest_bytes).map_err(|e| AppError::Json {
+            path: REMOTE_MANIFEST.to_string(),
+            source: e,
+        })?;
+    Ok(Some(RemoteSnapshot {
+        layout: transport.layout(),
+        manifest,
+        manifest_bytes,
+        manifest_etag,
+    }))
+}
+
+/// Status payload describing a remote snapshot without downloading it
+/// (shared by every transport's `fetch_remote_info`).
+pub(crate) fn remote_info<T: SyncTransport>(
+    transport: &T,
+    status: &WebDavSyncStatus,
+    snapshot: &RemoteSnapshot,
+) -> serde_json::Value {
+    let manifest = &snapshot.manifest;
+    let compatible = validate_manifest_compat(manifest, snapshot.layout).is_ok();
+    let db_compat_version = effective_db_compat_version(manifest, snapshot.layout);
+    let remote_changed = evaluate_upload_precondition(
+        status,
+        Some(&RemoteManifestView {
+            bytes: &snapshot.manifest_bytes,
+            etag: snapshot.manifest_etag.as_deref(),
+            manifest: None,
+        }),
+        false,
+    )
+    .is_err();
+    let encryption = remote_encryption_info(manifest);
+    serde_json::json!({
+        "remoteChangedSinceLastSync": remote_changed,
+        "insecureTransport": transport.insecure(),
+        "encrypted": encryption.encrypted,
+        "passphraseMatches": encryption.passphrase_matches,
+        "deviceName": manifest.device_name,
+        "createdAt": manifest.created_at,
+        "snapshotId": manifest.snapshot_id,
+        "version": manifest.version,
+        "protocolVersion": manifest.version,
+        "dbCompatVersion": db_compat_version,
+        "compatible": compatible,
+        "artifacts": manifest.artifacts.keys().collect::<Vec<_>>(),
+        "layout": snapshot.layout.as_str(),
+        "remotePath": transport.remote_path(),
+    })
 }
 
 /// What an [`upload`] did.
@@ -94,6 +174,32 @@ pub(crate) async fn upload<T: SyncTransport>(
     force: bool,
     skip_if_unchanged: bool,
 ) -> Result<UploadOutcome, AppError> {
+    // SVC-23: one traced operation per sync upload.
+    let op = Operation::start_async(
+        "sync",
+        &[
+            ("transport", transport.label()),
+            ("direction", "upload"),
+            ("force", if force { "true" } else { "false" }),
+        ],
+    );
+    let result = tracing::Instrument::instrument(
+        upload_inner(transport, db, status, force, skip_if_unchanged, &op),
+        op.span(),
+    )
+    .await;
+    op.finish(&result);
+    result
+}
+
+async fn upload_inner<T: SyncTransport>(
+    transport: &T,
+    db: &crate::database::Database,
+    status: &WebDavSyncStatus,
+    force: bool,
+    skip_if_unchanged: bool,
+    op: &Operation,
+) -> Result<UploadOutcome, AppError> {
     transport.ensure_root().await?;
 
     // SEC-06 / SVC-04: encrypt the artifacts when sync encryption is enabled.
@@ -102,7 +208,13 @@ pub(crate) async fn upload<T: SyncTransport>(
         .transpose()?;
     let snapshot = build_snapshot(db, encryption.as_ref())?;
     let local_fingerprint = snapshot.local_fingerprint.clone();
+    op.step("snapshot", StepOutcome::Ok, None);
     if skip_if_unchanged && local_unchanged_since_sync(status, &local_fingerprint) {
+        op.step(
+            "upload",
+            StepOutcome::Skipped,
+            Some("local content unchanged"),
+        );
         log::debug!(
             "[{}] Local content unchanged since last sync; skipping upload",
             transport.label()
@@ -122,7 +234,9 @@ pub(crate) async fn upload<T: SyncTransport>(
             manifest: parsed.as_ref(),
         });
         ensure_no_encryption_downgrade(parsed.as_ref(), encryption.is_some(), force)?;
-        evaluate_upload_precondition(status, view.as_ref(), force)?
+        let precondition = evaluate_upload_precondition(status, view.as_ref(), force);
+        op.step_result("remote_precondition", &precondition);
+        precondition?
     };
     let if_match = if_match.filter(|_| transport.supports_conditional_put());
 
@@ -150,6 +264,15 @@ pub(crate) async fn upload<T: SyncTransport>(
             if_match.as_deref(),
         )
         .await?;
+    op.step(
+        "manifest_put",
+        if outcome == PutResult::Stored {
+            StepOutcome::Ok
+        } else {
+            StepOutcome::Error
+        },
+        (outcome == PutResult::PreconditionFailed).then_some("precondition failed"),
+    );
     if outcome == PutResult::PreconditionFailed {
         log::warn!(
             "[{}] Manifest changed during upload (412); refusing to overwrite",
@@ -196,39 +319,148 @@ pub(crate) async fn download<T: SyncTransport>(
     force: bool,
 ) -> Result<SyncBaseline, AppError> {
     ensure_local_unchanged(db, status, force)?;
-    let keys = transport.keys();
-
-    let (manifest_bytes, etag) = transport
-        .get(REMOTE_MANIFEST, MAX_MANIFEST_BYTES)
+    let snapshot = fetch_manifest(transport)
         .await?
-        .ok_or_else(|| {
-            AppError::localized(
-                keys.remote_empty,
-                "远端没有可下载的同步数据",
-                "No downloadable sync data found on the remote.",
-            )
-        })?;
+        .ok_or_else(|| remote_empty_error(transport))?;
+    download_snapshot(transport, db, snapshot).await
+}
 
-    let manifest: SyncManifest =
-        serde_json::from_slice(&manifest_bytes).map_err(|e| AppError::Json {
-            path: REMOTE_MANIFEST.to_string(),
-            source: e,
-        })?;
+/// What downloading the remote snapshot would change locally (SVC-27).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncPreview {
+    pub device_name: String,
+    pub created_at: String,
+    pub snapshot_id: String,
+    /// Per-table differences (only tables that differ); rows and key paths
+    /// only, never values.
+    pub tables: Vec<crate::database::sync_diff::TableDiff>,
+}
 
-    validate_manifest_compat(&manifest, RemoteLayout::Current)?;
+impl SyncPreview {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn is_empty(&self) -> bool {
+        self.tables.is_empty()
+    }
+}
+
+/// Dry-run a download: fetch and verify the remote `db.sql`, load it into a
+/// scratch database and diff it against the local data. Nothing local is
+/// changed. `None` when the remote has no snapshot.
+pub(crate) async fn preview_snapshot<T: SyncTransport>(
+    transport: &T,
+    db: &crate::database::Database,
+    snapshot: &RemoteSnapshot,
+) -> Result<SyncPreview, AppError> {
+    let manifest = &snapshot.manifest;
+    validate_manifest_compat(manifest, snapshot.layout)?;
+    let key = unlock_remote(manifest, download_passphrase().as_deref())?;
+    let db_sql = download_and_verify(transport, REMOTE_DB_SQL, &manifest.artifacts).await?;
+    let db_sql = open_artifact(key.as_ref(), REMOTE_DB_SQL, db_sql)?;
+    let sql = String::from_utf8(db_sql).map_err(|e| {
+        AppError::localized(
+            "sync.preview_invalid_sql",
+            format!("远端 db.sql 不是有效的 UTF-8: {e}"),
+            format!("Remote db.sql is not valid UTF-8: {e}"),
+        )
+    })?;
+    let remote = crate::database::Database::from_sync_export(&sql)?;
+    let local = db.sync_view()?;
+    let tables = {
+        let local_conn = local
+            .conn
+            .lock()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let remote_conn = remote
+            .conn
+            .lock()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        crate::database::sync_diff::diff_databases(&local_conn, &remote_conn)?
+    };
+    Ok(SyncPreview {
+        device_name: manifest.device_name.clone(),
+        created_at: manifest.created_at.clone(),
+        snapshot_id: manifest.snapshot_id.clone(),
+        tables,
+    })
+}
+
+/// [`preview_snapshot`] of the transport's current manifest.
+pub(crate) async fn preview<T: SyncTransport>(
+    transport: &T,
+    db: &crate::database::Database,
+) -> Result<Option<SyncPreview>, AppError> {
+    match fetch_manifest(transport).await? {
+        Some(snapshot) => preview_snapshot(transport, db, &snapshot).await.map(Some),
+        None => Ok(None),
+    }
+}
+
+/// "Nothing to download" in the transport's localization namespace.
+pub(crate) fn remote_empty_error<T: SyncTransport>(transport: &T) -> AppError {
+    AppError::localized(
+        transport.keys().remote_empty,
+        "远端没有可下载的同步数据",
+        "No downloadable sync data found on the remote.",
+    )
+}
+
+/// Verify, download and apply the artifacts of an already fetched manifest.
+///
+/// The caller has checked the local-changes precondition; `transport` must
+/// address the layout the manifest was read from.
+pub(crate) async fn download_snapshot<T: SyncTransport>(
+    transport: &T,
+    db: &crate::database::Database,
+    snapshot: RemoteSnapshot,
+) -> Result<SyncBaseline, AppError> {
+    // SVC-23: one traced operation per sync download.
+    let op = Operation::start_async(
+        "sync",
+        &[
+            ("transport", transport.label()),
+            ("direction", "download"),
+            ("layout", snapshot.layout.as_str()),
+        ],
+    );
+    let result = tracing::Instrument::instrument(
+        download_snapshot_inner(transport, db, snapshot, &op),
+        op.span(),
+    )
+    .await;
+    op.finish(&result);
+    result
+}
+
+async fn download_snapshot_inner<T: SyncTransport>(
+    transport: &T,
+    db: &crate::database::Database,
+    snapshot: RemoteSnapshot,
+    op: &Operation,
+) -> Result<SyncBaseline, AppError> {
+    let RemoteSnapshot {
+        layout,
+        manifest,
+        manifest_bytes,
+        manifest_etag,
+    } = snapshot;
+    validate_manifest_compat(&manifest, layout)?;
     // Encrypted snapshot: check the passphrase before downloading artifacts.
     let key = unlock_remote(&manifest, download_passphrase().as_deref())?;
 
     let db_sql = download_and_verify(transport, REMOTE_DB_SQL, &manifest.artifacts).await?;
     let skills_zip = download_and_verify(transport, REMOTE_SKILLS_ZIP, &manifest.artifacts).await?;
+    op.step("artifacts_verified", StepOutcome::Ok, None);
     let db_sql = open_artifact(key.as_ref(), REMOTE_DB_SQL, db_sql)?;
     let skills_zip = open_artifact(key.as_ref(), REMOTE_SKILLS_ZIP, skills_zip)?;
 
-    apply_snapshot(db, &db_sql, &skills_zip)?;
+    let applied = apply_snapshot(db, &db_sql, &skills_zip);
+    op.step_result("apply_snapshot", &applied);
+    applied?;
 
     Ok(SyncBaseline {
         manifest_hash: sha256_hex(&manifest_bytes),
-        etag,
+        etag: manifest_etag,
         local_fingerprint: capture_local_fingerprint(db),
     })
 }
@@ -348,6 +580,12 @@ impl SyncTransport for InMemoryTransport {
             .get(name)
             .map(|(_, etag)| format!("\"{etag}\"")))
     }
+    fn remote_path(&self) -> String {
+        "/memory".to_string()
+    }
+    fn insecure(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
@@ -442,6 +680,90 @@ mod tests {
         let err = block(download(&remote, &db, &WebDavSyncStatus::default(), true))
             .expect_err("hash mismatch must be rejected before apply");
         assert!(!is_sync_conflict(&err));
+    }
+
+    /// SVC-19: remote info is computed once for every transport.
+    #[test]
+    #[serial_test::serial]
+    fn remote_info_reports_manifest_and_remote_change() {
+        let _home = TestHome::new();
+        let db = crate::database::Database::memory().expect("memory db");
+        let remote = InMemoryTransport::default();
+        assert!(block(fetch_manifest(&remote)).unwrap().is_none());
+
+        let baseline = match block(upload(
+            &remote,
+            &db,
+            &WebDavSyncStatus::default(),
+            false,
+            false,
+        ))
+        .unwrap()
+        {
+            UploadOutcome::Uploaded(baseline) => baseline,
+            other => panic!("expected an upload, got {other:?}"),
+        };
+        let status = sync_status_from_baseline(baseline);
+        let snapshot = block(fetch_manifest(&remote)).unwrap().expect("manifest");
+        let info = remote_info(&remote, &status, &snapshot);
+        assert_eq!(info["remoteChangedSinceLastSync"], false);
+        assert_eq!(info["compatible"], true);
+        assert_eq!(info["layout"], RemoteLayout::Current.as_str());
+        assert_eq!(info["remotePath"], "/memory");
+        assert_eq!(info["insecureTransport"], false);
+
+        // Another device replaced the manifest since this device's last sync.
+        let mut manifest = remote.object(REMOTE_MANIFEST).unwrap();
+        manifest.extend_from_slice(b" ");
+        remote.replace(REMOTE_MANIFEST, manifest);
+        let snapshot = block(fetch_manifest(&remote)).unwrap().expect("manifest");
+        let info = remote_info(&remote, &status, &snapshot);
+        assert_eq!(info["remoteChangedSinceLastSync"], true);
+    }
+
+    /// SVC-27: a preview of an identical snapshot is empty; a local edit shows
+    /// up as one changed key path; nothing local is modified.
+    #[test]
+    #[serial_test::serial]
+    fn preview_diffs_remote_against_local_without_applying() {
+        let _home = TestHome::new();
+        let db = crate::database::Database::memory().expect("memory db");
+        let remote = InMemoryTransport::default();
+        assert!(block(preview(&remote, &db)).unwrap().is_none());
+
+        let mut provider = crate::provider::Provider::with_id(
+            "p1".to_string(),
+            "P1".to_string(),
+            serde_json::json!({ "env": { "ANTHROPIC_BASE_URL": "https://a.example" } }),
+            None,
+        );
+        db.save_provider("claude", &provider).unwrap();
+        block(upload(
+            &remote,
+            &db,
+            &WebDavSyncStatus::default(),
+            false,
+            false,
+        ))
+        .unwrap();
+        let unchanged = block(preview(&remote, &db)).unwrap().expect("preview");
+        assert!(unchanged.is_empty(), "{:?}", unchanged.tables);
+
+        provider.settings_config =
+            serde_json::json!({ "env": { "ANTHROPIC_BASE_URL": "https://b.example" } });
+        db.save_provider("claude", &provider).unwrap();
+        let changed = block(preview(&remote, &db)).unwrap().expect("preview");
+        assert_eq!(changed.tables.len(), 1);
+        assert_eq!(
+            changed.tables[0].changed[0].fields,
+            vec!["settings_config.env.ANTHROPIC_BASE_URL".to_string()]
+        );
+        // The local edit is still there: a preview never applies.
+        let local = db.get_provider_by_id("p1", "claude").unwrap().unwrap();
+        assert_eq!(
+            local.settings_config["env"]["ANTHROPIC_BASE_URL"],
+            "https://b.example"
+        );
     }
 
     #[test]
