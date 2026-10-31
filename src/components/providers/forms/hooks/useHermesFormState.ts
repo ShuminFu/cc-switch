@@ -60,6 +60,39 @@ function parseHermesField<T>(
   }
 }
 
+/**
+ * Mark the keys the user removed while editing as explicit deletes (CFG-18).
+ *
+ * The backend merges a Hermes `custom_providers` entry with what is on disk so
+ * that keys the UI does not know survive; a key that is simply missing from the
+ * payload is therefore carried over. Only a `null` value deletes it. This turns
+ * every top-level key that the stored config had and the edited config lost
+ * (cleared models, rate limit, a key removed in the JSON editor...) into
+ * `null`. Text that is not a JSON object is returned unchanged.
+ */
+export function withClearedHermesKeys(
+  initialConfig: Record<string, unknown> | undefined,
+  configText: string,
+): string {
+  if (!initialConfig) return configText;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(configText);
+  } catch {
+    return configText;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return configText;
+  }
+  const next = parsed as Record<string, unknown>;
+  const cleared = Object.keys(initialConfig).filter(
+    (key) => key !== "name" && !(key in next),
+  );
+  if (cleared.length === 0) return configText;
+  for (const key of cleared) next[key] = null;
+  return JSON.stringify(next, null, 2);
+}
+
 function parseRateLimitDelay(raw: unknown): number | undefined {
   return typeof raw === "number" && Number.isFinite(raw) && raw >= 0
     ? raw
