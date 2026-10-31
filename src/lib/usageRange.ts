@@ -1,7 +1,6 @@
 import type { UsageRangePreset, UsageRangeSelection } from "@/types/usage";
 
 const DAY_SECONDS = 24 * 60 * 60;
-const DAY_MS = DAY_SECONDS * 1000;
 
 export interface ResolvedUsageRange {
   startDate: number;
@@ -18,9 +17,16 @@ function getPresetLookbackStart(
   nowMs: number,
 ): number {
   const dayCount = preset === "7d" ? 7 : preset === "14d" ? 14 : 30;
-  return Math.floor(
-    getStartOfLocalDayDate(nowMs - (dayCount - 1) * DAY_MS).getTime() / 1000,
+  // Calendar arithmetic, not `nowMs - n * 24h`: a 23-hour DST day inside the
+  // window would otherwise push the start one calendar day too far back
+  // (FE-ARCH-42).
+  const now = new Date(nowMs);
+  const start = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - (dayCount - 1),
   );
+  return Math.floor(start.getTime() / 1000);
 }
 
 export function resolveUsageRange(
