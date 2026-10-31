@@ -14,6 +14,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -344,10 +345,41 @@ export function ProviderList({
     }
   }, [isSearchOpen]);
 
+  // Filter chips (FE-PROV-33): by category, and "in failover queue" while
+  // failover is active. Shown only for lists long enough to need them.
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const [queueOnly, setQueueOnly] = useState(false);
+  const presentCategories = useMemo(() => {
+    const seen = new Set<string>();
+    for (const provider of sortedProviders) {
+      if (provider.category) seen.add(provider.category);
+    }
+    return CATEGORY_FILTER_ORDER.filter((category) => seen.has(category));
+  }, [sortedProviders]);
+  const showFilterChips =
+    sortedProviders.length >= FILTER_CHIPS_MIN_PROVIDERS &&
+    (presentCategories.length > 1 || isFailoverModeActive);
+  const activeCategoryFilter =
+    showFilterChips &&
+    categoryFilter &&
+    presentCategories.includes(categoryFilter)
+      ? categoryFilter
+      : null;
+  const activeQueueOnly = showFilterChips && isFailoverModeActive && queueOnly;
+
   const filteredProviders = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();
-    if (!keyword) return sortedProviders;
-    return sortedProviders.filter((provider) => {
+    const chipFiltered =
+      activeCategoryFilter || activeQueueOnly
+        ? sortedProviders.filter(
+            (provider) =>
+              (!activeCategoryFilter ||
+                provider.category === activeCategoryFilter) &&
+              (!activeQueueOnly || isInFailoverQueue(provider.id)),
+          )
+        : sortedProviders;
+    if (!keyword) return chipFiltered;
+    return chipFiltered.filter((provider) => {
       // Endpoint and configured models are searchable too (FE-PROV-54).
       const fields = [
         provider.name,
@@ -360,7 +392,14 @@ export function ProviderList({
         field?.toString().toLowerCase().includes(keyword),
       );
     });
-  }, [appId, searchTerm, sortedProviders]);
+  }, [
+    appId,
+    searchTerm,
+    sortedProviders,
+    activeCategoryFilter,
+    activeQueueOnly,
+    isInFailoverQueue,
+  ]);
 
   const sortableItems = useMemo(
     () => filteredProviders.map((provider) => provider.id),
@@ -660,6 +699,52 @@ export function ProviderList({
         )}
       </AnimatePresence>
 
+      {showFilterChips && (
+        <div
+          className="flex flex-wrap items-center gap-1.5"
+          role="toolbar"
+          aria-label={t("provider.filter.label", {
+            defaultValue: "Filter providers",
+          })}
+        >
+          <FilterChip
+            active={!activeCategoryFilter && !activeQueueOnly}
+            onClick={() => {
+              setCategoryFilter(null);
+              setQueueOnly(false);
+            }}
+          >
+            {t("provider.filter.all", { defaultValue: "All" })}
+          </FilterChip>
+          {presentCategories.length > 1 &&
+            presentCategories.map((category) => (
+              <FilterChip
+                key={category}
+                active={activeCategoryFilter === category}
+                onClick={() =>
+                  setCategoryFilter((current) =>
+                    current === category ? null : category,
+                  )
+                }
+              >
+                {t(`provider.filter.category.${category}`, {
+                  defaultValue: CATEGORY_FILTER_LABELS[category] ?? category,
+                })}
+              </FilterChip>
+            ))}
+          {isFailoverModeActive && (
+            <FilterChip
+              active={activeQueueOnly}
+              onClick={() => setQueueOnly((current) => !current)}
+            >
+              {t("provider.filter.inQueue", {
+                defaultValue: "In failover queue",
+              })}
+            </FilterChip>
+          )}
+        </div>
+      )}
+
       {filteredProviders.length === 0 ? (
         <div className="px-6 py-8 text-sm text-center border border-dashed rounded-lg border-border text-muted-foreground">
           {t("provider.noSearchResults", {
@@ -674,6 +759,53 @@ export function ProviderList({
 }
 
 const EMPTY_IDS: string[] = [];
+/** Filter chips appear from this many providers on (FE-PROV-33). */
+export const FILTER_CHIPS_MIN_PROVIDERS = 6;
+const CATEGORY_FILTER_ORDER = [
+  "official",
+  "cn_official",
+  "cloud_provider",
+  "aggregator",
+  "third_party",
+  "custom",
+  "omo",
+  "omo-slim",
+];
+const CATEGORY_FILTER_LABELS: Record<string, string> = {
+  official: "Official",
+  cn_official: "Open-source official",
+  cloud_provider: "Cloud",
+  aggregator: "Aggregator",
+  third_party: "Third party",
+  custom: "Custom",
+  omo: "OMO",
+  "omo-slim": "OMO Slim",
+};
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={
+        active
+          ? "rounded-full border border-primary bg-primary/10 px-2.5 py-0.5 text-xs text-primary"
+          : "rounded-full border border-border px-2.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"
+      }
+    >
+      {children}
+    </button>
+  );
+}
 /** Lists longer than this are virtualised. */
 export const VIRTUALIZE_THRESHOLD = 30;
 const ESTIMATED_CARD_HEIGHT = 112;

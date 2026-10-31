@@ -510,4 +510,48 @@ describe("ProviderList Component", () => {
     heightSpy.mockRestore();
     widthSpy.mockRestore();
   });
+
+  it("filters by category and failover-queue chips (FE-PROV-33)", () => {
+    const providers = [
+      createProvider({ id: "o1", name: "Off", category: "official" }),
+      ...Array.from({ length: 5 }, (_, i) =>
+        createProvider({
+          id: `a${i}`,
+          name: `Agg ${i}`,
+          category: "aggregator",
+        }),
+      ),
+    ];
+    failoverState.autoEnabled = true;
+    failoverState.queue = [{ providerId: "a1" }];
+    useDragSortMock.mockReturnValue({
+      sortedProviders: providers,
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={Object.fromEntries(providers.map((p) => [p.id, p]))}
+        currentProviderId="o1"
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+        isProxyTakeover
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Official" }));
+    expect(screen.getByTestId("provider-card-o1")).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-card-a0")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "In failover queue" }));
+    expect(screen.getByTestId("provider-card-a1")).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-card-o1")).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId(/^provider-card-/)).toHaveLength(1);
+  });
 });
