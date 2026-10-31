@@ -4,7 +4,11 @@
 //! read-only file installed by an administrator) and exposes a few Tauri
 //! commands, so the core services only need a one-line hook to use it.
 
+pub mod audit_log;
+pub mod config_history;
 pub mod deeplink_nav;
+pub mod file_dialog;
 pub mod log_retention;
 pub mod policy;
+pub mod redact;
 pub mod session_export;

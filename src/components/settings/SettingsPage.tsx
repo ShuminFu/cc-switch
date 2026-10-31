@@ -62,6 +62,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { SettingsFormState } from "@/hooks/useSettings";
 import { RequestLogRetentionPanel } from "@/components/log-retention/RequestLogRetentionPanel";
+import { WorkbenchAccordionItems } from "@/components/workbench/WorkbenchAccordionItems";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -537,6 +538,8 @@ export function SettingsPage({
                           <LogConfigPanel />
                         </AccordionContent>
                       </AccordionItem>
+
+                      <WorkbenchAccordionItems />
                     </Accordion>
                   </motion.div>
                 ) : null}

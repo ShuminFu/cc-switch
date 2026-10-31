@@ -62,6 +62,62 @@ export const handlers = [
     },
   ),
   http.post(`${TAURI_ENDPOINT}/prune_request_logs_now`, () => success(0)),
+  // Workbench features (src/components/workbench, src-tauri/src/features).
+  http.post(`${TAURI_ENDPOINT}/list_audit_events`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/export_audit_log`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/list_config_history`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_provider_history`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/restore_provider_version`, () =>
+    success({ recreated: false, missingSecrets: [] }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/list_custom_tools`, () =>
+    success({ tools: [], descriptorErrors: [], descriptorsDir: "" }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/save_custom_tool_profile`, () => success("p1")),
+  http.post(`${TAURI_ENDPOINT}/delete_custom_tool_profile`, () =>
+    success(null),
+  ),
+  http.post(`${TAURI_ENDPOINT}/activate_custom_tool_profile`, () => success(1)),
+  http.post(`${TAURI_ENDPOINT}/import_custom_tool_live`, () => success("p1")),
+  http.post(`${TAURI_ENDPOINT}/export_share_bundle`, () =>
+    success({
+      path: null,
+      providers: 0,
+      mcpServers: 0,
+      prompts: 0,
+      secretsStripped: 0,
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/preview_share_bundle`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/apply_share_bundle`, () =>
+    success({ added: 0, updated: 0, skipped: 0, errors: [] }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_session_usage`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/get_usage_by_project`, () =>
+    success({
+      since: 0,
+      projects: [],
+      unattributed: {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        totalCostUsd: 0,
+      },
+      total: {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        totalCostUsd: 0,
+      },
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/copy_prompt_to_apps`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/list_recovery_backups`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/restore_backup_for_recovery`, () => success("")),
   http.post(`${TAURI_ENDPOINT}/get_managed_policy_status`, () =>
     success({ state: "none", signed: false, unknownFeatures: [] }),
   ),

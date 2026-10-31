@@ -266,7 +266,10 @@ pub fn switch(ctx: &Context, app: AppType, provider: &str) -> Result<Output, Cli
         .get(&id)
         .map(|p| p.name.clone())
         .unwrap_or_default();
-    let result = ProviderService::switch(&state, app.clone(), &id).map_err(app_err)?;
+    let result = crate::features::config_history::track_switch(&state, &app, &id, "cli", || {
+        ProviderService::switch(&state, app.clone(), &id)
+    })
+    .map_err(app_err)?;
     let mut text = format!("Switched {} to {id} ({name}).\n", app.as_str());
     for w in &result.warnings {
         text.push_str(&format!("warning: {w}\n"));
