@@ -1,3 +1,4 @@
+import i18n from "i18next";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   extractCodexBaseUrl,
@@ -163,11 +164,17 @@ export function useCodexConfigState({ initialData }: UseCodexConfigStateProps) {
     try {
       const parsed = JSON.parse(value);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return "Auth JSON must be an object";
+        return i18n.t("providerForm.validation.fieldMustBeObject", {
+          field: "auth.json",
+          defaultValue: "{{field}} must be a JSON object",
+        });
       }
       return "";
     } catch {
-      return "Invalid JSON format";
+      return i18n.t("providerForm.validation.fieldJsonSyntaxError", {
+        field: "auth.json",
+        defaultValue: "{{field}}: JSON format error, please check the syntax",
+      });
     }
   }, []);
 

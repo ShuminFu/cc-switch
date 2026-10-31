@@ -1,3 +1,4 @@
+import i18n from "i18next";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 
 export const GROK_BUILD_DEFAULT_MODEL = "grok-4.5";
@@ -258,21 +259,33 @@ export function updateGrokBuildConfigPreservingFormat(
 }
 
 export function validateGrokBuildConfig(configToml: string): string | null {
-  if (!configToml.trim()) return "config.toml must not be empty";
+  if (!configToml.trim())
+    return i18n.t("grokBuild.validation.configEmpty", {
+      defaultValue: "config.toml must not be empty",
+    });
   try {
     const root = asRecord(parseToml(configToml));
     const models = asRecord(root?.models);
     const profile = asString(models?.default).trim();
     const selected = asRecord(asRecord(root?.model)?.[profile]);
-    if (!profile || !selected) return "Missing [models] default model table";
+    if (!profile || !selected)
+      return i18n.t("grokBuild.validation.missingDefaultModel", {
+        defaultValue: "Missing [models] default model table",
+      });
     for (const field of ["model", "base_url", "name", "api_backend"]) {
-      if (!asString(selected[field]).trim()) return `Missing ${field}`;
+      if (!asString(selected[field]).trim())
+        return i18n.t("grokBuild.validation.missingField", {
+          field,
+          defaultValue: "Missing {{field}}",
+        });
     }
     if (
       !asString(selected.api_key).trim() &&
       !asString(selected.env_key).trim()
     ) {
-      return "Missing api_key or env_key";
+      return i18n.t("grokBuild.validation.missingKey", {
+        defaultValue: "Missing api_key or env_key",
+      });
     }
     const contextWindow = selected.context_window;
     if (
@@ -280,7 +293,9 @@ export function validateGrokBuildConfig(configToml: string): string | null {
       !Number.isInteger(contextWindow) ||
       contextWindow <= 0
     ) {
-      return "context_window must be a positive integer";
+      return i18n.t("grokBuild.validation.contextWindow", {
+        defaultValue: "context_window must be a positive integer",
+      });
     }
     return null;
   } catch (error) {

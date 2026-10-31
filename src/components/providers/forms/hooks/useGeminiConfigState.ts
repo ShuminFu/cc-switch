@@ -1,3 +1,4 @@
+import i18n from "i18next";
 import { useState, useCallback, useEffect } from "react";
 import { mergeEnvIntoText } from "@/utils/providerEnvText";
 
@@ -127,9 +128,15 @@ export function useGeminiConfigState({
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return "";
       }
-      return "Config must be a JSON object";
+      return i18n.t("providerForm.validation.fieldMustBeObject", {
+        field: "config",
+        defaultValue: "{{field}} must be a JSON object",
+      });
     } catch {
-      return "Invalid JSON format";
+      return i18n.t("providerForm.validation.fieldJsonSyntaxError", {
+        field: "config",
+        defaultValue: "{{field}}: JSON format error, please check the syntax",
+      });
     }
   }, []);
 
