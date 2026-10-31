@@ -18,6 +18,7 @@ import {
   setCodexWireApi,
 } from "@/utils/providerConfigUtils";
 import CodexConfigEditor from "../CodexConfigEditor";
+import { normalizeTomlText } from "@/utils/textNormalization";
 import { CodexFormFields } from "../CodexFormFields";
 import { CODEX_DEFAULT_CONFIG } from "../helpers/opencodeFormUtils";
 import {
@@ -195,6 +196,7 @@ function CodexAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
 
   const {
     configError: codexConfigError,
+    smartQuoteFixAvailable,
     debouncedValidate,
     validateToml,
   } = useCodexTomlValidation();
@@ -453,6 +455,11 @@ function CodexAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
         commonConfigError={commonConfig.commonConfigError}
         authError={codexAuthError}
         configError={codexConfigError}
+        onFixSmartQuotes={
+          smartQuoteFixAvailable
+            ? () => handleCodexConfigChange(normalizeTomlText(codexConfig))
+            : undefined
+        }
         onExtract={commonConfig.handleExtract}
         isExtracting={commonConfig.isExtracting}
       />

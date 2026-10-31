@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { parse as parseToml } from "smol-toml";
 import { hasTomlCommonConfigSnippet } from "@/utils/providerConfigUtils";
 import { configApi } from "@/lib/api";
-import { normalizeTomlText } from "@/utils/textNormalization";
+import { parseTomlLenient } from "@/utils/textNormalization";
 
 /**
  * 合并/剥离通用配置片段（走后端 toml_edit，保注释、保键序）。
@@ -102,10 +101,7 @@ export function useCodexCommonConfig({
     }
 
     try {
-      const parsed = parseToml(normalizeTomlText(snippetString)) as Record<
-        string,
-        unknown
-      >;
+      const parsed = parseTomlLenient(snippetString) as Record<string, unknown>;
       return {
         hasContent: Object.keys(parsed).length > 0,
       };

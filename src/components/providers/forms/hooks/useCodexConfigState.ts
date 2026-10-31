@@ -7,7 +7,6 @@ import {
   setCodexModelName as setCodexModelNameInConfig,
   updateCodexExperimentalBearerToken,
 } from "@/utils/providerConfigUtils";
-import { normalizeTomlText } from "@/utils/textNormalization";
 import type { CodexCatalogModel } from "@/types";
 
 interface UseCodexConfigStateProps {
@@ -248,12 +247,13 @@ export function useCodexConfigState({ initialData }: UseCodexConfigStateProps) {
   // 处理 config 变化（同步 Base URL）
   const handleCodexConfigChange = useCallback(
     (value: string) => {
-      // 归一化中文/全角/弯引号，避免 TOML 解析报错
-      const normalized = normalizeTomlText(value);
-      setCodexConfig(normalized);
+      // Keep the buffer as typed: quotes inside strings and comments are user
+      // content (FE-ARCH-37). Smart-quote delimiters are offered as a fix by
+      // the TOML validation instead.
+      setCodexConfig(value);
 
       if (!isUpdatingCodexBaseUrlRef.current) {
-        const extracted = extractCodexBaseUrl(normalized) || "";
+        const extracted = extractCodexBaseUrl(value) || "";
         if (extracted !== codexBaseUrl) {
           setCodexBaseUrl(extracted);
         }

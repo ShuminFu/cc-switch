@@ -113,6 +113,7 @@ interface CodexConfigSectionProps {
   onEditCommonConfig: () => void;
   commonConfigError?: string;
   configError?: string;
+  onFixSmartQuotes?: () => void;
   isProxyTakeover?: boolean;
 }
 
@@ -129,6 +130,7 @@ export const CodexConfigSection: React.FC<CodexConfigSectionProps> = ({
   onEditCommonConfig,
   commonConfigError,
   configError,
+  onFixSmartQuotes,
   isProxyTakeover = false,
 }) => {
   const { t } = useTranslation();
@@ -371,6 +373,18 @@ export const CodexConfigSection: React.FC<CodexConfigSectionProps> = ({
 
       {configError && (
         <p className="text-xs text-red-500 dark:text-red-400">{configError}</p>
+      )}
+
+      {configError && onFixSmartQuotes && (
+        <button
+          type="button"
+          onClick={onFixSmartQuotes}
+          className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+        >
+          {t("codexConfig.fixSmartQuotes", {
+            defaultValue: "Replace smart quotes used as string delimiters",
+          })}
+        </button>
       )}
 
       {!configError && (

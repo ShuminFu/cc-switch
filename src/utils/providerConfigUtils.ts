@@ -3,7 +3,7 @@
 import type { TemplateValueConfig } from "../config/claudeProviderPresets";
 import type { CodexApiFormat } from "@/types";
 import { deepClone } from "@/utils/deepClone";
-import { normalizeTomlText } from "@/utils/textNormalization";
+import { normalizeTomlText, parseTomlLenient } from "@/utils/textNormalization";
 import { parse as parseToml } from "smol-toml";
 import i18n from "i18next";
 
@@ -261,8 +261,8 @@ export const hasTomlCommonConfigSnippet = (
   if (!snippetString.trim()) return false;
 
   try {
-    const config = parseToml(normalizeTomlText(tomlString || ""));
-    const snippet = parseToml(normalizeTomlText(snippetString));
+    const config = parseTomlLenient(tomlString || "");
+    const snippet = parseTomlLenient(snippetString);
     return isSubset(config, snippet);
   } catch {
     // Fallback to text-based matching if TOML parsing fails
@@ -697,7 +697,8 @@ export const setCodexWireApi = (
   configText: string,
   wireApi: "responses" | "chat",
 ): string => {
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   const lines = normalizedText ? normalizedText.split("\n") : [];
   const targetSectionName = getCodexProviderSectionName(normalizedText);
   const replacementLine = `wire_api = "${wireApi}"`;
@@ -805,7 +806,8 @@ export const setCodexGoalMode = (
   configText: string,
   enabled: boolean,
 ): string => {
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   const lines = normalizedText ? normalizedText.split("\n") : [];
   let featureRange = getTomlSectionRange(lines, "features");
 
@@ -914,7 +916,8 @@ export const setCodexRemoteCompaction = (
   enabled: boolean,
   fallbackProviderName?: string,
 ): string => {
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   const lines = normalizedText ? normalizedText.split("\n") : [];
   const targetSectionName = getCodexCustomProviderSectionName(normalizedText);
 
@@ -1089,7 +1092,8 @@ export const updateCodexExperimentalBearerToken = (
   configText: string,
   token: string,
 ): string => {
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   if (
     !normalizedText ||
     !normalizedText.includes("experimental_bearer_token")
@@ -1164,7 +1168,8 @@ export const setCodexBaseUrl = (
   baseUrl: string,
 ): string => {
   const trimmed = baseUrl.trim();
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   const lines = normalizedText ? normalizedText.split("\n") : [];
   const targetSectionName = getCodexProviderSectionName(normalizedText);
   const allAssignments = findTomlAssignments(lines, TOML_BASE_URL_PATTERN);
@@ -1324,7 +1329,8 @@ export const setCodexModelName = (
   modelName: string,
 ): string => {
   const trimmed = modelName.trim();
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   const lines = normalizedText ? normalizedText.split("\n") : [];
   const topLevelEndIndex = getTopLevelEndIndex(lines);
   const modelLineIndex = findTopLevelModelLineIndex(lines, topLevelEndIndex);
@@ -1402,7 +1408,8 @@ export const setCodexTopLevelInt = (
   fieldName: string,
   value: number,
 ): string => {
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   const lines = normalizedText ? normalizedText.split("\n") : [];
   const topLevelEndIndex = getTopLevelEndIndex(lines);
   const existing = findTopLevelIntMatch(lines, fieldName, topLevelEndIndex);
@@ -1427,7 +1434,8 @@ export const removeCodexTopLevelField = (
   configText: string,
   fieldName: string,
 ): string => {
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   if (!normalizedText) return normalizedText;
   const lines = normalizedText.split("\n");
   const topLevelEndIndex = getTopLevelEndIndex(lines);

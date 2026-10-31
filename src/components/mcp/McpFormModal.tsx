@@ -19,7 +19,6 @@ import {
   extractIdFromToml,
   mcpServerToToml,
 } from "@/utils/tomlUtils";
-import { normalizeTomlText } from "@/utils/textNormalization";
 import { parseSmartMcpJson } from "@/utils/formatters";
 import { useMcpValidation } from "./useMcpValidation";
 import { useUpsertMcpServer } from "@/hooks/useMcp";
@@ -205,7 +204,9 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
   };
 
   const handleConfigChange = (value: string) => {
-    const nextValue = useToml ? normalizeTomlText(value) : value;
+    // Never rewrite quotes while typing (FE-ARCH-37); TOML parsing falls back
+    // to smart-quote delimiters on its own.
+    const nextValue = value;
     setFormConfig(nextValue);
 
     if (useToml) {
