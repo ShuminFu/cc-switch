@@ -20,6 +20,9 @@ const home = process.env.CC_SWITCH_E2E_HOME;
 const binDir = process.env.CC_SWITCH_E2E_BIN;
 const fakeClaude = path.join(binDir, "claude");
 const marker = path.join(home, "ccs248-claude-invocation.txt");
+// The launch script the fake found among its ancestors, and whether it still
+// existed while the resume command ran.
+const scriptMarker = `${marker}.script`;
 
 const SESSION_ID = randomUUID();
 const SESSION_TITLE = `ccs248 resume probe ${SESSION_ID.slice(0, 8)}`;
@@ -43,6 +46,14 @@ function writeFakeClaude() {
     [
       "#!/bin/sh",
       'if [ "$1" = "--version" ]; then echo "0.0.0 (fake Claude Code)"; exit 0; fi',
+      // xterm -> sh <script> -> user shell -> claude: find the script path.
+      "pid=$PPID",
+      'while [ "${pid:-1}" -gt 1 ]; do',
+      '  script=$(tr "\\0" "\\n" < "/proc/$pid/cmdline" | grep "cc_switch_resume_.*\\.sh$")',
+      '  [ -n "$script" ] && break',
+      "  pid=$(sed -n 's/^PPid:[[:space:]]*//p' \"/proc/$pid/status\")",
+      "done",
+      `{ printf '%s\\n' "$script"; [ -f "$script" ] && echo present; } > ${shellQuote(scriptMarker)}`,
       `{ pwd -P; for arg in "$@"; do printf '[%s]\\n' "$arg"; done; } > ${shellQuote(`${marker}.tmp`)}`,
       `mv ${shellQuote(`${marker}.tmp`)} ${shellQuote(marker)}`,
       "",
@@ -117,23 +128,11 @@ const xtermPids = () =>
 
 // Launch scripts go to $XDG_RUNTIME_DIR when it is an absolute dir, otherwise
 // to <app config dir>/tmp (private_launch_temp_dir).
-function leftoverResumeScripts() {
+function launchScriptDirs() {
   const dirs = [path.join(home, ".cc-switch", "tmp")];
   const runtimeDir = process.env.XDG_RUNTIME_DIR;
   if (runtimeDir && path.isAbsolute(runtimeDir)) dirs.push(runtimeDir);
-  return dirs.flatMap((dir) => {
-    try {
-      return fs
-        .readdirSync(dir)
-        .filter(
-          (name) =>
-            name.startsWith("cc_switch_resume_") && name.endsWith(".sh"),
-        )
-        .map((name) => path.join(dir, name));
-    } catch {
-      return [];
-    }
-  });
+  return dirs;
 }
 
 const invoke = (command, args = {}) =>
@@ -182,6 +181,7 @@ describe("Session resume on Linux", () => {
     }
     fs.rmSync(fakeClaude, { force: true });
     fs.rmSync(marker, { force: true });
+    fs.rmSync(scriptMarker, { force: true });
     if (projectDir) fs.rmSync(projectDir, { recursive: true, force: true });
     if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
   });
@@ -208,6 +208,7 @@ describe("Session resume on Linux", () => {
     writeFakeClaude();
     writeSessionLog();
     fs.rmSync(marker, { force: true });
+    fs.rmSync(scriptMarker, { force: true });
 
     await nav.click();
     const item = await $(`//button[contains(., "${SESSION_TITLE}")]`);
@@ -255,10 +256,18 @@ describe("Session resume on Linux", () => {
   });
 
   it("deletes the launch script and keeps the terminal open", async () => {
-    await browser.waitUntil(() => leftoverResumeScripts().length === 0, {
+    // The resume command ran from a cc_switch_resume_*.sh in the private
+    // launch dir, which still existed at that point.
+    const [script, present] = fs.readFileSync(scriptMarker, "utf8").split("\n");
+    console.log(`[e2e] launch script: ${script}`);
+    expect(path.basename(script)).toMatch(/^cc_switch_resume_.*\.sh$/);
+    expect(launchScriptDirs()).toContain(path.dirname(script));
+    expect(present).toBe("present");
+
+    await browser.waitUntil(() => !fs.existsSync(script), {
       timeout: 10_000,
       interval: 250,
-      timeoutMsg: `resume script left behind: ${leftoverResumeScripts().join(", ")}`,
+      timeoutMsg: `resume script left behind: ${script}`,
     });
 
     await browser.pause(STAYS_OPEN_MS);

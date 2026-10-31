@@ -30,7 +30,7 @@ None.
   - the marker is exactly `<realpath session dir>\n[--resume]\n[<id>]\n`, so the cwd keeps its space and parentheses and the id is a single argument;
   - exactly one new xterm process appeared;
   - the "Terminal launched" toast is shown and there is no `data-type="error"` sonner toast;
-  - no `cc_switch_resume_*.sh` is left in `<HOME>/.cc-switch/tmp` or an absolute `$XDG_RUNTIME_DIR`;
+  - the fake finds the `cc_switch_resume_*.sh` launch script among its ancestors (`sh <script>`), which must sit in `<HOME>/.cc-switch/tmp` or an absolute `$XDG_RUNTIME_DIR` and still exist while the resume command runs; that exact file is gone afterwards;
   - after 2 s, xterm is still alive and has exactly one child, the user shell from the `exec` line. That shell's `/proc/<pid>/cwd` is the session dir and its cmdline no longer mentions the launch script.
 - Cleanup in `after`: kills the xterm, goes back to the main view (the app reopens on the last view, which broke the next spec on the first full run), restores the previous `preferredTerminal`, and removes the fake, the marker, the session log and the temp dir.
 - `e2e/wdio.conf.mjs`: new `CC_SWITCH_E2E_BIN` (default `<e2e HOME>/bin`), prepended to the app's `PATH` in `appEnv()`. It is empty unless a spec puts a stub there.
@@ -49,5 +49,7 @@ None.
 - `actionlint .github/workflows/ci.yml .github/workflows/release.yml`: clean. Both files also load with `yaml.safe_load`.
 - `pnpm typecheck`: clean. `pnpm test:unit`: 173 files / 1668 tests passed. `pnpm format:check` and `prettier --check` on the e2e files: clean.
 - No Rust code changed, so the cargo suites were not re-run.
+
+**Review.** The original deletion check only listed `cc_switch_resume_*.sh` files in the expected dirs, so it passed vacuously if the script landed anywhere else (for example the `env::temp_dir()` fallback) and could fail on unrelated leftovers in a shared `$XDG_RUNTIME_DIR`. The fake `claude` now walks its ancestors' `/proc/<pid>/cmdline` for the launch script path and records whether the file exists at that point; the spec asserts the path is in the private launch dir, existed during the run and is deleted afterwards. Re-verified: the spec passes with `XDG_RUNTIME_DIR` unset (script under `<HOME>/.cc-switch/tmp`) and set to a 0700 temp dir (script there); the full `xvfb-run -a pnpm --dir e2e test` passes (4 spec files: 6, 6, 3, 2); `pnpm format:check` clean; no xterm, tauri-driver, WebKitWebDriver or `/tmp/ccs248*` left behind.
 
 **Not covered:** real gnome-terminal and konsole on an interactive desktop, which still use `--` and `-e` from the built-in list. The CI legs pick up the spec once they run with the xterm install. They were not run from here.
