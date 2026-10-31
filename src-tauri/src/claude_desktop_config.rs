@@ -14,9 +14,7 @@ use crate::provider::{ClaudeDesktopMode, Provider};
 pub const PROFILE_ID: &str = "00000000-0000-4000-8000-000000157210";
 pub const PROFILE_NAME: &str = "CC Switch";
 
-#[cfg(any(target_os = "macos", windows, test))]
 const CONFIG_FILE: &str = "claude_desktop_config.json";
-#[cfg(any(target_os = "macos", windows, test))]
 const CONFIG_LIBRARY_DIR: &str = "configLibrary";
 const GATEWAY_TOKEN_SETTING_KEY: &str = "claude_desktop_gateway_token";
 const CLAUDE_DESKTOP_PROXY_PREFIX: &str = "/claude-desktop";
@@ -1206,7 +1204,45 @@ fn meta_has_profile_entry(path: &Path) -> bool {
 }
 
 fn is_supported_platform() -> bool {
-    cfg!(any(target_os = "macos", windows))
+    if cfg!(any(target_os = "macos", windows)) {
+        return true;
+    }
+    // PRODUCT-52: on Linux, community Claude Desktop builds keep their config
+    // under $XDG_CONFIG_HOME/Claude; support it once that directory exists.
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        linux_claude_dirs().is_some()
+    }
+    #[cfg(any(target_os = "macos", windows))]
+    {
+        false
+    }
+}
+
+/// `$XDG_CONFIG_HOME` (or `~/.config`) on Linux and other Unix desktops.
+#[cfg(any(not(any(target_os = "macos", windows)), test))]
+fn xdg_config_home(home: &Path, xdg: Option<std::ffi::OsString>) -> PathBuf {
+    xdg.map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| home.join(".config"))
+}
+
+/// `(Claude, Claude-3p)` under the XDG config dir when a Claude Desktop
+/// config directory exists there.
+#[cfg(any(not(any(target_os = "macos", windows)), test))]
+fn linux_claude_dirs_in(config_home: &Path) -> Option<(PathBuf, PathBuf)> {
+    let normal = config_home.join("Claude");
+    let threep = config_home.join("Claude-3p");
+    (normal.is_dir() || threep.is_dir()).then_some((normal, threep))
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn linux_claude_dirs() -> Option<(PathBuf, PathBuf)> {
+    let config_home = xdg_config_home(
+        &crate::config::get_home_dir(),
+        std::env::var_os("XDG_CONFIG_HOME"),
+    );
+    linux_claude_dirs_in(&config_home)
 }
 
 #[allow(clippy::needless_return)]
@@ -1224,7 +1260,10 @@ fn current_platform_paths() -> Result<ClaudeDesktopPaths, AppError> {
 
     #[cfg(not(any(target_os = "macos", windows)))]
     {
-        Err(unsupported_platform_error())
+        match linux_claude_dirs() {
+            Some((normal, threep)) => Ok(paths_from_dirs(normal, threep)),
+            None => Err(unsupported_platform_error()),
+        }
     }
 }
 
@@ -1276,7 +1315,6 @@ fn pick_windows_claude_dir(local_app_data: &Path, threep: bool) -> Option<PathBu
     candidates.into_iter().next()
 }
 
-#[cfg(any(target_os = "macos", windows, test))]
 fn paths_from_dirs(normal_dir: PathBuf, threep_dir: PathBuf) -> ClaudeDesktopPaths {
     let config_library_path = threep_dir.join(CONFIG_LIBRARY_DIR);
     let profile_path = config_library_path.join(format!("{PROFILE_ID}.json"));
@@ -1310,14 +1348,37 @@ fn proxy_origin_from_parts(listen_address: &str, listen_port: u16) -> String {
 fn unsupported_platform_error() -> AppError {
     AppError::localized(
         "claude_desktop.unsupported_platform",
-        "当前平台暂不支持 Claude Desktop 3P 配置。第一阶段仅支持 macOS 和 Windows。",
-        "Claude Desktop 3P configuration is not supported on this platform yet. Phase 1 only supports macOS and Windows.",
+        "未找到 Claude Desktop 配置目录（$XDG_CONFIG_HOME/Claude）。Linux 上需先安装并运行一次 Claude Desktop。",
+        "No Claude Desktop config directory was found ($XDG_CONFIG_HOME/Claude). On Linux, install and run Claude Desktop once first.",
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linux_paths_follow_xdg_config_home_and_require_the_claude_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path();
+        assert_eq!(xdg_config_home(home, None), home.join(".config"));
+        assert_eq!(
+            xdg_config_home(home, Some("relative".into())),
+            home.join(".config")
+        );
+        let xdg = home.join("xdg");
+        assert_eq!(xdg_config_home(home, Some(xdg.clone().into())), xdg);
+
+        assert!(linux_claude_dirs_in(&xdg).is_none());
+        std::fs::create_dir_all(xdg.join("Claude")).unwrap();
+        let (normal, threep) = linux_claude_dirs_in(&xdg).expect("Claude dir exists");
+        assert_eq!(normal, xdg.join("Claude"));
+        let paths = paths_from_dirs(normal, threep);
+        assert_eq!(
+            paths.config_library_path,
+            xdg.join("Claude-3p").join(CONFIG_LIBRARY_DIR)
+        );
+    }
     use crate::database::Database;
     use crate::provider::{ClaudeDesktopModelRoute, ProviderMeta};
     use serde_json::json;

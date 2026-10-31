@@ -13,6 +13,9 @@ use url::Url;
 /// Expected format:
 /// ccswitch://v1/import?resource={type}&...
 pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppError> {
+    // A managed policy can switch deep-link imports off entirely (PRODUCT-24).
+    crate::features::policy::enforce_deeplink_allowed()?;
+
     // Reject oversized links before any parsing or decoding (SESS-33).
     if url_str.len() > MAX_URL_BYTES {
         return Err(AppError::InvalidInput(format!(

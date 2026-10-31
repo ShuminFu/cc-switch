@@ -1169,6 +1169,29 @@ pub fn remove_provider(name: &str) -> Result<HermesWriteOutcome, AppError> {
 
     ensure_provider_writable(&config, name, "remove")?;
 
+    let exists = config
+        .get("custom_providers")
+        .and_then(|v| v.as_sequence())
+        .is_some_and(|seq| {
+            seq.iter()
+                .any(|p| p.get("name").and_then(|n| n.as_str()) == Some(name))
+        });
+    // PRODUCT-71: refuse to leave `model.provider` pointing at a removed entry.
+    let backs_default = config
+        .get("model")
+        .and_then(|m| m.get("provider"))
+        .and_then(|p| p.as_str())
+        .is_some_and(|p| p == name);
+    if exists && backs_default {
+        return Err(AppError::localized(
+            "hermes.providerBacksDefaultModel",
+            format!("供应商 '{name}' 是当前默认模型的来源（model.provider），请先切换到其他供应商再移除"),
+            format!(
+                "Provider '{name}' is the default model provider (model.provider). Switch to another provider before removing it."
+            ),
+        ));
+    }
+
     let mut providers: Vec<serde_yaml::Value> = config
         .get("custom_providers")
         .and_then(|v| v.as_sequence())
@@ -2168,6 +2191,33 @@ providers:
                 format!("{err}").contains("providers:"),
                 "error message should point user at providers dict: {err}"
             );
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn remove_provider_refuses_the_default_model_provider() {
+        with_test_home(|| {
+            let yaml = "\
+model:
+  default: m1
+  provider: openrouter
+custom_providers:
+- name: openrouter
+  base_url: https://openrouter.ai/api/v1
+- name: other
+  base_url: https://other.example.com/v1
+";
+            let config_path = get_hermes_config_path();
+            fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+            fs::write(&config_path, yaml).unwrap();
+
+            let err = remove_provider("openrouter").expect_err("default provider is protected");
+            assert!(err.to_string().contains("model.provider"), "{err}");
+            assert!(get_provider("openrouter").unwrap().is_some());
+
+            remove_provider("other").unwrap();
+            assert!(get_provider("other").unwrap().is_none());
         });
     }
 

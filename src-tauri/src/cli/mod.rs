@@ -173,6 +173,58 @@ fn dispatch(ctx: &Context, cli: &Cli, out: &mut dyn Write) -> Result<Output, Cli
         } => ops::usage_summary(ctx, *days, app.clone()),
         Command::Export { file } => ops::export(ctx, file),
         Command::Import { file } => ops::import(ctx, file),
+        Command::Policy => Ok(policy_output()),
+    }
+}
+
+/// `ccs policy`: report the managed policy state (PRODUCT-24).
+fn policy_output() -> Output {
+    use crate::features::policy::{current_status, PolicyState};
+    let status = current_status();
+    let text = match (status.state, status.policy.as_ref()) {
+        (PolicyState::None, _) => "No managed policy\n".to_string(),
+        (PolicyState::Active, Some(p)) => {
+            let mut t = format!(
+                "Managed policy: {}{}\nSource: {}\n",
+                p.name.as_deref().unwrap_or("(unnamed)"),
+                if status.signed { " (signed)" } else { "" },
+                status.source.as_deref().unwrap_or("-"),
+            );
+            if !p.endpoints.allow.is_empty() {
+                t.push_str(&format!(
+                    "Allowed endpoints: {}\n",
+                    p.endpoints.allow.join(", ")
+                ));
+            }
+            if !p.endpoints.deny.is_empty() {
+                t.push_str(&format!(
+                    "Denied endpoints: {}\n",
+                    p.endpoints.deny.join(", ")
+                ));
+            }
+            if !p.disabled_features.is_empty() {
+                t.push_str(&format!(
+                    "Disabled features: {}\n",
+                    p.disabled_features.join(", ")
+                ));
+            }
+            if !status.unknown_features.is_empty() {
+                t.push_str(&format!(
+                    "Not enforced by this version: {}\n",
+                    status.unknown_features.join(", ")
+                ));
+            }
+            t
+        }
+        (state, _) => format!(
+            "Policy file ignored ({state:?}): {}\n{}\n",
+            status.source.as_deref().unwrap_or("-"),
+            status.error.as_deref().unwrap_or(""),
+        ),
+    };
+    Output {
+        text,
+        json: serde_json::to_value(&status).unwrap_or(Value::Null),
     }
 }
 

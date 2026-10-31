@@ -31,6 +31,7 @@ import {
 import { BundleConfirmation } from "./BundleConfirmation";
 import { PublisherBadge } from "./PublisherBadge";
 import { queryKeys } from "@/lib/query/keys";
+import { UsageScriptHosts } from "@/components/deeplink-actions/UsageScriptHosts";
 
 /** Import stays disabled this long after the reviewed content changes, so a
  * request swapped in under the cursor cannot be approved by a stray click. */
@@ -952,6 +953,8 @@ export function DeepLinkImportDialog() {
                               })}
                           </pre>
                         </div>
+
+                        <UsageScriptHosts script={decodedUsageScript} />
 
                         <div className="flex items-start gap-2">
                           <Checkbox

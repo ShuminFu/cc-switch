@@ -52,6 +52,22 @@ const secretsVaultStatus = (enabled: boolean) => ({
 });
 
 export const handlers = [
+  http.post(`${TAURI_ENDPOINT}/save_session_export`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/take_deeplink_action`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/get_request_log_retention`, () =>
+    success({ retentionDays: 30, minDays: 1, maxDays: 3650 }),
+  ),
+  http.post(
+    `${TAURI_ENDPOINT}/set_request_log_retention`,
+    async ({ request }) => {
+      const { days } = await withJson<{ days: number }>(request);
+      return success({ retentionDays: days, minDays: 1, maxDays: 3650 });
+    },
+  ),
+  http.post(`${TAURI_ENDPOINT}/prune_request_logs_now`, () => success(0)),
+  http.post(`${TAURI_ENDPOINT}/get_managed_policy_status`, () =>
+    success({ state: "none", signed: false, unknownFeatures: [] }),
+  ),
   http.post(`${TAURI_ENDPOINT}/get_migration_result`, () => success(false)),
   http.post(`${TAURI_ENDPOINT}/get_skills_migration_result`, () =>
     success(null),

@@ -66,6 +66,8 @@ export interface AppEvents {
   /** Payload is a `DeepLinkImportRequestV2` (see `@/lib/api/deeplink`). */
   "deeplink-import": unknown;
   "deeplink-error": DeeplinkErrorPayload;
+  /** A navigation/switch action link is waiting in the backend mailbox. */
+  "deeplink-action": unknown;
   "update-download-progress": UpdateDownloadProgressPayload;
   "startup-progress": unknown;
   "startup-ready": unknown;
@@ -86,6 +88,7 @@ export const APP_EVENT_NAMES = [
   "s3-sync-status-updated",
   "deeplink-import",
   "deeplink-error",
+  "deeplink-action",
   "update-download-progress",
   "startup-progress",
   "startup-ready",

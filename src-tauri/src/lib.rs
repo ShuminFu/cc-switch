@@ -14,6 +14,7 @@ mod config;
 mod database;
 mod deeplink;
 mod error;
+mod features;
 mod gemini_config;
 mod gemini_mcp;
 mod grok_config;
@@ -149,6 +150,26 @@ fn handle_deeplink_url(
 
     if crate::commands::deeplink_is_duplicate(url_str) {
         log::info!("⊘ Ignoring duplicate delivery of the same deep link from {source}");
+        return true;
+    }
+
+    // Navigation / action links (open, switch, profile/apply), PRODUCT-20.
+    if let Some(parsed) = features::deeplink_nav::parse_action(url_str) {
+        match parsed {
+            Ok(action) => {
+                features::deeplink_nav::stash(app, action);
+                if focus_main_window {
+                    features::deeplink_nav::focus_main_window(app);
+                }
+            }
+            Err(e) => emit_or_buffer_deeplink(
+                app,
+                crate::commands::PendingDeepLink::Error {
+                    url: redacted_url,
+                    error: e.to_string(),
+                },
+            ),
+        }
         return true;
     }
 
@@ -978,6 +999,12 @@ pub fn run() {
             // Deep link import
             commands::parse_deeplink,
             commands::deeplink_frontend_ready,
+            features::policy::get_managed_policy_status,
+            features::deeplink_nav::take_deeplink_action,
+            features::log_retention::get_request_log_retention,
+            features::log_retention::set_request_log_retention,
+            features::log_retention::prune_request_logs_now,
+            features::session_export::save_session_export,
             commands::merge_deeplink_config,
             commands::import_from_deeplink,
             commands::import_from_deeplink_unified,

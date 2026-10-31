@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -235,33 +235,54 @@ export default function ProvidersPage() {
     setEditingProvider(null);
   };
 
+  // PRODUCT-73: one confirm at a time; errors always surface and the dialog
+  // always closes, so repeated clicks cannot re-issue the command.
+  const confirmPendingRef = useRef(false);
+  const [confirmPending, setConfirmPending] = useState(false);
   const handleConfirmAction = async () => {
-    if (!confirmAction) return;
+    if (!confirmAction || confirmPendingRef.current) return;
     const { provider, action } = confirmAction;
+    confirmPendingRef.current = true;
+    setConfirmPending(true);
 
-    if (action === "remove") {
-      // Remove from live config only (additive-mode apps); the provider
-      // stays in the database and the list.
-      await providersApi.removeFromLiveConfig(provider.id, activeApp);
-      const liveKey = liveProviderIdsKey(activeApp);
-      await Promise.all([
-        liveKey ? queryClient.invalidateQueries({ queryKey: liveKey }) : null,
-        appHas(activeApp, "healthBanner")
-          ? queryClient.invalidateQueries({
-              queryKey: queryKeys.openclaw.health,
-            })
-          : null,
-      ]);
-      toast.success(
-        t("notifications.removeFromConfigSuccess", {
-          defaultValue: "已从配置移除",
-        }),
-        { closeButton: true },
-      );
-    } else {
-      await deleteProvider(provider.id);
+    try {
+      if (action === "remove") {
+        // Remove from live config only (additive-mode apps); the provider
+        // stays in the database and the list.
+        await providersApi.removeFromLiveConfig(provider.id, activeApp);
+        const liveKey = liveProviderIdsKey(activeApp);
+        await Promise.all([
+          liveKey ? queryClient.invalidateQueries({ queryKey: liveKey }) : null,
+          appHas(activeApp, "healthBanner")
+            ? queryClient.invalidateQueries({
+                queryKey: queryKeys.openclaw.health,
+              })
+            : null,
+        ]);
+        toast.success(
+          t("notifications.removeFromConfigSuccess", {
+            defaultValue: "已从配置移除",
+          }),
+          { closeButton: true },
+        );
+      } else {
+        await deleteProvider(provider.id);
+      }
+    } catch (error) {
+      // The delete mutation already shows its own error toast.
+      if (action === "remove") {
+        toast.error(
+          t("notifications.removeFromConfigFailed", {
+            defaultValue: "Failed to remove from config: {{error}}",
+            error: extractErrorMessage(error) || String(error),
+          }),
+        );
+      }
+    } finally {
+      confirmPendingRef.current = false;
+      setConfirmPending(false);
+      setConfirmAction(null);
     }
-    setConfirmAction(null);
   };
 
   const handleDuplicateProvider = useDuplicateProvider(
@@ -563,6 +584,7 @@ export default function ProvidersPage() {
                 })
             : ""
         }
+        isPending={confirmPending}
         onConfirm={() => void handleConfirmAction()}
         onCancel={() => setConfirmAction(null)}
       />
