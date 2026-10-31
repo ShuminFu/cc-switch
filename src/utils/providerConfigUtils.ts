@@ -7,7 +7,7 @@ import { normalizeTomlText, parseTomlLenient } from "@/utils/textNormalization";
 import { parse as parseToml } from "smol-toml";
 import i18n from "i18next";
 
-const isPlainObject = (value: unknown): value is Record<string, any> => {
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   return Object.prototype.toString.call(value) === "[object Object]";
 };
 
@@ -18,7 +18,18 @@ const isPlainObject = (value: unknown): value is Record<string, any> => {
  */
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-const safeEntries = (source: Record<string, any>): [string, any][] =>
+/** The parts of a parsed Codex config.toml this module reads. */
+type CodexTomlDoc = {
+  features?: { goals?: unknown };
+  model_provider?: unknown;
+  model_providers?: Record<
+    string,
+    { name?: unknown; experimental_bearer_token?: unknown } | undefined
+  >;
+  [key: string]: unknown;
+};
+
+const safeEntries = (source: Record<string, unknown>): [string, unknown][] =>
   Object.entries(source).filter(([key]) => !UNSAFE_KEYS.has(key));
 
 const hasOwn = (target: object, key: string): boolean =>
@@ -34,15 +45,15 @@ export const containsUnsafeKeys = (value: unknown): boolean => {
 };
 
 const deepMerge = (
-  target: Record<string, any>,
-  source: Record<string, any>,
-): Record<string, any> => {
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): Record<string, unknown> => {
   safeEntries(source).forEach(([key, value]) => {
     if (isPlainObject(value)) {
       if (!hasOwn(target, key) || !isPlainObject(target[key])) {
         target[key] = {};
       }
-      deepMerge(target[key], value);
+      deepMerge(target[key] as Record<string, unknown>, value);
     } else {
       // 直接覆盖非对象字段（数组/基础类型）
       target[key] = value;
@@ -52,8 +63,8 @@ const deepMerge = (
 };
 
 const deepRemove = (
-  target: Record<string, any>,
-  source: Record<string, any>,
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
 ) => {
   safeEntries(source).forEach(([key, value]) => {
     if (!hasOwn(target, key)) return;
@@ -71,7 +82,7 @@ const deepRemove = (
   });
 };
 
-const isSubset = (target: any, source: any): boolean => {
+const isSubset = (target: unknown, source: unknown): boolean => {
   if (isPlainObject(source)) {
     if (!isPlainObject(target)) return false;
     return safeEntries(source).every(([key, value]) =>
@@ -133,7 +144,7 @@ export const updateCommonConfigSnippet = (
   snippetString: string,
   enabled: boolean,
 ): UpdateCommonConfigResult => {
-  let config: Record<string, any>;
+  let config: Record<string, unknown>;
   try {
     config = jsonString ? JSON.parse(jsonString) : {};
   } catch (err) {
@@ -166,7 +177,7 @@ export const updateCommonConfigSnippet = (
     };
   }
 
-  const snippet = JSON.parse(snippetString) as Record<string, any>;
+  const snippet = JSON.parse(snippetString) as Record<string, unknown>;
 
   if (enabled) {
     const merged = deepMerge(deepClone(config), snippet);
@@ -199,10 +210,10 @@ export const hasCommonConfigSnippet = (
 };
 
 // 模板变量替换
-export const applyTemplateValues = (
-  config: any,
+export const applyTemplateValues = <T>(
+  config: T,
   templateValues: Record<string, TemplateValueConfig> | undefined,
-): any => {
+): T => {
   const resolvedValues = Object.fromEntries(
     Object.entries(templateValues ?? {}).map(([key, value]) => {
       const resolvedValue =
@@ -223,7 +234,7 @@ export const applyTemplateValues = (
     }, str);
   };
 
-  const traverse = (obj: any): any => {
+  const traverse = (obj: unknown): unknown => {
     if (typeof obj === "string") {
       return replaceInString(obj);
     }
@@ -231,7 +242,7 @@ export const applyTemplateValues = (
       return obj.map(traverse);
     }
     if (obj && typeof obj === "object") {
-      const result: any = {};
+      const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(obj)) {
         result[key] = traverse(value);
       }
@@ -240,7 +251,7 @@ export const applyTemplateValues = (
     return obj;
   };
 
-  return traverse(config);
+  return traverse(config) as T;
 };
 
 // API-key read/write lives in the per-app provider codecs
@@ -459,7 +470,7 @@ const getTomlSectionInsertIndex = (
 const getCodexModelProviderName = (configText: string): string | undefined => {
   const normalized = normalizeTomlText(configText);
   try {
-    const parsed = parseToml(normalized) as Record<string, any>;
+    const parsed = parseToml(normalized) as Record<string, unknown>;
     const providerName =
       typeof parsed.model_provider === "string"
         ? parsed.model_provider.trim()
@@ -854,7 +865,7 @@ export const isCodexGoalModeEnabled = (
     if (!text) return false;
 
     try {
-      const parsed = parseToml(text) as Record<string, any>;
+      const parsed = parseToml(text) as CodexTomlDoc;
       return parsed.features?.goals === true;
     } catch {
       // Fall back to line scanning while the user is editing invalid TOML.
@@ -952,7 +963,7 @@ export const isCodexRemoteCompactionEnabled = (
     if (!text) return false;
 
     try {
-      const parsed = parseToml(text) as Record<string, any>;
+      const parsed = parseToml(text) as CodexTomlDoc;
       const providerId =
         typeof parsed.model_provider === "string"
           ? parsed.model_provider.trim()
@@ -1104,7 +1115,7 @@ export const extractCodexExperimentalBearerToken = (
     if (!text) return undefined;
 
     try {
-      const parsed = parseToml(text) as Record<string, any>;
+      const parsed = parseToml(text) as CodexTomlDoc;
       const providerName =
         typeof parsed.model_provider === "string"
           ? parsed.model_provider.trim()
@@ -1225,13 +1236,11 @@ export const updateCodexExperimentalBearerToken = (
 
 // 从 Provider 对象中提取 Codex base_url（当 settingsConfig.config 为 TOML 字符串时）
 export const getCodexBaseUrl = (
-  provider: { settingsConfig?: Record<string, any> } | undefined | null,
+  provider: { settingsConfig?: Record<string, unknown> } | undefined | null,
 ): string | undefined => {
   try {
-    const text =
-      typeof provider?.settingsConfig?.config === "string"
-        ? (provider as any).settingsConfig.config
-        : "";
+    const raw = provider?.settingsConfig?.config;
+    const text = typeof raw === "string" ? raw : "";
     return extractCodexBaseUrl(text);
   } catch {
     return undefined;

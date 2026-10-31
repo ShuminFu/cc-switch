@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslation } from "react-i18next";
@@ -147,9 +147,16 @@ export function GrokBuildProviderForm({
   );
   const [isEndpointModalOpen, setIsEndpointModalOpen] = useState(false);
   const [presetEndpoints, setPresetEndpoints] = useState<string[]>([]);
-  const [draftCustomEndpoints, setDraftCustomEndpoints] = useState<string[]>(
-    [],
-  );
+  const [draftCustomEndpoints, setDraftState] = useState<string[]>([]);
+  // Edit mode: endpoint changes are applied by the edit dialog after the
+  // provider is saved, never directly from the panel (FE-PROV-10).
+  const [endpointsTouched, setEndpointsTouched] = useState(false);
+  const setDraftCustomEndpoints = useCallback((urls: string[]) => {
+    setDraftState(urls);
+    setEndpointsTouched(true);
+  }, []);
+  const pendingCustomEndpoints =
+    providerId && endpointsTouched ? draftCustomEndpoints : undefined;
 
   const form = useForm<ProviderFormData>({
     resolver: zodResolver(providerSchema),
@@ -386,6 +393,7 @@ export function GrokBuildProviderForm({
       presetCategory: category ?? "custom",
       isPartner,
       meta,
+      customEndpoints: pendingCustomEndpoints,
     };
 
     await onSubmit(payload);
@@ -497,6 +505,7 @@ export function GrokBuildProviderForm({
           isEndpointModalOpen={isEndpointModalOpen}
           onEndpointModalToggle={setIsEndpointModalOpen}
           onCustomEndpointsChange={setDraftCustomEndpoints}
+          pendingCustomEndpoints={pendingCustomEndpoints}
           autoSelect={endpointAutoSelect}
           onAutoSelectChange={setEndpointAutoSelect}
           codexModel={upstreamModel}
@@ -540,8 +549,8 @@ export function GrokBuildProviderForm({
             placeholder=""
             darkMode={isDarkMode}
             rows={12}
-            showValidation={false}
-            language="javascript"
+            showValidation={true}
+            language="toml"
           />
           {rawConfigError && (
             <p className="text-xs text-destructive">

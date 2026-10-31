@@ -265,15 +265,8 @@ function ProviderFormShell({
       return;
     }
 
-    const issues: string[] = [];
-    if (!values.name.trim()) {
-      issues.push(
-        t("providerForm.fillSupplierName", {
-          defaultValue: "Please fill in provider name",
-        }),
-      );
-    }
-    issues.push(...(validation.issues ?? []));
+    // An empty name is rejected by `providerSchema` before this runs.
+    const issues: string[] = [...(validation.issues ?? [])];
 
     if (issues.length > 0) {
       setSoftIssues(issues);

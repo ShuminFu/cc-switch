@@ -76,7 +76,7 @@ const MCP_ERROR_CODES: Record<string, string> = {
  */
 export const translateMcpBackendError = (
   error: unknown,
-  t: (key: string, opts?: any) => string,
+  t: (key: string, opts?: Record<string, unknown>) => string,
 ): string => {
   const code = getErrorCode(error);
   if (!code) return "";

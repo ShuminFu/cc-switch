@@ -206,6 +206,11 @@ export const queryKeys = {
     providerHealthAll: ["providerHealth"] as const,
     providerHealth: (providerId: string, appType: string) =>
       ["providerHealth", providerId, appType] as const,
+    /** Batched health of one app's providers (`get_providers_health`). */
+    providersHealthByApp: (appType: string) =>
+      ["providerHealth", "batch", appType] as const,
+    providersHealth: (appType: string, providerIds: readonly string[]) =>
+      ["providerHealth", "batch", appType, providerIds.join("\n")] as const,
     circuitBreakerConfig: ["circuitBreakerConfig"] as const,
     circuitBreakerStatsAll: ["circuitBreakerStats"] as const,
     circuitBreakerStats: (providerId: string, appType: string) =>

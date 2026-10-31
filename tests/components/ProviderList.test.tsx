@@ -89,9 +89,20 @@ vi.mock("@/hooks/useStreamCheck", () => ({
   }),
 }));
 
+const failoverState = vi.hoisted(() => ({
+  autoEnabled: false,
+  queue: [] as Array<{ providerId: string }>,
+  health: new Map<string, unknown>(),
+  healthCalls: [] as unknown[][],
+}));
+
 vi.mock("@/lib/query/failover", () => ({
-  useAutoFailoverEnabled: () => ({ data: false }),
-  useFailoverQueue: () => ({ data: [] }),
+  useAutoFailoverEnabled: () => ({ data: failoverState.autoEnabled }),
+  useFailoverQueue: () => ({ data: failoverState.queue }),
+  useProvidersHealth: (...args: unknown[]) => {
+    failoverState.healthCalls.push(args);
+    return failoverState.health;
+  },
   useAddToFailoverQueue: () => ({ mutate: vi.fn() }),
   useRemoveFromFailoverQueue: () => ({ mutate: vi.fn() }),
   useReorderFailoverQueue: () => ({ mutate: vi.fn() }),
@@ -124,6 +135,10 @@ beforeEach(() => {
   useDragSortMock.mockReset();
   useSortableMock.mockReset();
   providerCardRenderSpy.mockClear();
+  failoverState.autoEnabled = false;
+  failoverState.queue = [];
+  failoverState.health = new Map();
+  failoverState.healthCalls = [];
 
   useSortableMock.mockImplementation(({ id }: { id: string }) => ({
     setNodeRef: vi.fn(),
@@ -416,5 +431,127 @@ describe("ProviderList Component", () => {
     expect(screen.queryByTestId("provider-card-o")).not.toBeInTheDocument();
     fireEvent.change(searchInput, { target: { value: "one.example" } });
     expect(screen.getByTestId("provider-card-m")).toBeInTheDocument();
+  });
+
+  it("polls health once for the queued providers and hands each card its entry (FE-ARCH-09)", () => {
+    const a = createProvider({ id: "a", name: "A" });
+    const b = createProvider({ id: "b", name: "B" });
+    const healthA = { provider_id: "a", is_healthy: false };
+    failoverState.autoEnabled = true;
+    failoverState.queue = [{ providerId: "a" }];
+    failoverState.health = new Map([["a", healthA]]);
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [a, b],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={{ a, b }}
+        currentProviderId="a"
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+        isProxyRunning
+        isProxyTakeover
+      />,
+    );
+
+    expect(failoverState.healthCalls.at(-1)).toEqual(["claude", ["a"], true]);
+    const lastProps = (id: string) =>
+      providerCardRenderSpy.mock.calls
+        .map(([props]) => props)
+        .filter((props) => props.provider.id === id)
+        .at(-1);
+    expect(lastProps("a").health).toBe(healthA);
+    expect(lastProps("b").health).toBeUndefined();
+  });
+
+  it("virtualises long lists so only part of the cards mount (FE-ARCH-09)", () => {
+    // jsdom has no layout: give the scroll container a viewport-sized box.
+    const heightSpy = vi
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockReturnValue(800);
+    const widthSpy = vi
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockReturnValue(800);
+    const many = Array.from({ length: 120 }, (_, i) =>
+      createProvider({ id: `p${i}`, name: `Provider ${i}` }),
+    );
+    useDragSortMock.mockReturnValue({
+      sortedProviders: many,
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={Object.fromEntries(many.map((p) => [p.id, p]))}
+        currentProviderId="p0"
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("provider-list-virtual")).toBeInTheDocument();
+    expect(screen.getByTestId("provider-card-p0")).toBeInTheDocument();
+    const mounted = screen.queryAllByTestId(/^provider-card-/).length;
+    expect(mounted).toBeGreaterThan(0);
+    expect(mounted).toBeLessThan(many.length);
+    expect(screen.queryByTestId("provider-card-p119")).not.toBeInTheDocument();
+    heightSpy.mockRestore();
+    widthSpy.mockRestore();
+  });
+
+  it("filters by category and failover-queue chips (FE-PROV-33)", () => {
+    const providers = [
+      createProvider({ id: "o1", name: "Off", category: "official" }),
+      ...Array.from({ length: 5 }, (_, i) =>
+        createProvider({
+          id: `a${i}`,
+          name: `Agg ${i}`,
+          category: "aggregator",
+        }),
+      ),
+    ];
+    failoverState.autoEnabled = true;
+    failoverState.queue = [{ providerId: "a1" }];
+    useDragSortMock.mockReturnValue({
+      sortedProviders: providers,
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={Object.fromEntries(providers.map((p) => [p.id, p]))}
+        currentProviderId="o1"
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+        isProxyTakeover
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Official" }));
+    expect(screen.getByTestId("provider-card-o1")).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-card-a0")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "In failover queue" }));
+    expect(screen.getByTestId("provider-card-a1")).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-card-o1")).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId(/^provider-card-/)).toHaveLength(1);
   });
 });

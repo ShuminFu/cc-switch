@@ -1,7 +1,7 @@
 /**
  * 预设供应商配置模板
  */
-import { ProviderCategory } from "../types";
+import type { ProviderCategory } from "../types";
 import { registerPresetCatalog } from "./presetCatalog";
 
 export interface TemplateValueConfig {

@@ -89,7 +89,7 @@ GEMINI_MODEL=gemini-3.5-flash`}
         darkMode={isDarkMode}
         rows={6}
         showValidation={false}
-        language="javascript"
+        language="dotenv"
       />
 
       {error && (

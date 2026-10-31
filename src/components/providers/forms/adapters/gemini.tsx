@@ -163,6 +163,7 @@ function GeminiAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
           ...endpoints.toMeta(),
           commonConfigEnabled: commonConfig.useCommonConfig,
         },
+        customEndpoints: endpoints.pendingCustomEndpoints,
       };
     },
     applyPreset: (entry, formValues) => {
@@ -200,6 +201,7 @@ function GeminiAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
         isEndpointModalOpen={isEndpointModalOpen}
         onEndpointModalToggle={setIsEndpointModalOpen}
         onCustomEndpointsChange={endpoints.setDraftCustomEndpoints}
+        pendingCustomEndpoints={endpoints.pendingCustomEndpoints}
         autoSelect={endpoints.endpointAutoSelect}
         onAutoSelectChange={endpoints.setEndpointAutoSelect}
         shouldShowModelField={true}

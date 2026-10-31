@@ -338,8 +338,8 @@ export const CodexConfigSection: React.FC<CodexConfigSectionProps> = ({
         placeholder=""
         darkMode={isDarkMode}
         rows={8}
-        showValidation={false}
-        language="javascript"
+        showValidation={true}
+        language="toml"
       />
 
       {configError && (

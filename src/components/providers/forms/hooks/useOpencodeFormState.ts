@@ -11,6 +11,11 @@ import {
   toOpencodeExtraOptions,
 } from "../helpers/opencodeFormUtils";
 
+/** The OpenCode provider entry while the form edits it. */
+type OpencodeDraft = Record<string, unknown> & {
+  options?: Record<string, unknown>;
+};
+
 interface UseOpencodeFormStateParams {
   initialData?: {
     settingsConfig?: Record<string, unknown>;
@@ -99,11 +104,11 @@ export function useOpencodeFormState({
   });
 
   const updateOpencodeSettings = useCallback(
-    (updater: (config: Record<string, any>) => void) => {
+    (updater: (config: OpencodeDraft) => void) => {
       try {
         const config = JSON.parse(
           getSettingsConfig() || OPENCODE_DEFAULT_CONFIG,
-        ) as Record<string, any>;
+        ) as OpencodeDraft;
         updater(config);
         onSettingsConfigChange(JSON.stringify(config, null, 2));
       } catch {}

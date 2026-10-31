@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useProviderActions } from "@/hooks/useProviderActions";
 import type { Provider, UsageScript } from "@/types";
 import { makeProvider } from "../factories";
+import { queryKeys } from "@/lib/query/keys";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -203,6 +204,33 @@ describe("useProviderActions", () => {
       "切换成功，请重启客户端以生效",
       { closeButton: true },
     );
+  });
+
+  it("offers Undo after a switch that switches back to the previous provider (FE-ARCH-17)", async () => {
+    switchProviderMutateAsync.mockResolvedValue(undefined);
+    const { wrapper, queryClient } = createWrapper();
+    queryClient.setQueryData(queryKeys.providers.byApp("claude"), {
+      providers: {},
+      currentProviderId: "old-one",
+    });
+    const provider = createProvider({ id: "new-one", category: "custom" });
+
+    const { result } = renderHook(() => useProviderActions("claude"), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.switchProvider(provider);
+    });
+
+    const options = toastSuccessMock.mock.calls[0]?.[1] as {
+      action?: { label: string; onClick: () => void };
+    };
+    expect(options.action?.label).toBe("Undo");
+    await act(async () => {
+      options.action?.onClick();
+      await Promise.resolve();
+    });
+    expect(switchProviderMutateAsync).toHaveBeenLastCalledWith("old-one");
   });
 
   it("warns but still switches providers that require proxy when proxy is not running", async () => {

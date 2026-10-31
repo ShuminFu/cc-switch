@@ -1,6 +1,7 @@
 import i18n from "i18next";
 import { useState, useCallback, useEffect } from "react";
 import { mergeEnvIntoText } from "@/utils/providerEnvText";
+import { settingsConfigFor } from "@/types/providerSettings";
 
 interface UseGeminiConfigStateProps {
   initialData?: {
@@ -79,14 +80,15 @@ export function useGeminiConfigState({
   useEffect(() => {
     if (!initialData) return;
 
-    const config = initialData.settingsConfig;
-    if (typeof config === "object" && config !== null) {
+    const raw = initialData.settingsConfig;
+    if (typeof raw === "object" && raw !== null) {
+      const config = settingsConfigFor("gemini", raw);
       // 设置 env
-      const env = (config as any).env || {};
+      const env = config.env ?? {};
       setGeminiEnvState(envObjToString(env));
 
       // 设置 config
-      const configObj = (config as any).config || {};
+      const configObj = config.config ?? {};
       setGeminiConfigState(JSON.stringify(configObj, null, 2));
 
       // 提取 API Key、Base URL 和 Model

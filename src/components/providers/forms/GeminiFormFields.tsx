@@ -33,6 +33,8 @@ interface GeminiFormFieldsProps {
   isEndpointModalOpen: boolean;
   onEndpointModalToggle: (open: boolean) => void;
   onCustomEndpointsChange: (endpoints: string[]) => void;
+  /** Edit mode: endpoints applied but not saved yet (FE-PROV-10). */
+  pendingCustomEndpoints?: string[];
   autoSelect: boolean;
   onAutoSelectChange: (checked: boolean) => void;
 
@@ -61,6 +63,7 @@ export function GeminiFormFields({
   isEndpointModalOpen,
   onEndpointModalToggle,
   onCustomEndpointsChange,
+  pendingCustomEndpoints,
   autoSelect,
   onAutoSelectChange,
   shouldShowModelField,
@@ -204,6 +207,7 @@ export function GeminiFormFields({
           autoSelect={autoSelect}
           onAutoSelectChange={onAutoSelectChange}
           onCustomEndpointsChange={onCustomEndpointsChange}
+          pendingCustomEndpoints={pendingCustomEndpoints}
         />
       )}
     </>

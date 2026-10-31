@@ -1,7 +1,7 @@
 /**
  * Codex 预设供应商配置模板
  */
-import { ProviderCategory } from "../types";
+import type { ProviderCategory } from "../types";
 import type {
   CodexApiFormat,
   CodexCatalogModel,
@@ -17,7 +17,7 @@ export interface CodexProviderPreset {
   websiteUrl: string;
   // 第三方供应商可提供单独的获取 API Key 链接
   apiKeyUrl?: string;
-  auth: Record<string, any>; // 将写入 ~/.codex/auth.json
+  auth: Record<string, unknown>; // 将写入 ~/.codex/auth.json
   config: string; // 将写入 ~/.codex/config.toml（TOML 字符串）
   isOfficial?: boolean; // 标识是否为官方预设
   isPartner?: boolean; // 标识是否为商业合作伙伴
@@ -45,7 +45,9 @@ export interface CodexProviderPreset {
 /**
  * 生成第三方供应商的 auth.json
  */
-export function generateThirdPartyAuth(apiKey: string): Record<string, any> {
+export function generateThirdPartyAuth(
+  apiKey: string,
+): Record<string, unknown> {
   return {
     OPENAI_API_KEY: apiKey || "",
   };

@@ -294,7 +294,7 @@ export function HermesFormFields({
 
       <div className="space-y-2">
         <FormLabel htmlFor="hermes-baseurl">
-          {t("hermes.form.baseUrl", { defaultValue: "API Endpoint" })}
+          {t("providerForm.apiEndpoint", { defaultValue: "API Endpoint" })}
         </FormLabel>
         <Input
           id="hermes-baseurl"

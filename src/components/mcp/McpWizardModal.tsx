@@ -11,7 +11,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { McpServerSpec } from "@/types";
+import type { McpServerSpec } from "@/types";
 import { maskEnvValue } from "@/components/env/maskEnvValue";
 import { parseEnvText, parseHeadersText } from "./wizardParsers";
 

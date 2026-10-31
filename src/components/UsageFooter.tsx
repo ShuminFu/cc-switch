@@ -2,7 +2,7 @@ import React from "react";
 import { RefreshCw, AlertCircle, Clock } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { UsageQueryResult } from "@/lib/query/queries";
-import { UsageData, Provider } from "@/types";
+import type { UsageData, Provider } from "@/types";
 import { TierBadge } from "@/components/SubscriptionQuotaFooter";
 import type { QuotaTier } from "@/types/subscription";
 

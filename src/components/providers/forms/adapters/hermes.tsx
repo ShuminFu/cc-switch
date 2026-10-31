@@ -7,6 +7,7 @@ import { HERMES_DEFAULT_CONFIG } from "@/lib/providerCodecs";
 import type { HermesProviderPreset } from "@/config/hermesProviderPresets";
 import { HermesFormFields } from "../HermesFormFields";
 import { useHermesFormState } from "../hooks";
+import { withClearedHermesKeys } from "../hooks/useHermesFormState";
 import { ProviderKeyField } from "./ProviderKeyField";
 import { useAdapterApiKeyLink, usePublishAdapterHandle } from "./shared";
 import type { ProviderFormAdapterContext, ShellFormAdapter } from "./types";
@@ -52,7 +53,14 @@ function HermesAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
   usePublishAdapterHandle(ctx.handleRef, {
     validate: () => ({ error: keyState.getSubmitError() }),
     serialize: (values) => ({
-      settingsConfig: values.settingsConfig.trim(),
+      // Cleared fields go out as `null` so the backend deletes them instead
+      // of carrying the old value over from config.yaml (CFG-18).
+      settingsConfig: isEditMode
+        ? withClearedHermesKeys(
+            initialData?.settingsConfig,
+            values.settingsConfig.trim(),
+          )
+        : values.settingsConfig.trim(),
       providerKey: hermesForm.hermesProviderKey,
     }),
     applyPreset: (entry, formValues) => {

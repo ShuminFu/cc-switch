@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { DeepLinkImportRequest } from "../../lib/api/deeplink";
+import type { DeepLinkImportRequest } from "../../lib/api/deeplink";
 
 export function SkillConfirmation({
   request,

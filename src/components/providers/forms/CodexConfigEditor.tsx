@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CodexAuthSection, CodexConfigSection } from "./CodexConfigSections";
-import { CodexCommonConfigModal } from "./CodexCommonConfigModal";
+import { CommonConfigModal } from "./CommonConfigModal";
 
 interface CodexConfigEditorProps {
   authValue: string;
@@ -108,14 +108,27 @@ const CodexConfigEditor: React.FC<CodexConfigEditorProps> = ({
       />
 
       {/* Common Config Modal */}
-      <CodexCommonConfigModal
+      <CommonConfigModal
         isOpen={isCommonConfigModalOpen}
         onClose={handleCloseCommonConfigModal}
+        title={t("codexConfig.editCommonConfigTitle")}
+        hint={
+          <p className="text-xs text-muted-foreground">
+            {t("codexConfig.commonConfigHint")}
+          </p>
+        }
         value={commonConfigSnippet}
+        language="toml"
+        placeholder={`# Common Codex config
+
+# Add your common TOML configuration here`}
         onSave={onCommonConfigSnippetChange}
         error={commonConfigError}
         onExtract={onExtract}
         isExtracting={isExtracting}
+        extractLabel={t("codexConfig.extractFromCurrent", {
+          defaultValue: "Extract from Editor",
+        })}
       />
     </div>
   );

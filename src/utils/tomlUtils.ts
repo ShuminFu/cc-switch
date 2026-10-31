@@ -1,6 +1,14 @@
 import { stringify as stringifyToml } from "smol-toml";
 import { parseTomlLenient } from "@/utils/textNormalization";
-import { McpServerSpec } from "../types";
+import type { McpServerSpec } from "../types";
+
+/** The parts of a parsed MCP TOML snippet this module reads. */
+type McpTomlDoc = {
+  mcp_servers?: Record<string, unknown>;
+  mcp?: { servers?: Record<string, unknown> };
+  command?: unknown;
+  [key: string]: unknown;
+};
 
 /**
  * 验证 TOML 格式并转换为 JSON 对象
@@ -15,9 +23,9 @@ export const validateToml = (text: string): string => {
       return "mustBeObject";
     }
     return "";
-  } catch (e: any) {
+  } catch (e: unknown) {
     // 返回底层错误信息，由上层进行 i18n 包装
-    return e?.message || "parseError";
+    return (e instanceof Error && e.message) || "parseError";
   }
 };
 
@@ -28,7 +36,7 @@ export const validateToml = (text: string): string => {
  */
 export const mcpServerToToml = (server: McpServerSpec): string => {
   // 先复制所有字段（保留扩展字段）
-  const obj: any = { ...server };
+  const obj: Record<string, unknown> = { ...server };
 
   // 去除未定义字段，确保输出更干净
   for (const k of Object.keys(obj)) {
@@ -54,7 +62,7 @@ export const tomlToMcpServer = (tomlText: string): McpServerSpec => {
     throw new Error("TOML 内容不能为空");
   }
 
-  const parsed = parseTomlLenient(tomlText) as Record<string, any>;
+  const parsed = parseTomlLenient(tomlText) as McpTomlDoc;
 
   // 情况 1: 直接是服务器配置（包含 type/command/url 等字段）
   if (
@@ -71,14 +79,14 @@ export const tomlToMcpServer = (tomlText: string): McpServerSpec => {
   if (parsed.mcp_servers && typeof parsed.mcp_servers === "object") {
     const serverIds = Object.keys(parsed.mcp_servers);
     if (serverIds.length > 0) {
-      const firstServer = (parsed.mcp_servers as any)[serverIds[0]];
+      const firstServer = parsed.mcp_servers[serverIds[0]];
       return normalizeServerConfig(firstServer);
     }
   }
 
   // 情况 3: [mcp.servers.<id>] 错误格式（容错解析）
   if (parsed.mcp && typeof parsed.mcp === "object") {
-    const mcpObj = parsed.mcp as any;
+    const mcpObj = parsed.mcp;
     if (mcpObj.servers && typeof mcpObj.servers === "object") {
       const serverIds = Object.keys(mcpObj.servers);
       if (serverIds.length > 0) {
@@ -97,10 +105,11 @@ export const tomlToMcpServer = (tomlText: string): McpServerSpec => {
  * 规范化服务器配置对象为 McpServer 格式
  * 保留所有字段（包括扩展字段如 timeout_ms）
  */
-function normalizeServerConfig(config: any): McpServerSpec {
-  if (!config || typeof config !== "object") {
+function normalizeServerConfig(input: unknown): McpServerSpec {
+  if (!input || typeof input !== "object") {
     throw new Error("服务器配置必须是对象");
   }
+  const config = input as Record<string, unknown>;
 
   const type = (config.type as string) || "stdio";
 
@@ -121,7 +130,7 @@ function normalizeServerConfig(config: any): McpServerSpec {
 
     // 可选字段
     if (config.args && Array.isArray(config.args)) {
-      server.args = config.args.map((arg: any) => String(arg));
+      server.args = config.args.map((arg) => String(arg));
       knownFields.add("args");
     }
     if (config.env && typeof config.env === "object") {
@@ -187,7 +196,7 @@ function normalizeServerConfig(config: any): McpServerSpec {
  */
 export const extractIdFromToml = (tomlText: string): string => {
   try {
-    const parsed = parseTomlLenient(tomlText) as Record<string, any>;
+    const parsed = parseTomlLenient(tomlText) as McpTomlDoc;
 
     // 尝试从 [mcp_servers.<id>] 或 [mcp.servers.<id>] 中提取 ID
     if (parsed.mcp_servers && typeof parsed.mcp_servers === "object") {
@@ -198,7 +207,7 @@ export const extractIdFromToml = (tomlText: string): string => {
     }
 
     if (parsed.mcp && typeof parsed.mcp === "object") {
-      const mcpObj = parsed.mcp as any;
+      const mcpObj = parsed.mcp;
       if (mcpObj.servers && typeof mcpObj.servers === "object") {
         const serverIds = Object.keys(mcpObj.servers);
         if (serverIds.length > 0) {

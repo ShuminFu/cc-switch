@@ -28,6 +28,7 @@ import {
 } from "@/utils/providerConfigUtils";
 import { supportsOfficialProxyTakeover } from "@/utils/providerCapabilities";
 import { queryKeys } from "@/lib/query/keys";
+import { appHas } from "@/config/apps";
 
 /**
  * Hook for managing provider actions (add, update, delete, switch)
@@ -276,6 +277,35 @@ export function useProviderActions(
         return;
       }
 
+      // Remember who was current so the success toast can offer Undo
+      // (FE-ARCH-17). Additive apps add to the live config instead.
+      const previousId = appHas(activeApp, "additiveLiveConfig")
+        ? undefined
+        : queryClient.getQueryData<{ currentProviderId?: string }>(
+            queryKeys.providers.byApp(activeApp),
+          )?.currentProviderId;
+      const undoAction =
+        previousId && previousId !== provider.id
+          ? {
+              label: t("common.undo", { defaultValue: "Undo" }),
+              onClick: () => {
+                void switchProviderMutation
+                  .mutateAsync(previousId)
+                  .then(() =>
+                    toast.success(
+                      t("notifications.switchUndone", {
+                        defaultValue: "Switched back",
+                      }),
+                      { closeButton: true },
+                    ),
+                  )
+                  .catch(() => {
+                    // The mutation's onError already reported it.
+                  });
+              },
+            }
+          : undefined;
+
       try {
         const result = await switchProviderMutation.mutateAsync(provider.id);
         await syncClaudePlugin(provider);
@@ -324,6 +354,7 @@ export function useProviderActions(
           } else {
             toast.success(t(messageKey, { defaultValue: defaultMessage }), {
               closeButton: true,
+              ...(undoAction ? { action: undoAction, duration: 8000 } : {}),
             });
           }
         }
@@ -337,6 +368,7 @@ export function useProviderActions(
       activeApp,
       isProxyRunning,
       isProxyTakeover,
+      queryClient,
       t,
     ],
   );

@@ -12,6 +12,10 @@ import {
   type ProviderFormValues,
 } from "@/components/providers/forms/ProviderForm";
 import { openclawApi, providersApi, endpointsApi, type AppId } from "@/lib/api";
+import { extractErrorMessage } from "@/utils/errorUtils";
+import { applyCustomEndpoints } from "@/components/providers/forms/shell/applyCustomEndpoints";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useDomDirtyGuard } from "@/hooks/useDomDirtyGuard";
 
 interface EditProviderDialogProps {
   open: boolean;
@@ -35,6 +39,21 @@ export function EditProviderDialog({
 }: EditProviderDialogProps) {
   const { t } = useTranslation();
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
+  // Esc / back on an edited form asks before discarding (FE-PROV-24).
+  const dirtyGuard = useDomDirtyGuard();
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const { reset: resetDirtyGuard } = dirtyGuard;
+  useEffect(() => {
+    if (open) resetDirtyGuard();
+    setConfirmDiscard(false);
+  }, [open, provider?.id, resetDirtyGuard]);
+  const requestClose = useCallback(() => {
+    if (!isFormSubmitting && dirtyGuard.isDirty()) {
+      setConfirmDiscard(true);
+      return;
+    }
+    onOpenChange(false);
+  }, [dirtyGuard, isFormSubmitting, onOpenChange]);
 
   // 默认使用传入的 provider.settingsConfig，若当前编辑对象是"当前生效供应商"，则尝试读取实时配置替换初始值
   const [liveSettings, setLiveSettings] = useState<Record<
@@ -196,6 +215,24 @@ export function EditProviderDialog({
         provider: updatedProvider,
         originalId: provider.id,
       });
+      // Endpoint-panel changes are written only now, after the provider was
+      // saved; cancelling the dialog discards them (FE-PROV-10).
+      if (values.customEndpoints) {
+        try {
+          await applyCustomEndpoints(
+            appId,
+            updatedProvider.id,
+            values.customEndpoints,
+          );
+        } catch (error) {
+          toast.error(
+            t("endpointTest.saveFailed", {
+              defaultValue: "Failed to save endpoints",
+            }),
+            { description: extractErrorMessage(error) || undefined },
+          );
+        }
+      }
       onOpenChange(false);
     },
     [appId, onSubmit, onOpenChange, provider, t],
@@ -209,7 +246,7 @@ export function EditProviderDialog({
     <FullScreenPanel
       isOpen={open}
       title={t("provider.editProvider")}
-      onClose={() => onOpenChange(false)}
+      onClose={requestClose}
       footer={
         <Button
           type="submit"
@@ -234,19 +271,34 @@ export function EditProviderDialog({
           </span>
         </div>
       ) : (
-        <ProviderForm
-          key={provider.id}
-          appId={appId}
-          providerId={provider.id}
-          submitLabel={t("common.save")}
-          onSubmit={handleSubmit}
-          onCancel={() => onOpenChange(false)}
-          onSubmittingChange={setIsFormSubmitting}
-          initialData={initialData}
-          showButtons={false}
-          isProxyTakeover={isProxyTakeover}
-        />
+        <div {...dirtyGuard.containerProps}>
+          <ProviderForm
+            key={provider.id}
+            appId={appId}
+            providerId={provider.id}
+            submitLabel={t("common.save")}
+            onSubmit={handleSubmit}
+            onCancel={requestClose}
+            onSubmittingChange={setIsFormSubmitting}
+            initialData={initialData}
+            showButtons={false}
+            isProxyTakeover={isProxyTakeover}
+          />
+        </div>
       )}
+      <ConfirmDialog
+        isOpen={confirmDiscard}
+        title={t("common.unsavedChangesTitle")}
+        message={t("common.unsavedChangesMessage")}
+        confirmText={t("common.discard")}
+        variant="destructive"
+        zIndex="top"
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onOpenChange(false);
+        }}
+        onCancel={() => setConfirmDiscard(false)}
+      />
     </FullScreenPanel>
   );
 }

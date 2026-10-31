@@ -77,14 +77,18 @@ export function detectCodingPlanProvider(
  */
 export function injectCodingPlanUsageScript<
   T extends {
-    settingsConfig?: Record<string, any>;
-    meta?: Record<string, any>;
+    settingsConfig?: Record<string, unknown>;
+    meta?: { usage_script?: unknown };
   },
 >(appId: string, provider: T): T {
   if (appId !== "claude") return provider;
   if (provider.meta?.usage_script) return provider;
 
-  const baseUrl = provider.settingsConfig?.env?.ANTHROPIC_BASE_URL;
+  const env = provider.settingsConfig?.env;
+  const baseUrl =
+    env && typeof env === "object"
+      ? (env as Record<string, unknown>).ANTHROPIC_BASE_URL
+      : undefined;
   const codingPlanProvider = detectCodingPlanProvider(
     typeof baseUrl === "string" ? baseUrl : null,
   );

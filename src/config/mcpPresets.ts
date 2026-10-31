@@ -1,4 +1,4 @@
-import { McpServer, McpServerSpec } from "../types";
+import type { McpServer, McpServerSpec } from "../types";
 import { isWindows } from "@/lib/platform";
 
 export type McpPreset = Omit<McpServer, "enabled" | "description">;

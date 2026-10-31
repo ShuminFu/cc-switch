@@ -31,7 +31,7 @@ import {
   isCodexChatWireApi,
 } from "@/utils/providerConfigUtils";
 import { supportsOfficialProxyTakeover } from "@/utils/providerCapabilities";
-import { useProviderHealth } from "@/lib/query/failover";
+import type { ProviderHealth } from "@/types/proxy";
 import { useProviderUsage } from "@/lib/query/queries";
 import { resolveProviderIcon } from "@/utils/providerIcon";
 import { buildProviderDeeplink } from "@/lib/deeplinkBuilder";
@@ -73,6 +73,8 @@ interface ProviderCardProps {
   isAutoFailoverEnabled?: boolean; // 是否开启自动故障转移
   failoverPriority?: number; // 故障转移优先级（1 = P1, 2 = P2, ...）
   isInFailoverQueue?: boolean; // 是否在故障转移队列中
+  /** Health of this provider, from the list's batched query (FE-ARCH-09). */
+  health?: ProviderHealth;
   onToggleFailover?: (enabled: boolean) => void; // 切换故障转移队列
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
   // OpenClaw: default model
@@ -129,6 +131,7 @@ function ProviderCardImpl({
   isAutoFailoverEnabled = false,
   failoverPriority,
   isInFailoverQueue = false,
+  health,
   onToggleFailover,
   activeProviderId,
   // OpenClaw: default model
@@ -141,14 +144,6 @@ function ProviderCardImpl({
   const isAnyOmo = isOmo || isOmoSlim;
   const handleDisableAnyOmo = isOmoSlim ? onDisableOmoSlim : onDisableOmo;
   const isAdditiveMode = appId === "opencode" && !isAnyOmo;
-
-  // The health badge only renders for queued providers while the proxy runs,
-  // so do not query (or poll) health for every other card (FE-PROV-13).
-  const { data: health } = useProviderHealth(
-    provider.id,
-    appId,
-    isProxyRunning && Boolean(isInFailoverQueue),
-  );
 
   const fallbackUrlText = t("provider.notConfigured", {
     defaultValue: "Not configured for official website",

@@ -1,4 +1,6 @@
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { ProviderHealth } from "@/types/proxy";
 import { failoverApi } from "@/lib/api/failover";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -35,6 +37,37 @@ export function useProviderHealth(
   });
 }
 
+const EMPTY_HEALTH = new Map<string, ProviderHealth>();
+
+function indexHealth(entries: ProviderHealth[]): Map<string, ProviderHealth> {
+  return new Map(entries.map((entry) => [entry.provider_id, entry]));
+}
+
+/**
+ * Health of several providers of one app through one batched IPC call
+ * (`get_providers_health`), keyed by provider id. The provider list uses this
+ * instead of one poller per card, so the IPC rate no longer grows with the
+ * number of cards (FE-ARCH-09).
+ */
+export function useProvidersHealth(
+  appType: string,
+  providerIds: readonly string[],
+  enabled = true,
+): Map<string, ProviderHealth> {
+  const proxyRunning = useCachedProxyRunning();
+  const ids = useMemo(() => [...providerIds].sort(), [providerIds]);
+  const { data } = useQuery({
+    queryKey: queryKeys.failover.providersHealth(appType, ids),
+    queryFn: () => failoverApi.getProvidersHealth(appType, ids),
+    enabled: enabled && ids.length > 0 && !!appType,
+    refetchInterval: proxyRunning ? HEALTH_REFETCH_MS : false,
+    refetchIntervalInBackground: false,
+    retry: false,
+    select: indexHealth,
+  });
+  return data ?? EMPTY_HEALTH;
+}
+
 // ========== 故障转移队列 Hooks（新） ==========
 
 /**
@@ -58,6 +91,9 @@ export function useResetCircuitBreaker() {
           variables.providerId,
           variables.appType,
         ),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.failover.providersHealthByApp(variables.appType),
       });
       // 刷新供应商列表（因为可能发生了自动恢复切换）
       queryClient.invalidateQueries({
@@ -148,6 +184,9 @@ export function useRemoveFromFailoverQueue() {
           variables.providerId,
           variables.appType,
         ),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.failover.providersHealthByApp(variables.appType),
       });
       // 清除该供应商的熔断器统计缓存
       queryClient.invalidateQueries({

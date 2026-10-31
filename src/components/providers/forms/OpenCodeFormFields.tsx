@@ -644,7 +644,7 @@ export function OpenCodeFormFields({
       {/* Base URL */}
       <div className="space-y-2">
         <FormLabel htmlFor="opencode-baseurl">
-          {t("opencode.baseUrl", { defaultValue: "Base URL" })}
+          {t("providerForm.apiEndpoint", { defaultValue: "API Endpoint" })}
         </FormLabel>
         <Input
           id="opencode-baseurl"
