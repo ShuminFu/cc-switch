@@ -9,6 +9,13 @@ import {
 import type { McpServer } from "@/types";
 import McpFormModal from "@/components/mcp/McpFormModal";
 
+// Testing Library collapses whitespace in placeholders, so the multi-line
+// en.json placeholders are matched in their normalised one-line form.
+const JSON_PLACEHOLDER =
+  '{ "type": "stdio", "command": "uvx", "args": ["mcp-server-fetch"] }';
+const TOML_PLACEHOLDER =
+  'type = "stdio" command = "uvx" args = ["mcp-server-fetch"]';
+
 const toastErrorMock = vi.hoisted(() => vi.fn());
 const toastSuccessMock = vi.hoisted(() => vi.fn());
 const upsertMock = vi.hoisted(() => {
@@ -22,15 +29,6 @@ vi.mock("sonner", () => ({
     error: (...args: unknown[]) => toastErrorMock(...args),
     success: (...args: unknown[]) => toastSuccessMock(...args),
   },
-}));
-
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, params?: Record<string, unknown>) =>
-      params ? `${key}:${JSON.stringify(params)}` : key,
-  }),
-  // 提供 initReactI18next 以兼容 i18n 初始化路径
-  initReactI18next: { type: "3rdParty", init: () => {} },
 }));
 
 vi.mock("@/config/mcpPresets", () => ({
@@ -171,20 +169,18 @@ describe("McpFormModal", () => {
   it("应用预设后填充 ID 与配置内容", async () => {
     renderForm();
     await waitFor(() =>
-      expect(
-        screen.getByPlaceholderText("mcp.form.titlePlaceholder"),
-      ).toBeInTheDocument(),
+      expect(screen.getByPlaceholderText("my-mcp-server")).toBeInTheDocument(),
     );
 
     fireEvent.click(screen.getByText("preset-stdio"));
 
     const idInput = screen.getByPlaceholderText(
-      "mcp.form.titlePlaceholder",
+      "my-mcp-server",
     ) as HTMLInputElement;
     expect(idInput.value).toBe("preset-stdio");
 
     const configTextarea = screen.getByPlaceholderText(
-      "mcp.form.jsonPlaceholder",
+      JSON_PLACEHOLDER,
     ) as HTMLTextAreaElement;
     expect(configTextarea.value).toBe(
       '{\n  "type": "stdio",\n  "command": "preset-cmd"\n}',
@@ -194,39 +190,36 @@ describe("McpFormModal", () => {
   it("提交时清洗字段并调用 upsert 与 onSave", async () => {
     const { onSave } = renderForm();
 
-    fireEvent.change(screen.getByPlaceholderText("mcp.form.titlePlaceholder"), {
+    fireEvent.change(screen.getByPlaceholderText("my-mcp-server"), {
       target: { value: " my-server " },
     });
-    fireEvent.change(screen.getByPlaceholderText("mcp.form.namePlaceholder"), {
-      target: { value: "   Friendly " },
-    });
-
-    fireEvent.click(screen.getByText("mcp.form.additionalInfo"));
-
     fireEvent.change(
-      screen.getByPlaceholderText("mcp.form.descriptionPlaceholder"),
+      screen.getByPlaceholderText("e.g. @modelcontextprotocol/server-time"),
       {
-        target: { value: " Description " },
+        target: { value: "   Friendly " },
       },
     );
-    fireEvent.change(screen.getByPlaceholderText("mcp.form.tagsPlaceholder"), {
+
+    fireEvent.click(screen.getByText("Additional Info"));
+
+    fireEvent.change(screen.getByPlaceholderText("Optional description"), {
+      target: { value: " Description " },
+    });
+    fireEvent.change(screen.getByPlaceholderText("stdio, time, utility"), {
       target: { value: " tag1 , tag2 " },
     });
-    fireEvent.change(
-      screen.getByPlaceholderText("mcp.form.homepagePlaceholder"),
-      {
-        target: { value: " https://example.com " },
-      },
-    );
-    fireEvent.change(screen.getByPlaceholderText("mcp.form.docsPlaceholder"), {
+    fireEvent.change(screen.getByPlaceholderText("https://example.com"), {
+      target: { value: " https://example.com " },
+    });
+    fireEvent.change(screen.getByPlaceholderText("https://example.com/docs"), {
       target: { value: " https://docs.example.com " },
     });
 
-    fireEvent.change(screen.getByPlaceholderText("mcp.form.jsonPlaceholder"), {
+    fireEvent.change(screen.getByPlaceholderText(JSON_PLACEHOLDER), {
       target: { value: '{"type":"stdio","command":"run"}' },
     });
 
-    fireEvent.click(screen.getByText("common.add"));
+    fireEvent.click(screen.getByText("Add"));
 
     await waitFor(() => expect(upsertMock).toHaveBeenCalledTimes(1));
     const [entry] = upsertMock.mock.calls.at(-1) ?? [];
@@ -256,24 +249,24 @@ describe("McpFormModal", () => {
   it("缺少配置命令时阻止提交并提示错误", async () => {
     renderForm();
 
-    fireEvent.change(screen.getByPlaceholderText("mcp.form.titlePlaceholder"), {
+    fireEvent.change(screen.getByPlaceholderText("my-mcp-server"), {
       target: { value: "no-command" },
     });
-    fireEvent.change(screen.getByPlaceholderText("mcp.form.jsonPlaceholder"), {
+    fireEvent.change(screen.getByPlaceholderText(JSON_PLACEHOLDER), {
       target: { value: '{"type":"stdio"}' },
     });
 
-    fireEvent.click(screen.getByText("common.add"));
+    fireEvent.click(screen.getByText("Add"));
 
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
     expect(upsertMock).not.toHaveBeenCalled();
     const [message] = toastErrorMock.mock.calls.at(-1) ?? [];
-    expect(message).toBe("mcp.error.commandRequired");
+    expect(message).toBe("Please enter command");
   });
 
   it("支持向导生成配置并自动填充 ID", async () => {
     renderForm();
-    fireEvent.click(screen.getByText("mcp.form.useWizard"));
+    fireEvent.click(screen.getByText("Config Wizard"));
 
     const applyButton = await screen.findByTestId("wizard-apply");
     await act(async () => {
@@ -281,12 +274,12 @@ describe("McpFormModal", () => {
     });
 
     const idInput = screen.getByPlaceholderText(
-      "mcp.form.titlePlaceholder",
+      "my-mcp-server",
     ) as HTMLInputElement;
     expect(idInput.value).toBe("wizard-id");
 
     const configTextarea = screen.getByPlaceholderText(
-      "mcp.form.jsonPlaceholder",
+      JSON_PLACEHOLDER,
     ) as HTMLTextAreaElement;
     expect(configTextarea.value).toBe(
       '{"type":"stdio","command":"wizard-cmd"}',
@@ -297,7 +290,7 @@ describe("McpFormModal", () => {
     const { onSave } = renderForm({ defaultFormat: "toml" });
 
     const configTextarea = screen.getByPlaceholderText(
-      "mcp.form.tomlPlaceholder",
+      TOML_PLACEHOLDER,
     ) as HTMLTextAreaElement;
 
     const toml = `[mcp.servers.demo]
@@ -307,12 +300,12 @@ command = "run"
     fireEvent.change(configTextarea, { target: { value: toml } });
 
     const idInput = screen.getByPlaceholderText(
-      "mcp.form.titlePlaceholder",
+      "my-mcp-server",
     ) as HTMLInputElement;
 
     await waitFor(() => expect(idInput.value).toBe("demo"));
 
-    fireEvent.click(screen.getByText("common.add"));
+    fireEvent.click(screen.getByText("Add"));
 
     await waitFor(() => expect(upsertMock).toHaveBeenCalledTimes(1));
     const [entry] = upsertMock.mock.calls.at(-1) ?? [];
@@ -327,12 +320,12 @@ command = "run"
     renderForm({ defaultFormat: "toml" });
 
     // 填写 ID 字段
-    fireEvent.change(screen.getByPlaceholderText("mcp.form.titlePlaceholder"), {
+    fireEvent.change(screen.getByPlaceholderText("my-mcp-server"), {
       target: { value: "test-toml" },
     });
 
     const configTextarea = screen.getByPlaceholderText(
-      "mcp.form.tomlPlaceholder",
+      TOML_PLACEHOLDER,
     ) as HTMLTextAreaElement;
 
     const invalidToml = `[mcp.servers.demo]
@@ -340,10 +333,10 @@ type = "stdio"
 `;
     fireEvent.change(configTextarea, { target: { value: invalidToml } });
 
-    fireEvent.click(screen.getByText("common.add"));
+    fireEvent.click(screen.getByText("Add"));
 
     await waitFor(() =>
-      expect(toastErrorMock).toHaveBeenCalledWith("mcp.error.tomlInvalid", {
+      expect(toastErrorMock).toHaveBeenCalledWith("Invalid TOML format", {
         duration: 3000,
       }),
     );
@@ -366,13 +359,13 @@ type = "stdio"
     });
 
     const idInput = screen.getByPlaceholderText(
-      "mcp.form.titlePlaceholder",
+      "my-mcp-server",
     ) as HTMLInputElement;
     expect(idInput.value).toBe("existing");
     expect(idInput).toHaveAttribute("disabled");
 
     const configTextarea = screen.getByPlaceholderText(
-      "mcp.form.jsonPlaceholder",
+      JSON_PLACEHOLDER,
     ) as HTMLTextAreaElement;
     expect(configTextarea.value).toContain('"command": "old"');
 
@@ -380,7 +373,7 @@ type = "stdio"
       target: { value: '{"type":"stdio","command":"updated"}' },
     });
 
-    fireEvent.click(screen.getByText("common.save"));
+    fireEvent.click(screen.getByText("Save"));
 
     await waitFor(() => expect(upsertMock).toHaveBeenCalledTimes(1));
     const [entry] = upsertMock.mock.calls.at(-1) ?? [];
@@ -412,18 +405,18 @@ type = "stdio"
       existingIds: ["a", "wizard-id"],
     });
 
-    fireEvent.click(screen.getByText("mcp.form.useWizard"));
+    fireEvent.click(screen.getByText("Config Wizard"));
     const applyButton = await screen.findByTestId("wizard-apply");
     await act(async () => {
       fireEvent.click(applyButton);
     });
 
     const idInput = screen.getByPlaceholderText(
-      "mcp.form.titlePlaceholder",
+      "my-mcp-server",
     ) as HTMLInputElement;
     expect(idInput.value).toBe("a");
 
-    fireEvent.click(screen.getByText("common.save"));
+    fireEvent.click(screen.getByText("Save"));
 
     await waitFor(() => expect(upsertMock).toHaveBeenCalledTimes(1));
     const [entry] = upsertMock.mock.calls.at(-1) ?? [];
@@ -437,52 +430,48 @@ type = "stdio"
   it("flags a wizard title that collides with an existing ID in add mode", async () => {
     renderForm({ existingIds: ["wizard-id"] });
 
-    fireEvent.click(screen.getByText("mcp.form.useWizard"));
+    fireEvent.click(screen.getByText("Config Wizard"));
     const applyButton = await screen.findByTestId("wizard-apply");
     await act(async () => {
       fireEvent.click(applyButton);
     });
 
-    expect(screen.getByText("mcp.error.idExists")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("common.add"));
+    expect(
+      screen.getByText("Identifier already exists. Please choose another."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Add"));
     await waitFor(() => expect(upsertMock).not.toHaveBeenCalled());
   });
 
   it("允许未选择任何应用保存配置，并保持 apps 全 false", async () => {
     const { onSave } = renderForm();
 
-    fireEvent.change(screen.getByPlaceholderText("mcp.form.titlePlaceholder"), {
+    fireEvent.change(screen.getByPlaceholderText("my-mcp-server"), {
       target: { value: "no-apps" },
     });
-    fireEvent.change(screen.getByPlaceholderText("mcp.form.jsonPlaceholder"), {
+    fireEvent.change(screen.getByPlaceholderText(JSON_PLACEHOLDER), {
       target: { value: '{"type":"stdio","command":"run"}' },
     });
 
-    const claudeCheckbox = screen.getByLabelText(
-      "mcp.unifiedPanel.apps.claude",
-    ) as HTMLInputElement;
+    const claudeCheckbox = screen.getByLabelText("Claude") as HTMLInputElement;
     expect(claudeCheckbox.checked).toBe(true);
     fireEvent.click(claudeCheckbox);
 
-    const codexCheckbox = screen.getByLabelText(
-      "mcp.unifiedPanel.apps.codex",
-    ) as HTMLInputElement;
+    const codexCheckbox = screen.getByLabelText("Codex") as HTMLInputElement;
     expect(codexCheckbox.checked).toBe(true);
     fireEvent.click(codexCheckbox);
 
-    const geminiCheckbox = screen.getByLabelText(
-      "mcp.unifiedPanel.apps.gemini",
-    ) as HTMLInputElement;
+    const geminiCheckbox = screen.getByLabelText("Gemini") as HTMLInputElement;
     expect(geminiCheckbox.checked).toBe(true);
     fireEvent.click(geminiCheckbox);
 
     const grokbuildCheckbox = screen.getByLabelText(
-      "mcp.unifiedPanel.apps.grokbuild",
+      "Grok Build",
     ) as HTMLInputElement;
     expect(grokbuildCheckbox.checked).toBe(true);
     fireEvent.click(grokbuildCheckbox);
 
-    fireEvent.click(screen.getByText("common.add"));
+    fireEvent.click(screen.getByText("Add"));
 
     await waitFor(() => expect(upsertMock).toHaveBeenCalledTimes(1));
     const [entry] = upsertMock.mock.calls.at(-1) ?? [];
@@ -504,21 +493,21 @@ type = "stdio"
     const failingSave = vi.fn().mockRejectedValue(new Error("保存失败"));
     renderForm({ onSave: failingSave });
 
-    fireEvent.change(screen.getByPlaceholderText("mcp.form.titlePlaceholder"), {
+    fireEvent.change(screen.getByPlaceholderText("my-mcp-server"), {
       target: { value: "will-fail" },
     });
-    fireEvent.change(screen.getByPlaceholderText("mcp.form.jsonPlaceholder"), {
+    fireEvent.change(screen.getByPlaceholderText(JSON_PLACEHOLDER), {
       target: { value: '{"type":"stdio","command":"ok"}' },
     });
 
-    fireEvent.click(screen.getByText("common.add"));
+    fireEvent.click(screen.getByText("Add"));
 
     await waitFor(() => expect(failingSave).toHaveBeenCalled());
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
     const [message] = toastErrorMock.mock.calls.at(-1) ?? [];
     expect(message).toBe("保存失败");
 
-    const addButton = screen.getByText("common.add") as HTMLButtonElement;
+    const addButton = screen.getByText("Add") as HTMLButtonElement;
     expect(addButton.disabled).toBe(false);
   });
 });

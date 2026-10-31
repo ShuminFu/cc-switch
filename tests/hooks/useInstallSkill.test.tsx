@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { act, renderHook } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { useInstallSkill, useUninstallSkill } from "@/hooks/useSkills";
 import type { DiscoverableSkill, InstalledSkill } from "@/lib/api/skills";
 import { queryKeys } from "@/lib/query/keys";
+import { mockInvoke } from "../msw/invokeRecorder";
 import { createTestQueryClient } from "../utils/testQueryClient";
 
 const installed: InstalledSkill = {
@@ -23,21 +24,14 @@ const installed: InstalledSkill = {
   updatedAt: 0,
 };
 
-vi.mock("@/lib/api/skills", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/skills")>();
-  return {
-    ...actual,
-    skillsApi: {
-      ...actual.skillsApi,
-      installUnified: vi.fn(async () => installed),
-      uninstallUnified: vi.fn(async () => ({ backupPath: null })),
-    },
-  };
-});
-
 // FE-ARCH-44
 describe("useInstallSkill cache patch", () => {
   it("keeps exactly one entry per id when the same skill installs twice", async () => {
+    // TEST-12: IPC-level mocks; the real skillsApi wrapper runs.
+    const api = mockInvoke({
+      install_skill_unified: installed,
+      uninstall_skill_unified: { backupPath: null },
+    });
     const queryClient = createTestQueryClient();
     queryClient.setQueryData<InstalledSkill[]>(queryKeys.skills.installed, []);
     const wrapper = ({ children }: { children: ReactNode }) => (
@@ -62,6 +56,10 @@ describe("useInstallSkill cache patch", () => {
       queryKeys.skills.installed,
     );
     expect(after?.filter((s) => s.id === installed.id)).toHaveLength(1);
+    expect(api.callsTo("install_skill_unified")[0].args).toEqual({
+      skill,
+      currentApp: "claude",
+    });
 
     await act(async () => {
       await result.current.uninstall.mutateAsync({ id: installed.id });

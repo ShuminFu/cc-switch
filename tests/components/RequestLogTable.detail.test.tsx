@@ -28,14 +28,6 @@ const log: RequestLog = {
 
 const useRequestDetailMock = vi.hoisted(() => vi.fn());
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: string | { defaultValue?: string }) =>
-      typeof options === "string" ? options : (options?.defaultValue ?? key),
-    i18n: { resolvedLanguage: "en", language: "en" },
-  }),
-}));
-
 vi.mock("@/lib/query/usage", () => ({
   useRequestLogs: () => ({
     data: { data: [log], total: 1, page: 0, pageSize: 20 },

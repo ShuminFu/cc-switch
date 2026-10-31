@@ -143,7 +143,7 @@ describe("EditProviderDialog", () => {
       expect(apiMocks.getLiveProviderSettings).toHaveBeenCalled(),
     );
     expect(screen.queryByTestId("settings-config")).toBeNull();
-    expect(screen.getByRole("button", { name: "common.save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
 
     resolveLive(liveSettings);
 
@@ -152,9 +152,7 @@ describe("EditProviderDialog", () => {
         JSON.parse(screen.getByTestId("settings-config").textContent ?? "{}"),
       ).toEqual(liveSettings),
     );
-    expect(
-      screen.getByRole("button", { name: "common.save" }),
-    ).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled();
   });
 
   it("still mounts the form when reading the current provider fails", async () => {
@@ -203,7 +201,7 @@ describe("EditProviderDialog", () => {
     await waitFor(() =>
       expect(screen.getByTestId("settings-config")).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
     expect(handleSubmit.mock.calls[0][0].provider.id).toBe("new-key");
@@ -262,7 +260,7 @@ describe("EditProviderDialog", () => {
       });
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
     expect(handleSubmit.mock.calls[0][0].provider.settingsConfig).toEqual({

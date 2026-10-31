@@ -20,22 +20,6 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: Record<string, unknown>) => {
-      if (key === "proxy.server.started") {
-        return `代理服务已启动 - ${options?.address}:${options?.port}`;
-      }
-
-      if (typeof options?.defaultValue === "string") {
-        return options.defaultValue;
-      }
-
-      return key;
-    },
-  }),
-}));
-
 interface WrapperProps {
   children: ReactNode;
 }
@@ -112,7 +96,7 @@ describe("useProxyStatus", () => {
     });
 
     expect(toastSuccessMock).toHaveBeenCalledWith(
-      "代理服务已启动 - 127.0.0.1:15721",
+      "Routing service started - 127.0.0.1:15721",
       { closeButton: true },
     );
   });

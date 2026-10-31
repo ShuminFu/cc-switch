@@ -76,7 +76,7 @@ describe("Common config modals", () => {
 
     expect(screen.getByTestId("common-config-panel")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     await waitFor(() =>
       expect(
@@ -114,7 +114,7 @@ describe("Common config modals", () => {
     );
 
     const goalToggle = screen.getByRole("checkbox", {
-      name: "codexConfig.enableGoalMode",
+      name: "Enable Goal mode",
     });
 
     expect(goalToggle).not.toBeChecked();
@@ -159,7 +159,7 @@ describe("Common config modals", () => {
 
     expect(screen.getByTestId("common-config-panel")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     await waitFor(() =>
       expect(

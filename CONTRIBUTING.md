@@ -52,7 +52,8 @@ pnpm dev
 | `pnpm test:e2e` | Renderer journeys in Chromium (Playwright, mocked IPC) |
 | `pnpm format:check` | Check code formatting |
 | `pnpm i18n:check` | Check the four locale files are complete and consistent |
-| `pnpm check:repo` | Repository checks: labeler globs, release asset names in docs, README parity, image sizes |
+| `pnpm check:repo` | Repository checks: labeler globs, release asset names in docs, README parity, image sizes, sponsor tables |
+| `pnpm docs:sync` | Regenerate the README sponsor tables from `assets/partners/sponsors.json` (never edit those tables by hand) |
 | `pnpm test:coverage` | Unit tests with a coverage report in `coverage/` |
 | `pnpm check` | Everything the CI frontend job runs, in one command |
 | `pnpm check:rust` | Everything the CI backend job runs (creates `dist/` if missing) |

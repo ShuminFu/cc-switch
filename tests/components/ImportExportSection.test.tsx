@@ -5,10 +5,6 @@ import { ImportExportSection } from "@/components/settings/ImportExportSection";
 
 const tMock = vi.fn((key: string) => key);
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: tMock }),
-}));
-
 describe("ImportExportSection Component", () => {
   const baseProps = {
     status: "idle" as const,
@@ -35,16 +31,12 @@ describe("ImportExportSection Component", () => {
 
     // When no file selected, button shows "selectConfigFile" and clicking it opens file dialog
     expect(
-      screen.getByRole("button", { name: /settings\.selectConfigFile/ }),
+      screen.getByRole("button", { name: /Select SQL File/ }),
     ).toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole("button", { name: "settings.exportConfig" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Export SQL Backup" }));
     expect(baseProps.onExport).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /settings\.selectConfigFile/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Select SQL File/ }));
     expect(baseProps.onSelectFile).toHaveBeenCalledTimes(1);
   });
 
@@ -58,19 +50,17 @@ describe("ImportExportSection Component", () => {
 
     expect(screen.getByText(/config\.json/)).toBeInTheDocument();
     const importButton = screen.getByRole("button", {
-      name: /settings\.import/,
+      name: /Import/,
     });
     expect(importButton).toBeEnabled();
     fireEvent.click(importButton);
     // FE-UI-55: importing replaces everything, so it asks first.
     expect(baseProps.onImport).not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog");
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "settings.import" }),
-    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Import" }));
     expect(baseProps.onImport).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "common.clear" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(baseProps.onClear).toHaveBeenCalledTimes(1);
   });
 
@@ -84,12 +74,10 @@ describe("ImportExportSection Component", () => {
       />,
     );
 
-    const importingLabels = screen.getAllByText("settings.importing");
+    const importingLabels = screen.getAllByText("Importing...");
     expect(importingLabels.length).toBeGreaterThanOrEqual(2);
-    expect(
-      screen.getByRole("button", { name: "settings.importing" }),
-    ).toBeDisabled();
-    expect(screen.getByText("common.loading")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Importing..." })).toBeDisabled();
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
   });
 
   it("should display backup information on successful import", () => {
@@ -102,9 +90,9 @@ describe("ImportExportSection Component", () => {
       />,
     );
 
-    expect(screen.getByText("settings.importSuccess")).toBeInTheDocument();
+    expect(screen.getByText("Import Successful!")).toBeInTheDocument();
     expect(screen.getByText(/backup-001/)).toBeInTheDocument();
-    expect(screen.getByText("settings.autoReload")).toBeInTheDocument();
+    expect(screen.getByText("Data refreshed")).toBeInTheDocument();
   });
 
   it("should display error message when import fails", () => {
@@ -116,7 +104,7 @@ describe("ImportExportSection Component", () => {
       />,
     );
 
-    expect(screen.getByText("settings.importFailed")).toBeInTheDocument();
+    expect(screen.getByText("Import Failed")).toBeInTheDocument();
     expect(screen.getByText("Parse failed")).toBeInTheDocument();
   });
 
@@ -127,12 +115,12 @@ describe("ImportExportSection Component", () => {
         selectedFile={"/tmp/test/config.sql"}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /settings\.import/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Import/ }));
     const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveTextContent("settings.importConfirmMessage");
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "common.cancel" }),
+    expect(dialog).toHaveTextContent(
+      "Importing config.sql replaces all providers",
     );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(baseProps.onImport).not.toHaveBeenCalled();
   });
 
@@ -148,19 +136,17 @@ describe("ImportExportSection Component", () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "settings.revertImport" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Revert import" }));
     const dialog = screen.getByRole("dialog");
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "settings.revertImport" }),
+      within(dialog).getByRole("button", { name: "Revert import" }),
     );
     await waitFor(() =>
       expect(onRevertImport).toHaveBeenCalledWith("db_safety_20260101_000000"),
     );
     await waitFor(() =>
       expect(
-        screen.queryByRole("button", { name: "settings.revertImport" }),
+        screen.queryByRole("button", { name: "Revert import" }),
       ).toBeNull(),
     );
   });

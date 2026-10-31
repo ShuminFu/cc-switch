@@ -4,14 +4,14 @@ How cc-switch is tested, where tests go, and how to mock the backend.
 
 ## The layers
 
-| Layer | Where | Runner | Command |
-| --- | --- | --- | --- |
-| Pure frontend logic (no DOM) | `src/**/*.test.ts`, `tests/{config,contracts,i18n,lib,scripts,utils}/**/*.test.ts` | vitest, `unit` project (node) | `pnpm test:unit --project unit` |
-| Components, hooks, integration | `tests/{app,components,hooks,integration}/**`, `tests/**/*.test.tsx` | vitest, `dom` project (jsdom) | `pnpm test:unit --project dom` |
-| Renderer journeys (E2E) | `e2e/*.e2e.mjs` | node:test + Playwright (Chromium) | `pnpm test:e2e` |
-| Rust unit tests | `#[cfg(test)]` modules next to the code | cargo / nextest | `cargo test --lib <module>` |
-| Rust integration tests | `src-tauri/tests/*.rs` (shared `support.rs`) | cargo / nextest | `cargo test --test <file>` |
-| Proxy golden corpus | `src-tauri/tests/fixtures/proxy/` | `proxy::testing` | `UPDATE_GOLDEN=1 cargo test --lib proxy::testing` |
+| Layer                          | Where                                                                              | Runner                            | Command                                           |
+| ------------------------------ | ---------------------------------------------------------------------------------- | --------------------------------- | ------------------------------------------------- |
+| Pure frontend logic (no DOM)   | `src/**/*.test.ts`, `tests/{config,contracts,i18n,lib,scripts,utils}/**/*.test.ts` | vitest, `unit` project (node)     | `pnpm test:unit --project unit`                   |
+| Components, hooks, integration | `tests/{app,components,hooks,integration}/**`, `tests/**/*.test.tsx`               | vitest, `dom` project (jsdom)     | `pnpm test:unit --project dom`                    |
+| Renderer journeys (E2E)        | `e2e/*.e2e.mjs`                                                                    | node:test + Playwright (Chromium) | `pnpm test:e2e`                                   |
+| Rust unit tests                | `#[cfg(test)]` modules next to the code                                            | cargo / nextest                   | `cargo test --lib <module>`                       |
+| Rust integration tests         | `src-tauri/tests/*.rs` (shared `support.rs`)                                       | cargo / nextest                   | `cargo test --test <file>`                        |
+| Proxy golden corpus            | `src-tauri/tests/fixtures/proxy/`                                                  | `proxy::testing`                  | `UPDATE_GOLDEN=1 cargo test --lib proxy::testing` |
 
 The project split lives in `vitest.workspace.ts`. A `.ts` test that needs a DOM
 can opt in with a `// @vitest-environment jsdom` first line.
@@ -96,14 +96,14 @@ package dependency: CI installs `playwright@1.63.0` globally; locally run with
 
 Release-checklist mapping:
 
-| Journey | Release checklist item |
-| --- | --- |
-| J1 boot | App starts, provider list renders, no unknown backend command |
-| J2 switch | Switching provider updates "In Use" and refreshes the tray |
-| J3 apps | Every app tab loads its own providers |
-| J4 switch failure | A backend error shows a localized toast and changes nothing |
-| J5 settings | Settings page opens with all sections |
-| J6 add provider | Add-provider dialog opens with presets |
+| Journey           | Release checklist item                                        |
+| ----------------- | ------------------------------------------------------------- |
+| J1 boot           | App starts, provider list renders, no unknown backend command |
+| J2 switch         | Switching provider updates "In Use" and refreshes the tray    |
+| J3 apps           | Every app tab loads its own providers                         |
+| J4 switch failure | A backend error shows a localized toast and changes nothing   |
+| J5 settings       | Settings page opens with all sections                         |
+| J6 add provider   | Add-provider dialog opens with presets                        |
 
 ## CI
 

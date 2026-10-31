@@ -9,13 +9,6 @@ import {
 } from "@/components/notifications/notificationSettings";
 import type { SettingsFormState } from "@/hooks/useSettings";
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, opts?: { defaultValue?: string }) =>
-      opts?.defaultValue ?? key,
-  }),
-}));
-
 const baseSettings = {
   showInTray: true,
   minimizeToTrayOnClose: true,

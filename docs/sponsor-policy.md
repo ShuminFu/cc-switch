@@ -27,6 +27,13 @@ Sponsorship never buys:
 - removal or demotion of competitors, or changes to how non-sponsored presets are shown;
 - access to any user data. CC Switch has no telemetry and does not report anything to sponsors.
 
+### Editing the README listing
+
+The sponsor table in the four READMEs is generated (CI-33). Add, change or remove a sponsor in
+`assets/partners/sponsors.json` (shared link, logo and alt text, a `blurb` per locale, and
+`overrides` for a locale that uses a different link or logo), then run `pnpm docs:sync`.
+`pnpm check:repo` fails when a README table was edited by hand.
+
 ## 2. Listing criteria
 
 Before a sponsored preset or README entry is merged, the sponsor provides, and a maintainer records in the PR:

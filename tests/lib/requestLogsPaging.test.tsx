@@ -3,21 +3,22 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useRequestLogs } from "@/lib/query/usage";
+import { mockInvoke, type RecordedInvoke } from "../msw/invokeRecorder";
 import { createTestQueryClient } from "../utils/testQueryClient";
 
-const getRequestLogsMock = vi.fn();
-vi.mock("@/lib/api/usage", () => ({
-  usageApi: {
-    getRequestLogs: (...args: unknown[]) => getRequestLogsMock(...args),
-  },
-}));
+// TEST-12: mocked at the IPC boundary, so the real usageApi wrapper runs.
+let calls: RecordedInvoke[] = [];
+const endDateOf = (index: number) =>
+  (calls[index].args.filters as { endDate: number }).endDate;
 
 // FE-ARCH-41: later pages use a frozen window instead of `now`.
 describe("useRequestLogs paging window", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
-    getRequestLogsMock.mockReset().mockResolvedValue({ data: [], total: 25 });
+    calls = mockInvoke({
+      get_request_logs: { data: [], total: 25, page: 0, pageSize: 20 },
+    }).calls;
   });
   afterEach(() => vi.useRealTimers());
 
@@ -38,24 +39,25 @@ describe("useRequestLogs paging window", () => {
         }),
       { wrapper, initialProps: { page: 0 } },
     );
-    await waitFor(() => expect(getRequestLogsMock).toHaveBeenCalledTimes(1));
-    const firstEnd = getRequestLogsMock.mock.calls[0][0].endDate;
+    await waitFor(() => expect(calls).toHaveLength(1));
+    const firstEnd = endDateOf(0);
 
     vi.setSystemTime(new Date("2026-10-01T12:05:00Z"));
     rerender({ page: 1 });
-    await waitFor(() => expect(getRequestLogsMock).toHaveBeenCalledTimes(2));
-    const frozenEnd = getRequestLogsMock.mock.calls[1][0].endDate;
+    await waitFor(() => expect(calls).toHaveLength(2));
+    const frozenEnd = endDateOf(1);
     expect(frozenEnd).toBeGreaterThan(firstEnd);
 
     vi.setSystemTime(new Date("2026-10-01T12:10:00Z"));
     await act(async () => {
       await result.current.refetch();
     });
-    const refetchEnd = getRequestLogsMock.mock.calls.at(-1)?.[0].endDate;
+    const refetchEnd = endDateOf(calls.length - 1);
     expect(refetchEnd).toBe(frozenEnd);
 
     rerender({ page: 2 });
-    await waitFor(() => expect(getRequestLogsMock).toHaveBeenCalledTimes(4));
-    expect(getRequestLogsMock.mock.calls[3][0].endDate).toBe(frozenEnd);
+    await waitFor(() => expect(calls).toHaveLength(4));
+    expect(endDateOf(3)).toBe(frozenEnd);
+    expect(calls[3].args).toMatchObject({ page: 2, pageSize: 20 });
   });
 });

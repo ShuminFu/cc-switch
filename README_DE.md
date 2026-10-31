@@ -33,6 +33,7 @@ Hauptsächlich mit Programmierung beschäftigt? Probieren Sie den **[Kimi-For-Co
 
 ---
 
+<!-- SPONSORS:START -->
 <table>
 <tr>
 <td width="180"><a href="https://www.packyapi.com/register?aff=cc-switch"><img src="assets/partners/logos/packycode.png" alt="PackyCode" width="150"></a></td>
@@ -190,6 +191,7 @@ TeamoRouter bietet außerdem Enterprise-Funktionen wie zentrale Abrechnung, Team
 </tr>
 
 </table>
+<!-- SPONSORS:END -->
 
 </details>
 

@@ -33,6 +33,7 @@ Doing mostly coding work? Try the **[Kimi For Coding plan](https://www.kimi.com/
 
 ---
 
+<!-- SPONSORS:START -->
 <table>
 <tr>
 <td width="180"><a href="https://www.packyapi.com/register?aff=cc-switch"><img src="assets/partners/logos/packycode.png" alt="PackyCode" width="150"></a></td>
@@ -190,6 +191,7 @@ TeamoRouter also offers enterprise features including centralized billing, team 
 </tr>
 
 </table>
+<!-- SPONSORS:END -->
 
 </details>
 

@@ -4,21 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import { PricingEditModal } from "@/components/usage/PricingEditModal";
 import type { ModelPricing } from "@/types/usage";
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
-      key: string,
-      options?: string | ({ defaultValue?: string } & Record<string, unknown>),
-    ) => {
-      if (typeof options === "string") return options;
-      const text = options?.defaultValue ?? key;
-      return text.replace(/\{\{(\w+)\}\}/g, (_, name: string) =>
-        String(options?.[name] ?? ""),
-      );
-    },
-  }),
-}));
-
 vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),
@@ -83,7 +68,7 @@ describe("PricingEditModal", () => {
 
     for (const { id } of PRICE_FIELDS) {
       const input = screen.getByLabelText(
-        /每百万 tokens/ as unknown as string,
+        /per million tokens/ as unknown as string,
         {
           selector: `#${id}`,
         },

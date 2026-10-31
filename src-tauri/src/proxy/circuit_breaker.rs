@@ -114,16 +114,16 @@ pub fn split_breaker_key(key: &str) -> Option<(&str, &str)> {
 /// must not block; spawn a task for anything slow.
 pub type CircuitStateListener = Arc<dyn Fn(&CircuitStateChange) + Send + Sync>;
 
-static STATE_LISTENERS: once_cell::sync::Lazy<std::sync::RwLock<Vec<(u64, CircuitStateListener)>>> =
-    once_cell::sync::Lazy::new(|| std::sync::RwLock::new(Vec::new()));
+static STATE_LISTENERS: std::sync::LazyLock<std::sync::RwLock<Vec<(u64, CircuitStateListener)>>> =
+    std::sync::LazyLock::new(|| std::sync::RwLock::new(Vec::new()));
 static NEXT_LISTENER_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Registry of live keyed breakers, used by the background health prober.
 /// Holds weak references so stopping the proxy (dropping its router) drops
 /// the breakers too.
-static BREAKER_REGISTRY: once_cell::sync::Lazy<
+static BREAKER_REGISTRY: std::sync::LazyLock<
     std::sync::Mutex<HashMap<String, Weak<CircuitBreaker>>>,
-> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
 /// Register a state-change listener; returns an id for [`remove_state_listener`].
 pub fn add_state_listener(listener: CircuitStateListener) -> u64 {

@@ -30,13 +30,6 @@ vi.mock("@/hooks/useBackupManager", () => ({
   }),
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: Record<string, unknown>) =>
-      (options?.defaultValue as string) ?? key,
-  }),
-}));
-
 describe("parseBackupName", () => {
   it.each([
     ["db_backup_20260101_101500.db", "auto", "2026-01-01 10:15:00"],

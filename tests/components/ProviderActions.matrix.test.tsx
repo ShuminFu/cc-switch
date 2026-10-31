@@ -28,7 +28,7 @@ const mainButton = () => screen.getAllByRole("button")[0];
 describe("ProviderActions state matrix", () => {
   it("switch mode: enable when not current, disabled 'in use' when current", () => {
     const props = renderActions();
-    expect(mainButton()).toHaveTextContent("provider.enable");
+    expect(mainButton()).toHaveTextContent("Enable");
     fireEvent.click(mainButton());
     expect(props.onSwitch).toHaveBeenCalledTimes(1);
   });
@@ -36,8 +36,8 @@ describe("ProviderActions state matrix", () => {
   it("current provider: main button disabled and delete unavailable", () => {
     const props = renderActions({ isCurrent: true });
     expect(mainButton()).toBeDisabled();
-    expect(mainButton()).toHaveTextContent("provider.inUse");
-    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+    expect(mainButton()).toHaveTextContent("In Use");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(props.onDelete).not.toHaveBeenCalled();
   });
 

@@ -14,17 +14,6 @@ import { resetDashboardViewState } from "@/components/usage/dashboardViewState";
 const useProviderStatsMock = vi.hoisted(() => vi.fn());
 const useModelStatsMock = vi.hoisted(() => vi.fn());
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, fallback?: string | { defaultValue?: string }) =>
-      typeof fallback === "string" ? fallback : (fallback?.defaultValue ?? key),
-    i18n: {
-      resolvedLanguage: "en",
-      language: "en",
-    },
-  }),
-}));
-
 vi.mock("framer-motion", () => ({
   motion: {
     div: ({ children, ...props }: any) => <div {...props}>{children}</div>,
@@ -172,9 +161,7 @@ describe("UsageDashboard", () => {
 
   it("keeps the app filter after the dashboard remounts (FE-UI-31)", () => {
     const first = renderDashboard();
-    fireEvent.click(
-      screen.getByRole("button", { name: "usage.appFilter.codex" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
     expect(screen.getByTestId("usage-export")).toHaveTextContent("codex");
     first.unmount();
 

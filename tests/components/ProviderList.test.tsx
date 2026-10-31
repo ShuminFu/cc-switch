@@ -201,7 +201,7 @@ describe("ProviderList Component", () => {
     );
 
     const addButton = screen.getByRole("button", {
-      name: "provider.addProvider",
+      name: "Add Provider",
     });
     fireEvent.click(addButton);
 

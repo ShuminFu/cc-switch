@@ -17,14 +17,6 @@ const toastMock = vi.hoisted(() => ({
 }));
 vi.mock("sonner", () => ({ toast: toastMock }));
 
-const stableT = vi.hoisted(
-  () => (key: string, options?: unknown) =>
-    (options as { defaultValue?: string } | undefined)?.defaultValue ?? key,
-);
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: stableT, i18n: { language: "en" } }),
-}));
-
 vi.mock("@/components/MarkdownEditor", () => ({
   default: ({ value }: { value: string }) => (
     <textarea data-testid="editor" readOnly value={value} />
@@ -110,9 +102,7 @@ describe("ManagedItemsPanel (generic shell)", () => {
     // Action buttons have accessible names (keyboard reachable, FE-UI-11).
     fireEvent.click(screen.getByRole("button", { name: "delete two" }));
     expect(onDelete).not.toHaveBeenCalled();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "common.confirm" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith("two"));
     await waitFor(() =>
       expect(screen.queryByText("Delete?")).not.toBeInTheDocument(),
@@ -152,13 +142,11 @@ describe("ManagedItemsPanel adapters", () => {
       enabled: true,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "common.edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(await screen.findByTestId("mcp-form")).toHaveTextContent("fs");
 
-    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "common.confirm" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
     await waitFor(() =>
       expect(api.callsTo("delete_mcp_server")).toHaveLength(1),
     );
@@ -197,10 +185,8 @@ describe("ManagedItemsPanel adapters", () => {
       enabled: false,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "skills.uninstall" }));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "common.confirm" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Uninstall" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
     await waitFor(() =>
       expect(api.callsTo("uninstall_skill_unified")).toHaveLength(1),
     );
@@ -223,7 +209,7 @@ describe("ManagedItemsPanel adapters", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Alpha" }));
     await waitFor(() => expect(api.callsTo("enable_prompt")).toHaveLength(1));
 
-    fireEvent.click(screen.getByRole("button", { name: "common.edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(await screen.findByTestId("editor")).toHaveValue("A");
   });
 
@@ -237,11 +223,9 @@ describe("ManagedItemsPanel adapters", () => {
     renderWithQuery(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
 
     await screen.findByText("Alpha");
-    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(api.callsTo("delete_prompt")).toHaveLength(0);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "common.confirm" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(api.callsTo("delete_prompt")).toHaveLength(1));
   });
 });

@@ -843,8 +843,8 @@ pub(crate) async fn fetch_pypi_latest_version(
 }
 
 /// 预编译的版本号正则表达式
-pub(crate) static VERSION_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\d+\.\d+\.\d+(-[\w.]+)?").expect("Invalid version regex"));
+pub(crate) static VERSION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\d+\.\d+\.\d+(-[\w.]+)?").expect("Invalid version regex"));
 
 /// 从版本输出中提取纯版本号
 pub(crate) fn extract_version(raw: &str) -> String {

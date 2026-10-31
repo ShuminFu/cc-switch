@@ -2,7 +2,7 @@
 //!
 //! 负责系统托盘图标和菜单的创建、更新和事件处理。
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use tauri::menu::{CheckMenuItem, Menu, MenuBuilder, MenuItem, Submenu, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
@@ -41,9 +41,9 @@ const TIER_LABEL_GROUPS: &[(&str, &[&str])] = &[
 
 /// 每个 app 分区的子菜单句柄，用于 usage 更新时就地改 label 而非整菜单重建。
 /// `create_tray_menu` 每次重建都会整表覆盖写入，保证句柄始终指向当前活跃菜单。
-static TRAY_SECTION_SUBMENUS: Lazy<
+static TRAY_SECTION_SUBMENUS: LazyLock<
     std::sync::Mutex<std::collections::HashMap<AppType, Submenu<tauri::Wry>>>,
-> = Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+> = LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 /// 托盘菜单文本（国际化）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -778,9 +778,9 @@ fn proxy_running_snapshot(app_state: &AppState) -> (bool, bool) {
 type LiveFingerprint = Vec<Option<(std::time::SystemTime, u64)>>;
 
 /// 按应用缓存"Live 配置是否含接管占位符"的检测结果，文件指纹不变时不再读取解析。
-static LIVE_TAKEOVER_CACHE: Lazy<
+static LIVE_TAKEOVER_CACHE: LazyLock<
     std::sync::Mutex<std::collections::HashMap<AppType, (LiveFingerprint, bool)>>,
-> = Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+> = LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 fn live_config_paths(app_type: &AppType) -> Vec<std::path::PathBuf> {
     match app_type {

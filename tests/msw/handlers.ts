@@ -269,6 +269,33 @@ export const handlers = [
     );
   }),
   http.post(`${TAURI_ENDPOINT}/discard_pending_deeplink`, () => success(true)),
+  // Single-resource imports (v1 links and one-item v2 links, TEST-32).
+  http.post(
+    `${TAURI_ENDPOINT}/import_from_deeplink_unified`,
+    async ({ request }) => {
+      const { request: link } = await withJson<{
+        request: { resource?: string; name?: string; repo?: string };
+      }>(request);
+      const resource = link.resource ?? "provider";
+      if (resource === "mcp") {
+        return success({
+          type: "mcp",
+          importedCount: 1,
+          importedIds: ["deeplink-mcp"],
+          failed: [],
+        });
+      }
+      if (resource === "skill") {
+        return success({ type: "skill", key: link.repo ?? "owner/repo" });
+      }
+      return success({ type: resource, id: `deeplink-${resource}` });
+    },
+  ),
+  // Echo the request: the fake has no Base64/URL config to merge.
+  http.post(`${TAURI_ENDPOINT}/merge_deeplink_config`, async ({ request }) => {
+    const { request: link } = await withJson<{ request: unknown }>(request);
+    return success(link);
+  }),
   http.post(`${TAURI_ENDPOINT}/build_deeplink_share_link`, () =>
     success("ccswitch://v2/import?p=e30"),
   ),

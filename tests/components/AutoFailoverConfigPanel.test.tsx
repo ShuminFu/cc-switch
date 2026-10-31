@@ -9,11 +9,6 @@ const toastMock = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast: toastMock }));
 
 // `t(key, "default")` and `t(key, { defaultValue })` both return the key.
-const stableT = vi.hoisted(() => (key: string) => key);
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: stableT }),
-}));
-
 const config = {
   appType: "claude",
   enabled: true,
@@ -37,7 +32,7 @@ const renderPanel = () =>
   );
 
 const maxRetries = () =>
-  screen.getByLabelText("proxy.autoFailover.maxRetries") as HTMLInputElement;
+  screen.getByLabelText("Max Retries") as HTMLInputElement;
 
 beforeEach(() => {
   toastMock.error.mockReset();
@@ -66,18 +61,16 @@ describe("AutoFailoverConfigPanel", () => {
 
     await waitFor(() => expect(maxRetries()).toHaveValue(2));
     fireEvent.change(maxRetries(), { target: { value: "11" } });
-    fireEvent.click(screen.getByRole("button", { name: /common\.save/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }));
 
     await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
     expect(String(toastMock.error.mock.calls[0][0])).toContain(
-      "proxy.autoFailover.validationFailed",
+      "The following fields are out of valid range",
     );
     expect(api.callsTo("update_proxy_config_for_app")).toHaveLength(0);
     // The offending field is flagged inline (FE-UI-20).
     expect(maxRetries()).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getAllByText("proxy.autoFailover.rangeError")).toHaveLength(
-      1,
-    );
+    expect(screen.getAllByText(/Enter a whole number from/)).toHaveLength(1);
   });
 
   it("saves the full config, converting the error rate back to a ratio", async () => {
@@ -89,7 +82,7 @@ describe("AutoFailoverConfigPanel", () => {
 
     await waitFor(() => expect(maxRetries()).toHaveValue(2));
     fireEvent.change(maxRetries(), { target: { value: "5" } });
-    fireEvent.click(screen.getByRole("button", { name: /common\.save/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }));
 
     await waitFor(() =>
       expect(api.callsTo("update_proxy_config_for_app")).toHaveLength(1),
@@ -106,7 +99,7 @@ describe("AutoFailoverConfigPanel", () => {
     await waitFor(() => expect(maxRetries()).toHaveValue(2));
     fireEvent.change(maxRetries(), { target: { value: "7" } });
     expect(maxRetries()).toHaveValue(7);
-    fireEvent.click(screen.getByRole("button", { name: /common\.reset/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reset/ }));
     expect(maxRetries()).toHaveValue(2);
   });
 });

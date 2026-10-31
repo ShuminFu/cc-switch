@@ -139,7 +139,7 @@ function renderSelector({
 
 function getPresetButtonTexts() {
   const knownNames = new Set([
-    "providerPreset.custom",
+    "Custom Configuration",
     ...presetEntries.flatMap((entry) => [
       entry.preset.name,
       entry.preset.nameKey ?? entry.preset.name,
@@ -303,7 +303,7 @@ describe("ProviderPresetSelector", () => {
     renderSelector();
 
     expect(getPresetButtonTexts()).toEqual([
-      "providerPreset.custom",
+      "Custom Configuration",
       "preset.alpha",
       "preset.gamma",
       "Beta Gateway",
@@ -318,7 +318,7 @@ describe("ProviderPresetSelector", () => {
     await user.click(getSortButton());
 
     expect(getPresetButtonTexts()).toEqual([
-      "providerPreset.custom",
+      "Custom Configuration",
       "Beta Gateway",
       "Delta Mirror",
       "preset.alpha",
@@ -328,7 +328,7 @@ describe("ProviderPresetSelector", () => {
     await user.click(getSortButton());
 
     expect(getPresetButtonTexts()).toEqual([
-      "providerPreset.custom",
+      "Custom Configuration",
       "preset.alpha",
       "preset.gamma",
       "Beta Gateway",
@@ -344,7 +344,7 @@ describe("ProviderPresetSelector", () => {
     await user.type(getSearchInput(), "gateway");
 
     expect(
-      screen.getByRole("button", { name: "providerPreset.custom" }),
+      screen.getByRole("button", { name: "Custom Configuration" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Beta Gateway" }),
@@ -368,7 +368,7 @@ describe("ProviderPresetSelector", () => {
     await user.type(getSearchInput(), "not-found");
 
     expect(
-      screen.getByRole("button", { name: "providerPreset.custom" }),
+      screen.getByRole("button", { name: "Custom Configuration" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "preset.gamma" }),
@@ -383,9 +383,7 @@ describe("ProviderPresetSelector", () => {
       screen.queryByRole("button", { name: "Delta Mirror" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText(
-        /providerPreset\.(empty|noResults)|没有匹配|无结果|no matching presets/i,
-      ),
+      screen.getByText("No provider presets match your search."),
     ).toBeInTheDocument();
   });
 
@@ -450,7 +448,7 @@ describe("ProviderPresetSelector", () => {
     renderSelector();
 
     const customButton = screen.getByRole("button", {
-      name: "providerPreset.custom",
+      name: "Custom Configuration",
     });
     const placeholder = customButton.querySelector("span[aria-hidden]");
     expect(placeholder).not.toBeNull();

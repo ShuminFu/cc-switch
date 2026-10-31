@@ -113,8 +113,8 @@ impl NotificationDeduper {
     }
 }
 
-static DEDUPER: once_cell::sync::Lazy<Mutex<NotificationDeduper>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(NotificationDeduper::new(DEDUP_WINDOW)));
+static DEDUPER: std::sync::LazyLock<Mutex<NotificationDeduper>> =
+    std::sync::LazyLock::new(|| Mutex::new(NotificationDeduper::new(DEDUP_WINDOW)));
 
 /// Decide whether a notification should be shown: the category must be
 /// enabled and not notified for this subject within the de-dup window.

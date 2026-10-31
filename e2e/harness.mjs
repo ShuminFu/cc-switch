@@ -97,8 +97,17 @@ export async function startApp() {
 /**
  * Open a fresh page with tracing. `run(page)` is the journey; on failure the
  * screenshot and trace are kept under e2e/artifacts/<name>.*.
+ *
+ * `setup` is a browser-side function run before the app boots; it may set
+ * `window.__E2E_SETUP__ = { overrides: { cmd: (args, next) => ... } }` to
+ * change what startup commands return (see e2e/ipc-mock.ts).
  */
-export async function withPage(app, name, run, { locale = "en-US" } = {}) {
+export async function withPage(
+  app,
+  name,
+  run,
+  { locale = "en-US", setup } = {},
+) {
   const context = await app.browser.newContext({
     locale,
     viewport: { width: 1280, height: 860 },
@@ -111,6 +120,7 @@ export async function withPage(app, name, run, { locale = "en-US" } = {}) {
       /* storage blocked */
     }
   });
+  if (setup) await context.addInitScript(setup);
   await context.tracing.start({ screenshots: true, snapshots: true });
   const page = await context.newPage();
   const errors = [];

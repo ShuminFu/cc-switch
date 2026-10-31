@@ -15,13 +15,6 @@ import { createTestQueryClient } from "../utils/testQueryClient";
 import { mockInvoke } from "../msw/invokeRecorder";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-const stableT = vi.hoisted(
-  () => (key: string, options?: { defaultValue?: string }) =>
-    options?.defaultValue ?? key,
-);
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: stableT }),
-}));
 vi.mock("@/components/JsonEditor", () => ({
   default: ({
     value,
@@ -100,7 +93,7 @@ describe("AgentsDefaultsPanel (FE-UI-36)", () => {
     });
     renderWith(createTestQueryClient(), <AgentsDefaultsPanel />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /common.save/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Save/ }));
     expect(
       await screen.findByText(/Choose a primary model/),
     ).toBeInTheDocument();
@@ -114,14 +107,14 @@ describe("AgentsDefaultsPanel (FE-UI-36)", () => {
     });
     renderWith(createTestQueryClient(), <AgentsDefaultsPanel />);
 
-    const ctx = await screen.findByLabelText("openclaw.agents.contextTokens");
+    const ctx = await screen.findByLabelText("Context Tokens");
     fireEvent.change(ctx, { target: { value: "-5" } });
-    fireEvent.click(screen.getByRole("button", { name: /common.save/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }));
     expect(await screen.findByText(/whole number/)).toBeInTheDocument();
     expect(api.callsTo("set_openclaw_agents_defaults")).toHaveLength(0);
 
     fireEvent.change(ctx, { target: { value: "200000" } });
-    fireEvent.click(screen.getByRole("button", { name: /common.save/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }));
     await waitFor(() =>
       expect(api.callsTo("set_openclaw_agents_defaults")).toHaveLength(1),
     );

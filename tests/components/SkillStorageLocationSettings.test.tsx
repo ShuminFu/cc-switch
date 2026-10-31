@@ -35,9 +35,7 @@ describe("SkillStorageLocationSettings (FE-UI-58)", () => {
       </QueryClientProvider>,
     );
 
-    fireEvent.click(
-      screen.getByRole("radio", { name: /settings.skillStorage.unified/ }),
-    );
+    fireEvent.click(screen.getByRole("radio", { name: /~\/.agents\/skills/ }));
 
     const list = await screen.findByTestId("skill-migration-errors");
     expect(list).toHaveTextContent("foo: permission denied");

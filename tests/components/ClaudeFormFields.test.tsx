@@ -144,7 +144,7 @@ describe("ClaudeFormFields", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "providerForm.fetchModels",
+        name: "Fetch Models",
       }),
     );
 
@@ -167,7 +167,7 @@ describe("ClaudeFormFields", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "providerForm.fetchModels",
+        name: "Fetch Models",
       }),
     );
 
