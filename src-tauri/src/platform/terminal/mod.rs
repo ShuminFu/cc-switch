@@ -2,6 +2,8 @@
 //! （`launch_terminal_running`）与会话恢复（`launch_session_terminal`）都从这里拉起外部终端，
 //! 共用私有临时文件（`tempfiles`）、shell 引号（`platform::shell`）与各平台的首选终端选择。
 
+#[cfg(any(target_os = "macos", test))]
+mod applescript;
 mod posix;
 mod resume;
 mod tempfiles;
