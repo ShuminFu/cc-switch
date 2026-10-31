@@ -285,6 +285,19 @@ describe("SettingsPage Component", () => {
     vi.unstubAllGlobals();
   });
 
+  it("jumps from the settings search to an Advanced section and opens it (FE-UI-38)", async () => {
+    renderSettingsPage();
+    expect(screen.queryByTestId("tab-advanced")).not.toBeInTheDocument();
+    const box = screen.getByRole("combobox", {
+      name: "settings.search.label",
+    });
+    fireEvent.change(box, { target: { value: "webdav" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+
+    expect(await screen.findByTestId("tab-advanced")).toBeInTheDocument();
+    expect(await screen.findByText(/webdav-sync-section:/)).toBeInTheDocument();
+  });
+
   it("should not render form content when loading", () => {
     settingsMock = createSettingsMock({ settings: null, isLoading: true });
 

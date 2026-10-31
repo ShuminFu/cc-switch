@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Server, Activity, Zap, Globe, ShieldAlert } from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
@@ -24,13 +24,27 @@ import { PROXY_CAPABLE_APPS, getAppLabel } from "@/config/proxyApps";
 interface ProxyTabContentProps {
   settings: SettingsFormState;
   onAutoSave: (updates: Partial<SettingsFormState>) => Promise<boolean | void>;
+  /** Section the settings search asked to open (FE-UI-38). */
+  expandSection?: { section: string; nonce: number } | null;
 }
 
 export function ProxyTabContent({
   settings,
   onAutoSave,
+  expandSection,
 }: ProxyTabContentProps) {
   const { t } = useTranslation();
+  const [openSections, setOpenSections] = useState<string[]>(() =>
+    expandSection ? [expandSection.section] : [],
+  );
+  useEffect(() => {
+    if (!expandSection) return;
+    setOpenSections((prev) =>
+      prev.includes(expandSection.section)
+        ? prev
+        : [...prev, expandSection.section],
+    );
+  }, [expandSection]);
   const [showProxyConfirm, setShowProxyConfirm] = useState(false);
   const [showFailoverConfirm, setShowFailoverConfirm] = useState(false);
 
@@ -90,7 +104,12 @@ export function ProxyTabContent({
       transition={{ duration: 0.3 }}
       className="space-y-4"
     >
-      <Accordion type="multiple" defaultValue={[]} className="w-full space-y-4">
+      <Accordion
+        type="multiple"
+        value={openSections}
+        onValueChange={setOpenSections}
+        className="w-full space-y-4"
+      >
         {/* Local Proxy */}
         <AccordionItem
           value="proxy"
