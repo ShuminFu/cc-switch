@@ -12,7 +12,7 @@ import type { SwitchResult } from "@/lib/api/providers";
 import type { Provider, SessionMeta, Settings } from "@/types";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { generateUUID } from "@/utils/uuid";
-import { invalidateHermesProviderCaches } from "@/hooks/useHermes";
+import { invalidateHermesProviderCaches } from "./hermes";
 import { queryKeys } from "./keys";
 import { CODEX_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
 

@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { providersApi } from "@/lib/api";
 import { useProvidersQuery } from "@/lib/query/queries";
 import type { OpenCodeProviderPreset } from "@/config/opencodeProviderPresets";
-import { parseOmoOtherFieldsObject } from "@/types/omo";
+import { parseOmoOtherFieldsObject } from "@/config/omo";
 import { OmoFormFields } from "../OmoFormFields";
 import { OpenCodeFormFields } from "../OpenCodeFormFields";
 import {

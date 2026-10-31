@@ -3,7 +3,6 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
-  type QueryClient,
 } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -31,12 +30,7 @@ export const hermesKeys = queryKeys.hermes;
  * added/updated/deleted/switched. Runs invalidations in parallel so the
  * caller doesn't await three sequential refetches.
  */
-export function invalidateHermesProviderCaches(queryClient: QueryClient) {
-  return Promise.all([
-    queryClient.invalidateQueries({ queryKey: hermesKeys.liveProviderIds }),
-    queryClient.invalidateQueries({ queryKey: hermesKeys.modelConfig }),
-  ]);
-}
+export { invalidateHermesProviderCaches } from "@/lib/query/hermes";
 
 // ============================================================
 // Query hooks

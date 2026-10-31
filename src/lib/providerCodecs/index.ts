@@ -13,7 +13,7 @@ import {
   GEMINI_DEFAULT_CONFIG,
   OPENCLAW_DEFAULT_CONFIG,
   OPENCODE_DEFAULT_CONFIG,
-} from "@/components/providers/forms/helpers/opencodeFormUtils";
+} from "@/config/providerDefaultConfigs";
 
 /**
  * Per-app knowledge of a provider's `settingsConfig` shape (FE-PROV-22).

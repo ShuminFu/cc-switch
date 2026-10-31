@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { proxyApi } from "@/lib/api/proxy";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
-import { useTauriEvent } from "@/hooks/useTauriEvent";
+import { useTauriEvent } from "@/lib/useTauriEvent";
 import type {
   GlobalProxyConfig,
   AppProxyConfig,
