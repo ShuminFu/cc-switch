@@ -18,6 +18,7 @@ pub async fn start_proxy_server(
 
 /// 停止代理服务器（仅停止服务，不恢复/清理 Live 接管状态）
 #[tauri::command]
+#[specta::specta]
 pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let takeover = state.proxy_service.get_takeover_status().await?;
     if takeover.claude
@@ -37,6 +38,7 @@ pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), 
 
 /// 停止代理服务器（恢复 Live 配置）
 #[tauri::command]
+#[specta::specta]
 pub async fn stop_proxy_with_restore(state: tauri::State<'_, AppState>) -> Result<(), String> {
     state.proxy_service.stop_with_restore().await
 }
@@ -51,6 +53,7 @@ pub async fn get_proxy_takeover_status(
 
 /// 为指定应用开启/关闭接管
 #[tauri::command]
+#[specta::specta]
 pub async fn set_proxy_takeover_for_app(
     state: tauri::State<'_, AppState>,
     app_type: String,
@@ -166,6 +169,7 @@ pub async fn get_default_cost_multiplier_test_hook(
 
 /// 获取默认成本倍率
 #[tauri::command]
+#[specta::specta]
 pub async fn get_default_cost_multiplier(
     state: tauri::State<'_, AppState>,
     app_type: String,
@@ -195,6 +199,7 @@ pub async fn set_default_cost_multiplier_test_hook(
 
 /// 设置默认成本倍率
 #[tauri::command]
+#[specta::specta]
 pub async fn set_default_cost_multiplier(
     state: tauri::State<'_, AppState>,
     app_type: String,
@@ -223,6 +228,7 @@ pub async fn get_pricing_model_source_test_hook(
 
 /// 获取计费模式来源
 #[tauri::command]
+#[specta::specta]
 pub async fn get_pricing_model_source(
     state: tauri::State<'_, AppState>,
     app_type: String,
@@ -252,6 +258,7 @@ pub async fn set_pricing_model_source_test_hook(
 
 /// 设置计费模式来源
 #[tauri::command]
+#[specta::specta]
 pub async fn set_pricing_model_source(
     state: tauri::State<'_, AppState>,
     app_type: String,
@@ -264,18 +271,21 @@ pub async fn set_pricing_model_source(
 
 /// 检查代理服务器是否正在运行
 #[tauri::command]
+#[specta::specta]
 pub async fn is_proxy_running(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     Ok(state.proxy_service.is_running().await)
 }
 
 /// 检查是否处于 Live 接管模式
 #[tauri::command]
+#[specta::specta]
 pub async fn is_live_takeover_active(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     state.proxy_service.is_takeover_active().await
 }
 
 /// 代理模式下切换供应商（热切换）
 #[tauri::command]
+#[specta::specta]
 pub async fn switch_proxy_provider(
     state: tauri::State<'_, AppState>,
     app_type: String,
@@ -326,6 +336,7 @@ pub async fn get_provider_health(
 /// 1. 检查自动故障转移是否开启
 /// 2. 如果恢复的供应商在队列中优先级更高（queue_order 更小），则自动切换
 #[tauri::command]
+#[specta::specta]
 pub async fn reset_circuit_breaker(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,

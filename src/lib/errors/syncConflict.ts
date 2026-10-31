@@ -1,3 +1,4 @@
+import { getErrorCode } from "@/lib/errors/appError";
 import { extractErrorMessage } from "@/utils/errorUtils";
 
 /**
@@ -8,35 +9,29 @@ import { extractErrorMessage } from "@/utils/errorUtils";
  */
 export type SyncConflictKind = "remote_changed" | "local_changed";
 
-/** Backend error keys (`services/sync_protocol.rs`). */
+/** Backend error codes (`services/sync_protocol.rs`). */
 export const SYNC_CONFLICT_KEYS: Record<SyncConflictKind, string> = {
   remote_changed: "sync.conflict.remote_changed",
   local_changed: "sync.conflict.local_changed",
 };
 
-// `AppError::Localized` reaches the frontend as "{zh} ({en})" without its
-// key, so the conflict is recognised by the key when present and otherwise
-// by the fixed start of the zh / en messages.
-const CONFLICT_MARKERS: Record<SyncConflictKind, readonly string[]> = {
-  remote_changed: [
-    SYNC_CONFLICT_KEYS.remote_changed,
-    "the remote data changed since the last sync",
-    "远端数据自上次同步后已被其他设备更新",
-  ],
-  local_changed: [
-    SYNC_CONFLICT_KEYS.local_changed,
-    "local data changed since the last sync",
-    "本地数据自上次同步后已修改",
-  ],
-};
+const KIND_BY_CODE = new Map<string, SyncConflictKind>(
+  (Object.keys(SYNC_CONFLICT_KEYS) as SyncConflictKind[]).map((kind) => [
+    SYNC_CONFLICT_KEYS[kind],
+    kind,
+  ]),
+);
 
 export function detectSyncConflict(error: unknown): SyncConflictKind | null {
+  // The sync commands return a structured `AppError` whose `code` is the key.
+  const code = getErrorCode(error);
+  if (code) return KIND_BY_CODE.get(code) ?? null;
+
+  // Legacy: a plain string error that embeds the key.
   const message = extractErrorMessage(error);
   if (!message) return null;
-  for (const kind of Object.keys(CONFLICT_MARKERS) as SyncConflictKind[]) {
-    if (CONFLICT_MARKERS[kind].some((marker) => message.includes(marker))) {
-      return kind;
-    }
+  for (const [key, kind] of KIND_BY_CODE) {
+    if (message.includes(key)) return kind;
   }
   return null;
 }

@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, call } from "./invoke";
+import { commands } from "@/lib/bindings";
 import type {
   UsageSummary,
   UsageSummaryByApp,
@@ -154,18 +155,20 @@ export const usageApi = {
     cacheReadCost: string,
     cacheCreationCost: string,
   ): Promise<void> => {
-    return invoke("update_model_pricing", {
-      modelId,
-      displayName,
-      inputCost,
-      outputCost,
-      cacheReadCost,
-      cacheCreationCost,
-    });
+    return call(
+      commands.updateModelPricing(
+        modelId,
+        displayName,
+        inputCost,
+        outputCost,
+        cacheReadCost,
+        cacheCreationCost,
+      ),
+    );
   },
 
   deleteModelPricing: async (modelId: string): Promise<void> => {
-    return invoke("delete_model_pricing", { modelId });
+    return call(commands.deleteModelPricing(modelId));
   },
 
   checkProviderLimits: async (

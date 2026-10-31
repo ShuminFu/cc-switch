@@ -1,4 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, call, callJson } from "./invoke";
+import { commands } from "@/lib/bindings";
+import type { CodexUnifyHistoryRestoreResult } from "@/lib/bindings";
+export type { CodexUnifyHistoryRestoreResult } from "@/lib/bindings";
 import type {
   Settings,
   WebDavSyncSettings,
@@ -19,13 +22,6 @@ export interface WebDavTestResult {
   message?: string;
   /** The endpoint is plain HTTP (credentials and data are not encrypted). */
   insecureTransport?: boolean;
-}
-
-export interface CodexUnifyHistoryRestoreResult {
-  restoredJsonlFiles: number;
-  restoredStateRows: number;
-  /** 还原被跳过的原因（如当前目录没有账本）；存在时不应报成功 */
-  skippedReason?: string;
 }
 
 export interface WebDavSyncResult {
@@ -65,79 +61,79 @@ export const settingsApi = {
 
   /** 是否存在统一 Codex 会话历史的迁移备份（关闭弹窗据此显示"恢复备份"勾选） */
   async hasCodexUnifyHistoryBackup(): Promise<boolean> {
-    return await invoke("has_codex_unify_history_backup");
+    return await call(commands.hasCodexUnifyHistoryBackup());
   },
 
   /** 按迁移备份账本把当时迁入共享桶的官方会话还原回 openai 桶（幂等） */
   async restoreCodexUnifiedHistory(): Promise<CodexUnifyHistoryRestoreResult> {
-    return await invoke("restore_codex_unified_history");
+    return await call(commands.restoreCodexUnifiedHistory());
   },
 
   async restart(): Promise<boolean> {
-    return await invoke("restart_app");
+    return await call(commands.restartApp());
   },
 
   async installUpdateAndRestart(): Promise<boolean> {
-    return await invoke("install_update_and_restart");
+    return await call(commands.installUpdateAndRestart());
   },
 
   async checkUpdates(): Promise<void> {
-    await invoke("check_for_updates");
+    await call(commands.checkForUpdates());
   },
 
   async isPortable(): Promise<boolean> {
-    return await invoke("is_portable_mode");
+    return await call(commands.isPortableMode());
   },
 
   async getConfigDir(appId: AppId): Promise<string> {
-    return await invoke("get_config_dir", { app: appId });
+    return await call(commands.getConfigDir(appId));
   },
 
   async openConfigFolder(appId: AppId): Promise<void> {
-    await invoke("open_config_folder", { app: appId });
+    await call(commands.openConfigFolder(appId));
   },
 
   async pickDirectory(defaultPath?: string): Promise<string | null> {
-    return await invoke("pick_directory", { defaultPath });
+    return await call(commands.pickDirectory(defaultPath ?? null));
   },
 
   async selectConfigDirectory(defaultPath?: string): Promise<string | null> {
-    return await invoke("pick_directory", { defaultPath });
+    return await call(commands.pickDirectory(defaultPath ?? null));
   },
 
   async getClaudeCodeConfigPath(): Promise<string> {
-    return await invoke("get_claude_code_config_path");
+    return await call(commands.getClaudeCodeConfigPath());
   },
 
   async getAppConfigPath(): Promise<string> {
-    return await invoke("get_app_config_path");
+    return await call(commands.getAppConfigPath());
   },
 
   async openAppConfigFolder(): Promise<void> {
-    await invoke("open_app_config_folder");
+    await call(commands.openAppConfigFolder());
   },
 
   async getAppConfigDirOverride(): Promise<string | null> {
-    return await invoke("get_app_config_dir_override");
+    return await call(commands.getAppConfigDirOverride());
   },
 
   async setAppConfigDirOverride(path: string | null): Promise<boolean> {
-    return await invoke("set_app_config_dir_override", { path });
+    return await call(commands.setAppConfigDirOverride(path ?? null));
   },
 
   async applyClaudePluginConfig(options: {
     official: boolean;
   }): Promise<boolean> {
     const { official } = options;
-    return await invoke("apply_claude_plugin_config", { official });
+    return await call(commands.applyClaudePluginConfig(official));
   },
 
   async applyClaudeOnboardingSkip(): Promise<boolean> {
-    return await invoke("apply_claude_onboarding_skip");
+    return await call(commands.applyClaudeOnboardingSkip());
   },
 
   async clearClaudeOnboardingSkip(): Promise<boolean> {
-    return await invoke("clear_claude_onboarding_skip");
+    return await call(commands.clearClaudeOnboardingSkip());
   },
 
   async saveFileDialog(defaultName: string): Promise<string | null> {
@@ -149,11 +145,11 @@ export const settingsApi = {
   },
 
   async exportConfigToFile(filePath: string): Promise<ConfigTransferResult> {
-    return await invoke("export_config_to_file", { filePath });
+    return await callJson(commands.exportConfigToFile(filePath));
   },
 
   async importConfigFromFile(filePath: string): Promise<ConfigTransferResult> {
-    return await invoke("import_config_from_file", { filePath });
+    return await callJson(commands.importConfigFromFile(filePath));
   },
 
   // ─── WebDAV sync ──────────────────────────────────────────
@@ -171,13 +167,13 @@ export const settingsApi = {
   async webdavSyncUpload(
     options: CloudSyncTransferOptions = {},
   ): Promise<WebDavSyncResult> {
-    return await invoke("webdav_sync_upload", { force: options.force });
+    return await callJson(commands.webdavSyncUpload(options.force ?? null));
   },
 
   async webdavSyncDownload(
     options: CloudSyncTransferOptions = {},
   ): Promise<WebDavSyncResult> {
-    return await invoke("webdav_sync_download", { force: options.force });
+    return await callJson(commands.webdavSyncDownload(options.force ?? null));
   },
 
   async webdavSyncSaveSettings(
@@ -191,7 +187,7 @@ export const settingsApi = {
   },
 
   async webdavSyncFetchRemoteInfo(): Promise<CloudRemoteInfoResult> {
-    return await invoke("webdav_sync_fetch_remote_info");
+    return await callJson(commands.webdavSyncFetchRemoteInfo());
   },
 
   // ===== S3 Sync API =====
@@ -209,13 +205,13 @@ export const settingsApi = {
   async s3SyncUpload(
     options: CloudSyncTransferOptions = {},
   ): Promise<WebDavSyncResult> {
-    return await invoke("s3_sync_upload", { force: options.force });
+    return await callJson(commands.s3SyncUpload(options.force ?? null));
   },
 
   async s3SyncDownload(
     options: CloudSyncTransferOptions = {},
   ): Promise<WebDavSyncResult> {
-    return await invoke("s3_sync_download", { force: options.force });
+    return await callJson(commands.s3SyncDownload(options.force ?? null));
   },
 
   async s3SyncSaveSettings(
@@ -229,11 +225,11 @@ export const settingsApi = {
   },
 
   async s3SyncFetchRemoteInfo(): Promise<CloudRemoteInfoResult> {
-    return await invoke("s3_sync_fetch_remote_info");
+    return await callJson(commands.s3SyncFetchRemoteInfo());
   },
 
   async syncCurrentProvidersLive(): Promise<void> {
-    const result = (await invoke("sync_current_providers_live")) as {
+    const result = (await callJson(commands.syncCurrentProvidersLive())) as {
       success?: boolean;
       message?: string;
     };
@@ -252,15 +248,15 @@ export const settingsApi = {
     } catch {
       throw new Error("Invalid URL");
     }
-    await invoke("open_external", { url });
+    await call(commands.openExternal(url));
   },
 
   async setAutoLaunch(enabled: boolean): Promise<boolean> {
-    return await invoke("set_auto_launch", { enabled });
+    return await call(commands.setAutoLaunch(enabled));
   },
 
   async getAutoLaunchStatus(): Promise<boolean> {
-    return await invoke("get_auto_launch_status");
+    return await call(commands.getAutoLaunchStatus());
   },
 
   async getToolVersions(
@@ -378,7 +374,7 @@ export interface BackupEntry {
 
 export const backupsApi = {
   async createDbBackup(): Promise<string> {
-    return await invoke("create_db_backup");
+    return await call(commands.createDbBackup());
   },
 
   async listDbBackups(): Promise<BackupEntry[]> {
@@ -386,14 +382,14 @@ export const backupsApi = {
   },
 
   async restoreDbBackup(filename: string): Promise<string> {
-    return await invoke("restore_db_backup", { filename });
+    return await call(commands.restoreDbBackup(filename));
   },
 
   async renameDbBackup(oldFilename: string, newName: string): Promise<string> {
-    return await invoke("rename_db_backup", { oldFilename, newName });
+    return await call(commands.renameDbBackup(oldFilename, newName));
   },
 
   async deleteDbBackup(filename: string): Promise<void> {
-    await invoke("delete_db_backup", { filename });
+    await call(commands.deleteDbBackup(filename));
   },
 };

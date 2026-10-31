@@ -196,12 +196,18 @@ pub fn clear_has_completed_onboarding() -> Result<bool, AppError> {
 
 pub fn upsert_mcp_server(id: &str, spec: Value) -> Result<bool, AppError> {
     if id.trim().is_empty() {
-        return Err(AppError::InvalidInput("MCP 服务器 ID 不能为空".into()));
+        return Err(AppError::localized(
+            "mcp.error.idRequired",
+            "MCP 服务器 ID 不能为空",
+            "The MCP server ID is required",
+        ));
     }
     // 基础字段校验（尽量宽松）
     if !spec.is_object() {
-        return Err(AppError::McpValidation(
-            "MCP 服务器定义必须为 JSON 对象".into(),
+        return Err(AppError::localized(
+            "mcp.error.jsonInvalid",
+            "MCP 服务器定义必须为 JSON 对象",
+            "The MCP server definition must be a JSON object",
         ));
     }
     let t_opt = spec.get("type").and_then(|x| x.as_str());
@@ -209,8 +215,10 @@ pub fn upsert_mcp_server(id: &str, spec: Value) -> Result<bool, AppError> {
     let is_http = t_opt.map(|t| t == "http").unwrap_or(false);
     let is_sse = t_opt.map(|t| t == "sse").unwrap_or(false);
     if !(is_stdio || is_http || is_sse) {
-        return Err(AppError::McpValidation(
-            "MCP 服务器 type 必须是 'stdio'、'http' 或 'sse'（或省略表示 stdio）".into(),
+        return Err(AppError::localized(
+            "mcp.error.jsonInvalid",
+            "MCP 服务器 type 必须是 'stdio'、'http' 或 'sse'（或省略表示 stdio）",
+            "The MCP server type must be 'stdio', 'http' or 'sse' (omit it for stdio)",
         ));
     }
 
@@ -218,8 +226,10 @@ pub fn upsert_mcp_server(id: &str, spec: Value) -> Result<bool, AppError> {
     if is_stdio {
         let cmd = spec.get("command").and_then(|x| x.as_str()).unwrap_or("");
         if cmd.is_empty() {
-            return Err(AppError::McpValidation(
-                "stdio 类型的 MCP 服务器缺少 command 字段".into(),
+            return Err(AppError::localized(
+                "mcp.error.commandRequired",
+                "stdio 类型的 MCP 服务器缺少 command 字段",
+                "A stdio MCP server needs a command",
             ));
         }
     }
@@ -228,11 +238,19 @@ pub fn upsert_mcp_server(id: &str, spec: Value) -> Result<bool, AppError> {
     if is_http || is_sse {
         let url = spec.get("url").and_then(|x| x.as_str()).unwrap_or("");
         if url.is_empty() {
-            return Err(AppError::McpValidation(if is_http {
-                "http 类型的 MCP 服务器缺少 url 字段".into()
-            } else {
-                "sse 类型的 MCP 服务器缺少 url 字段".into()
-            }));
+            return Err(AppError::localized(
+                "mcp.wizard.urlRequired",
+                if is_http {
+                    "http 类型的 MCP 服务器缺少 url 字段"
+                } else {
+                    "sse 类型的 MCP 服务器缺少 url 字段"
+                },
+                if is_http {
+                    "An http MCP server needs a URL"
+                } else {
+                    "An sse MCP server needs a URL"
+                },
+            ));
         }
     }
 
@@ -268,7 +286,11 @@ pub fn upsert_mcp_server(id: &str, spec: Value) -> Result<bool, AppError> {
 
 pub fn delete_mcp_server(id: &str) -> Result<bool, AppError> {
     if id.trim().is_empty() {
-        return Err(AppError::InvalidInput("MCP 服务器 ID 不能为空".into()));
+        return Err(AppError::localized(
+            "mcp.error.idRequired",
+            "MCP 服务器 ID 不能为空",
+            "The MCP server ID is required",
+        ));
     }
     let path = user_config_path();
     if !path.exists() {

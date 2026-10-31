@@ -12,6 +12,7 @@ use crate::openclaw_config;
 /// OpenClaw uses additive mode — users may already have providers
 /// configured in openclaw.json.
 #[tauri::command]
+#[specta::specta]
 pub async fn import_openclaw_providers_from_live(
     handle: tauri::AppHandle,
 ) -> Result<usize, String> {
@@ -24,6 +25,7 @@ pub async fn import_openclaw_providers_from_live(
 
 /// Get provider IDs in the OpenClaw live config.
 #[tauri::command]
+#[specta::specta]
 pub async fn get_openclaw_live_provider_ids() -> Result<Vec<String>, String> {
     run_blocking(move || {
         openclaw_config::get_providers()
@@ -35,6 +37,7 @@ pub async fn get_openclaw_live_provider_ids() -> Result<Vec<String>, String> {
 
 /// Get a single OpenClaw provider fragment from live config.
 #[tauri::command]
+#[specta::specta]
 pub async fn get_openclaw_live_provider(
     #[allow(non_snake_case)] providerId: String,
 ) -> Result<Option<serde_json::Value>, String> {

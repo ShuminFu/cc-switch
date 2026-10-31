@@ -43,6 +43,12 @@ tauri-plugin-store = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-notification = "2"
+# Typed IPC bindings (CMD-13): `#[specta::specta]` on commands, exported to
+# src/lib/bindings.ts by the `bindings` test. Pinned with `=` while specta v2 is
+# a release candidate.
+specta = { version = "=2.0.0-rc.22", features = ["derive", "function", "serde_json", "indexmap"] }
+specta-typescript = "=0.0.9"
+tauri-specta = { version = "=2.0.0-rc.21", features = ["typescript"] }
 dirs = "5.0"
 toml = "0.8"
 toml_edit = "0.22"

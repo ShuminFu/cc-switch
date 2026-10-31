@@ -2,6 +2,8 @@
 
 mod auth;
 mod balance;
+#[cfg(test)]
+mod bindings;
 mod blocking;
 mod budget;
 mod codex_oauth;

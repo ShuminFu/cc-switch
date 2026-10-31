@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, call } from "./invoke";
+import { commands } from "@/lib/bindings";
 import type { SessionMessage, SessionMeta } from "@/types";
 
 export interface DeleteSessionOptions {
@@ -26,11 +27,9 @@ export const sessionsApi = {
 
   async delete(options: DeleteSessionOptions): Promise<boolean> {
     const { providerId, sessionId, sourcePath } = options;
-    return await invoke("delete_session", {
-      providerId,
-      sessionId,
-      sourcePath,
-    });
+    return await call(
+      commands.deleteSession(providerId, sessionId, sourcePath),
+    );
   },
 
   async deleteMany(
@@ -45,10 +44,8 @@ export const sessionsApi = {
     cwd?: string | null;
   }): Promise<boolean> {
     const { providerId, sessionId, cwd } = options;
-    return await invoke("launch_session_terminal", {
-      providerId,
-      sessionId,
-      cwd,
-    });
+    return await call(
+      commands.launchSessionTerminal(providerId, sessionId, cwd ?? null),
+    );
   },
 };

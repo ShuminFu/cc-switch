@@ -1,5 +1,6 @@
 // 配置相关 API
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "./invoke";
+import { commands } from "@/lib/bindings";
 
 export type AppType = "claude" | "codex" | "gemini" | "omo" | "omo_slim";
 
@@ -9,7 +10,7 @@ export type AppType = "claude" | "codex" | "gemini" | "omo" | "omo_slim";
  * @deprecated 使用 getCommonConfigSnippet('claude') 替代
  */
 export async function getClaudeCommonConfigSnippet(): Promise<string | null> {
-  return invoke<string | null>("get_claude_common_config_snippet");
+  return call(commands.getClaudeCommonConfigSnippet());
 }
 
 /**
@@ -21,7 +22,7 @@ export async function getClaudeCommonConfigSnippet(): Promise<string | null> {
 export async function setClaudeCommonConfigSnippet(
   snippet: string,
 ): Promise<void> {
-  return invoke("set_claude_common_config_snippet", { snippet });
+  return call(commands.setClaudeCommonConfigSnippet(snippet));
 }
 
 /**
@@ -32,7 +33,7 @@ export async function setClaudeCommonConfigSnippet(
 export async function getCommonConfigSnippet(
   appType: AppType,
 ): Promise<string | null> {
-  return invoke<string | null>("get_common_config_snippet", { appType });
+  return call(commands.getCommonConfigSnippet(appType));
 }
 
 /**
@@ -45,7 +46,7 @@ export async function setCommonConfigSnippet(
   appType: AppType,
   snippet: string,
 ): Promise<void> {
-  return invoke("set_common_config_snippet", { appType, snippet });
+  return call(commands.setCommonConfigSnippet(appType, snippet));
 }
 
 /**
@@ -64,11 +65,9 @@ export async function updateTomlCommonConfigSnippet(
   snippetToml: string,
   enabled: boolean,
 ): Promise<string> {
-  return invoke<string>("update_toml_common_config_snippet", {
-    configToml,
-    snippetToml,
-    enabled,
-  });
+  return call(
+    commands.updateTomlCommonConfigSnippet(configToml, snippetToml, enabled),
+  );
 }
 
 /**
@@ -89,12 +88,13 @@ export async function extractCommonConfigSnippet(
   appType: Exclude<AppType, "omo">,
   options?: ExtractCommonConfigSnippetOptions,
 ): Promise<string> {
-  const args: Record<string, unknown> = { appType };
   const settingsConfig = options?.settingsConfig;
-
-  if (typeof settingsConfig === "string" && settingsConfig.trim()) {
-    args.settingsConfig = settingsConfig;
-  }
-
-  return invoke<string>("extract_common_config_snippet", args);
+  return call(
+    commands.extractCommonConfigSnippet(
+      appType,
+      typeof settingsConfig === "string" && settingsConfig.trim()
+        ? settingsConfig
+        : null,
+    ),
+  );
 }

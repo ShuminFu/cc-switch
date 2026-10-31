@@ -13,6 +13,7 @@ use crate::services::cli_tools::{
 
 /// 打开外部链接
 #[tauri::command]
+#[specta::specta]
 pub async fn open_external(app: AppHandle, url: String) -> Result<bool, String> {
     let url = if url.starts_with("http://") || url.starts_with("https://") {
         url
@@ -28,6 +29,7 @@ pub async fn open_external(app: AppHandle, url: String) -> Result<bool, String> 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn copy_text_to_clipboard(text: String) -> Result<bool, String> {
     // Use spawn_blocking to avoid blocking the async runtime
     // Clipboard access can block on some platforms and may have thread/loop constraints
@@ -45,6 +47,7 @@ pub async fn copy_text_to_clipboard(text: String) -> Result<bool, String> {
 
 /// 检查更新
 #[tauri::command]
+#[specta::specta]
 pub async fn check_for_updates(handle: AppHandle) -> Result<bool, String> {
     handle
         .opener()
@@ -59,6 +62,7 @@ pub async fn check_for_updates(handle: AppHandle) -> Result<bool, String> {
 
 /// 判断是否为便携版（绿色版）运行
 #[tauri::command]
+#[specta::specta]
 pub async fn is_portable_mode() -> Result<bool, String> {
     let exe_path = std::env::current_exe().map_err(|e| format!("获取可执行路径失败: {e}"))?;
     if let Some(dir) = exe_path.parent() {
@@ -78,6 +82,7 @@ pub async fn get_init_error() -> Result<Option<InitErrorPayload>, String> {
 /// 获取 JSON→SQLite 迁移结果（若有）。
 /// 只返回一次 true，之后返回 false，用于前端显示一次性 Toast 通知。
 #[tauri::command]
+#[specta::specta]
 pub async fn get_migration_result() -> Result<bool, String> {
     Ok(crate::init_status::take_migration_success())
 }
@@ -123,6 +128,7 @@ pub async fn probe_tool_installations(
 /// 读配置、写临时文件与拉起终端进程都在阻塞线程池执行。
 #[allow(non_snake_case)]
 #[tauri::command]
+#[specta::specta]
 pub async fn open_provider_terminal(
     handle: AppHandle,
     app: String,
@@ -139,6 +145,7 @@ pub async fn open_provider_terminal(
 /// 设置窗口主题（Windows/macOS 标题栏颜色）
 /// theme: "dark" | "light" | "system"
 #[tauri::command]
+#[specta::specta]
 pub async fn set_window_theme(window: tauri::Window, theme: String) -> Result<(), String> {
     use tauri::Theme;
 

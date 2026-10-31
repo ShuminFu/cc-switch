@@ -35,6 +35,7 @@ pub async fn copilot_start_device_flow(
 /// 使用设备码轮询 GitHub，等待用户完成授权
 /// 返回 true 表示授权成功，false 表示等待中
 #[tauri::command(rename_all = "camelCase")]
+#[specta::specta]
 pub async fn copilot_poll_for_auth(
     device_code: String,
     github_domain: Option<String>,
@@ -98,6 +99,7 @@ pub async fn copilot_list_accounts(
 
 /// 移除指定账号
 #[tauri::command(rename_all = "camelCase")]
+#[specta::specta]
 pub async fn copilot_remove_account(
     account_id: String,
     state: State<'_, CopilotAuthState>,
@@ -111,6 +113,7 @@ pub async fn copilot_remove_account(
 
 /// 设置默认账号
 #[tauri::command(rename_all = "camelCase")]
+#[specta::specta]
 pub async fn copilot_set_default_account(
     account_id: String,
     state: State<'_, CopilotAuthState>,
@@ -135,6 +138,7 @@ pub async fn copilot_get_auth_status(
 
 /// 检查是否已认证（有任意账号）
 #[tauri::command]
+#[specta::specta]
 pub async fn copilot_is_authenticated(state: State<'_, CopilotAuthState>) -> Result<bool, String> {
     let auth_manager = state.0.read().await;
     Ok(auth_manager.is_authenticated().await)
@@ -142,6 +146,7 @@ pub async fn copilot_is_authenticated(state: State<'_, CopilotAuthState>) -> Res
 
 /// 注销所有 Copilot 认证
 #[tauri::command]
+#[specta::specta]
 pub async fn copilot_logout(state: State<'_, CopilotAuthState>) -> Result<(), String> {
     let auth_manager = state.0.write().await;
     auth_manager.clear_auth().await.map_err(|e| e.to_string())

@@ -157,6 +157,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 
+      - name: Check generated IPC bindings are up to date (src/lib/bindings.ts)
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib commands::bindings
+
       - name: Run tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 

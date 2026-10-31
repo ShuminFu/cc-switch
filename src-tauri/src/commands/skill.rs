@@ -43,6 +43,7 @@ pub async fn get_skill_backups() -> Result<Vec<SkillBackupEntry>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_skill_backup(backup_id: String) -> Result<bool, String> {
     run_blocking(move || {
         SkillService::delete_backup(&backup_id).map_err(|e| e.to_string())?;
@@ -100,6 +101,7 @@ pub async fn restore_skill_backup(
 
 /// 切换 Skill 的应用启用状态
 #[tauri::command]
+#[specta::specta]
 pub async fn toggle_skill_app(
     id: String,
     app: String,
@@ -233,6 +235,7 @@ pub async fn get_skills_for_app(
 
 /// 安装技能（兼容旧 API）
 #[tauri::command]
+#[specta::specta]
 pub async fn install_skill(
     directory: String,
     service: State<'_, SkillServiceState>,
@@ -243,6 +246,7 @@ pub async fn install_skill(
 
 /// 安装指定应用的技能（兼容旧 API）
 #[tauri::command]
+#[specta::specta]
 pub async fn install_skill_for_app(
     app: String,
     directory: String,
@@ -350,6 +354,7 @@ pub async fn add_skill_repo(repo: SkillRepo, handle: AppHandle) -> Result<bool, 
 
 /// 删除技能仓库
 #[tauri::command]
+#[specta::specta]
 pub async fn remove_skill_repo(
     owner: String,
     name: String,

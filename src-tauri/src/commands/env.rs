@@ -18,6 +18,7 @@ pub async fn delete_env_vars(conflicts: Vec<EnvConflict>) -> Result<BackupInfo, 
 
 /// Restore environment variables from backup file
 #[tauri::command]
+#[specta::specta]
 pub async fn restore_env_backup(backup_path: String) -> Result<(), String> {
     run_blocking(move || restore_from_backup(backup_path)).await
 }

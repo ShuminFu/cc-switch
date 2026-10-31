@@ -36,6 +36,7 @@ fn validate_passphrase(passphrase: &str) -> Result<(), String> {
 
 /// Encryption status (never includes the passphrase).
 #[tauri::command]
+#[specta::specta]
 pub async fn sync_encryption_get_status() -> Result<Value, String> {
     Ok(status_json(
         settings::get_sync_encryption_settings().as_ref(),
@@ -47,6 +48,7 @@ pub async fn sync_encryption_get_status() -> Result<Value, String> {
 /// The next upload is encrypted with the new passphrase; other devices need
 /// the same passphrase to download it.
 #[tauri::command]
+#[specta::specta]
 pub async fn sync_encryption_set_passphrase(passphrase: String) -> Result<Value, String> {
     validate_passphrase(&passphrase)?;
     let next = SyncEncryptionSettings {
@@ -62,6 +64,7 @@ pub async fn sync_encryption_set_passphrase(passphrase: String) -> Result<Value,
 
 /// Turn encryption off and forget the passphrase (also from the keychain).
 #[tauri::command]
+#[specta::specta]
 pub async fn sync_encryption_disable() -> Result<Value, String> {
     settings::set_sync_encryption_settings(None).map_err(|e| e.to_string())?;
     Ok(status_json(None))

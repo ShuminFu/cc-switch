@@ -220,6 +220,7 @@ fn validate_model_pricing_input(
 
 /// 更新模型定价
 #[tauri::command]
+#[specta::specta]
 pub async fn update_model_pricing(
     handle: AppHandle,
     model_id: String,
@@ -265,6 +266,7 @@ pub async fn check_provider_limits(
 
 /// 删除模型定价
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_model_pricing(handle: AppHandle, model_id: String) -> Result<(), AppError> {
     run_blocking_with_state(handle, move |state| {
         state.db.delete_model_pricing(&model_id)?;

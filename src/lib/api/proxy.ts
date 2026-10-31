@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, call } from "./invoke";
+import { commands } from "@/lib/bindings";
 import type {
   ProxyConfig,
   ProxyStatus,
@@ -18,12 +19,12 @@ export const proxyApi = {
 
   // 停止代理服务器（不恢复接管配置）
   async stopProxyServer(): Promise<void> {
-    return invoke("stop_proxy_server");
+    return call(commands.stopProxyServer());
   },
 
   // 停止代理服务器并恢复配置
   async stopProxyWithRestore(): Promise<void> {
-    return invoke("stop_proxy_with_restore");
+    return call(commands.stopProxyWithRestore());
   },
 
   // 获取代理服务器状态
@@ -33,12 +34,12 @@ export const proxyApi = {
 
   // 检查代理服务器是否正在运行
   async isProxyRunning(): Promise<boolean> {
-    return invoke("is_proxy_running");
+    return call(commands.isProxyRunning());
   },
 
   // 检查是否处于接管模式
   async isLiveTakeoverActive(): Promise<boolean> {
-    return invoke("is_live_takeover_active");
+    return call(commands.isLiveTakeoverActive());
   },
 
   // 代理模式下切换供应商
@@ -46,7 +47,7 @@ export const proxyApi = {
     appType: string,
     providerId: string,
   ): Promise<void> {
-    return invoke("switch_proxy_provider", { appType, providerId });
+    return call(commands.switchProxyProvider(appType, providerId));
   },
 
   // ========== 接管状态 API ==========
@@ -61,7 +62,7 @@ export const proxyApi = {
     appType: string,
     enabled: boolean,
   ): Promise<void> {
-    return invoke("set_proxy_takeover_for_app", { appType, enabled });
+    return call(commands.setProxyTakeoverForApp(appType, enabled));
   },
 
   // ========== Legacy 代理配置 API (兼容) ==========
@@ -102,7 +103,7 @@ export const proxyApi = {
 
   // 获取默认成本倍率
   async getDefaultCostMultiplier(appType: string): Promise<string> {
-    return invoke("get_default_cost_multiplier", { appType });
+    return call(commands.getDefaultCostMultiplier(appType));
   },
 
   // 设置默认成本倍率
@@ -110,16 +111,16 @@ export const proxyApi = {
     appType: string,
     value: string,
   ): Promise<void> {
-    return invoke("set_default_cost_multiplier", { appType, value });
+    return call(commands.setDefaultCostMultiplier(appType, value));
   },
 
   // 获取计费模式来源
   async getPricingModelSource(appType: string): Promise<string> {
-    return invoke("get_pricing_model_source", { appType });
+    return call(commands.getPricingModelSource(appType));
   },
 
   // 设置计费模式来源
   async setPricingModelSource(appType: string, value: string): Promise<void> {
-    return invoke("set_pricing_model_source", { appType, value });
+    return call(commands.setPricingModelSource(appType, value));
   },
 };
