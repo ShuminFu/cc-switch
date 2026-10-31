@@ -1,0 +1,159 @@
+TrayModel {
+    texts: TrayTexts {
+        show_main: "Open main window",
+        open_website: "Open Official Website",
+        no_providers_label: "(no providers)",
+        lightweight_mode: "Lightweight Mode",
+        quit: "Quit",
+        _auto_label: "Auto (Failover)",
+        projects_label: "Projects",
+        no_project_label: "No project",
+    },
+    sections: [
+        TraySectionModel {
+            section: 0,
+            body: Providers {
+                label: "Claude · Relay B",
+                items: [
+                    TrayProviderItem {
+                        id: "official",
+                        label: "Claude Official",
+                        enabled: true,
+                        checked: false,
+                    },
+                    TrayProviderItem {
+                        id: "relay",
+                        label: "Relay B",
+                        enabled: true,
+                        checked: true,
+                    },
+                ],
+            },
+        },
+        TraySectionModel {
+            section: 1,
+            body: Providers {
+                label: "Codex",
+                items: [
+                    TrayProviderItem {
+                        id: "codex-a",
+                        label: "Codex A",
+                        enabled: true,
+                        checked: false,
+                    },
+                ],
+            },
+        },
+        TraySectionModel {
+            section: 2,
+            body: Empty {
+                label: "Gemini (no providers)",
+            },
+        },
+        TraySectionModel {
+            section: 3,
+            body: Empty {
+                label: "Grok Build (no providers)",
+            },
+        },
+    ],
+    profile_scopes: [
+        TrayProfileScopeModel {
+            scope: "claude",
+            label: "Claude Code",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: true,
+                },
+            ],
+            none_checked: false,
+        },
+        TrayProfileScopeModel {
+            scope: "claude-desktop",
+            label: "Claude Desktop",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "codex",
+            label: "Codex",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "gemini",
+            label: "Gemini",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "grokbuild",
+            label: "Grok Build",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "opencode",
+            label: "OpenCode",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "openclaw",
+            label: "OpenClaw",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "hermes",
+            label: "Hermes",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+    ],
+    lightweight: false,
+}

@@ -1,0 +1,147 @@
+TrayModel {
+    texts: TrayTexts {
+        show_main: "開啟主介面",
+        open_website: "開啟官方網站",
+        no_providers_label: "(無供應商)",
+        lightweight_mode: "輕量模式",
+        quit: "退出",
+        _auto_label: "自動 (故障轉移)",
+        projects_label: "專案",
+        no_project_label: "不使用專案",
+    },
+    sections: [
+        TraySectionModel {
+            section: 0,
+            body: Providers {
+                label: "Claude · Relay B",
+                items: [
+                    TrayProviderItem {
+                        id: "official",
+                        label: "Claude Official",
+                        enabled: true,
+                        checked: false,
+                    },
+                    TrayProviderItem {
+                        id: "relay",
+                        label: "Relay B",
+                        enabled: true,
+                        checked: true,
+                    },
+                ],
+            },
+        },
+        TraySectionModel {
+            section: 1,
+            body: Providers {
+                label: "Codex",
+                items: [
+                    TrayProviderItem {
+                        id: "codex-a",
+                        label: "Codex A",
+                        enabled: true,
+                        checked: false,
+                    },
+                ],
+            },
+        },
+        TraySectionModel {
+            section: 2,
+            body: Empty {
+                label: "Gemini (無供應商)",
+            },
+        },
+        TraySectionModel {
+            section: 3,
+            body: Empty {
+                label: "Grok Build (無供應商)",
+            },
+        },
+    ],
+    profile_scopes: [
+        TrayProfileScopeModel {
+            scope: "claude",
+            label: "Claude Code",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: true,
+                },
+            ],
+            none_checked: false,
+        },
+        TrayProfileScopeModel {
+            scope: "claude-desktop",
+            label: "Claude Desktop",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "codex",
+            label: "Codex",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "gemini",
+            label: "Gemini",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "grokbuild",
+            label: "Grok Build",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "opencode",
+            label: "OpenCode",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+        TrayProfileScopeModel {
+            scope: "openclaw",
+            label: "OpenClaw",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: false,
+                },
+            ],
+            none_checked: true,
+        },
+    ],
+    lightweight: false,
+}

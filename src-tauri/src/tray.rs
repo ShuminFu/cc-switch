@@ -852,7 +852,16 @@ fn section_label(
 /// 收集托盘菜单所需的全部数据。返回值第二项为 `true` 表示代理状态锁被占用，
 /// 本次用了上次的值，调用方应稍后补刷一次。
 fn collect_tray_model(app_state: &AppState) -> Result<(TrayModel, bool), AppError> {
-    let app_settings = crate::settings::get_settings();
+    collect_tray_model_with(app_state, crate::settings::get_settings())
+}
+
+/// [`collect_tray_model`] with the settings passed in, so tests can build the
+/// model for any language / visibility without touching the global settings
+/// cache (TEST-16, TEST-09).
+fn collect_tray_model_with(
+    app_state: &AppState,
+    app_settings: crate::settings::AppSettings,
+) -> Result<(TrayModel, bool), AppError> {
     // 用户未显式设置语言（首次安装）时，按系统区域回退而非硬编码简体，
     // 否则繁中系统的托盘会固定显示简体直到用户手动切换一次。
     let language: &str = match app_settings.language.as_deref() {
@@ -2086,5 +2095,168 @@ mod tests {
     fn script_summary_empty_data_returns_none() {
         let r = usage_result(true, vec![]);
         assert!(format_script_summary(&r).is_none());
+    }
+
+    // ---- TEST-16: tray menu model snapshots ---------------------------------
+    //
+    // The model (sections, items, check marks, labels in every language) is
+    // built from an in-memory DB and explicit settings, then compared with
+    // `src-tauri/tests/fixtures/tray/<case>.txt` (`UPDATE_GOLDEN=1` rewrites).
+
+    mod model_snapshots {
+        use super::super::{collect_tray_model_with, TrayModel};
+        use crate::database::{Database, Profile};
+        use crate::provider::Provider;
+        use crate::settings::{AppSettings, VisibleApps};
+        use crate::store::AppState;
+        use serde_json::json;
+        use serial_test::serial;
+        use std::path::PathBuf;
+        use std::sync::Arc;
+
+        const LANGUAGES: [&str; 4] = ["en", "zh", "zh-TW", "ja"];
+
+        fn visibility(name: &str) -> VisibleApps {
+            let mut v = VisibleApps::default();
+            match name {
+                "all" => {
+                    v.hermes = true;
+                }
+                "default" => {}
+                "claude-only" => {
+                    v = VisibleApps {
+                        claude: true,
+                        claude_desktop: false,
+                        codex: false,
+                        gemini: false,
+                        grokbuild: false,
+                        opencode: false,
+                        openclaw: false,
+                        hermes: false,
+                    };
+                }
+                other => panic!("unknown visibility {other}"),
+            }
+            v
+        }
+
+        fn state(with_data: bool) -> AppState {
+            let db = Arc::new(Database::memory().expect("memory db"));
+            if with_data {
+                for (app, id, name, category, sort) in [
+                    ("claude", "official", "Claude Official", Some("official"), 0),
+                    ("claude", "relay", "Relay B", Some("custom"), 1),
+                    ("codex", "codex-a", "Codex A", None, 0),
+                ] {
+                    let mut p = Provider::with_id(id.into(), name.into(), json!({}), None);
+                    p.category = category.map(str::to_string);
+                    p.sort_index = Some(sort);
+                    db.save_provider(app, &p).unwrap();
+                }
+                db.set_current_provider("claude", "relay").unwrap();
+                db.save_profile(&Profile {
+                    id: "work".into(),
+                    name: "Work".into(),
+                    payload: "{}".into(),
+                    sort_order: Some(0),
+                    created_at: Some(0),
+                    updated_at: Some(0),
+                })
+                .unwrap();
+                db.set_current_profile_id("claude", Some("work")).unwrap();
+            }
+            AppState::new(db)
+        }
+
+        fn model(language: &str, visible: &str, with_data: bool) -> TrayModel {
+            let settings = AppSettings {
+                language: Some(language.to_string()),
+                visible_apps: Some(visibility(visible)),
+                ..AppSettings::default()
+            };
+            collect_tray_model_with(&state(with_data), settings)
+                .expect("collect tray model")
+                .0
+        }
+
+        fn fixture(name: &str) -> PathBuf {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/tray")
+                .join(format!("{name}.txt"))
+        }
+
+        fn assert_snapshot(name: &str, model: &TrayModel) {
+            let actual = format!("{model:#?}\n");
+            let path = fixture(name);
+            if std::env::var_os("UPDATE_GOLDEN").is_some() || !path.exists() {
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, &actual).unwrap();
+                return;
+            }
+            let expected = std::fs::read_to_string(&path).unwrap();
+            assert_eq!(
+                actual,
+                expected.replace("\r\n", "\n"),
+                "tray model snapshot {name} changed; rerun with UPDATE_GOLDEN=1 after review"
+            );
+        }
+
+        #[test]
+        #[serial]
+        fn tray_model_snapshots_per_language_visibility_and_data() {
+            let mut count = 0;
+            for language in LANGUAGES {
+                for visible in ["all", "default", "claude-only"] {
+                    for with_data in [false, true] {
+                        let name = format!(
+                            "{language}__{visible}__{}",
+                            if with_data { "data" } else { "empty" }
+                        );
+                        assert_snapshot(&name, &model(language, visible, with_data));
+                        count += 1;
+                    }
+                }
+            }
+            assert_eq!(count, 24);
+        }
+
+        #[test]
+        #[serial]
+        fn current_provider_is_checked_and_sorted_by_index() {
+            let m = model("en", "claude-only", true);
+            assert_eq!(m.sections.len(), 1, "only Claude is visible");
+            let rendered = format!("{m:?}");
+            assert!(rendered.contains("Claude · Relay B"), "{rendered}");
+            match &m.sections[0].body {
+                super::super::TraySectionBody::Providers { items, .. } => {
+                    let ids: Vec<_> = items.iter().map(|i| i.id.as_str()).collect();
+                    assert_eq!(ids, ["official", "relay"]);
+                    assert!(!items[0].checked && items[1].checked);
+                    assert!(items.iter().all(|i| i.enabled), "proxy is not running");
+                }
+                other => panic!("expected providers, got {other:?}"),
+            }
+            assert_eq!(
+                m.profile_scopes.len(),
+                1,
+                "only the Claude scope is visible"
+            );
+            assert!(m.profile_scopes[0].profiles[0].checked);
+            assert!(!m.profile_scopes[0].none_checked);
+        }
+
+        #[test]
+        #[serial]
+        fn every_language_has_its_own_texts() {
+            let texts: Vec<_> = LANGUAGES
+                .iter()
+                .map(|l| model(l, "default", false).texts.no_providers_label)
+                .collect();
+            let unique: std::collections::BTreeSet<_> = texts.iter().collect();
+            assert_eq!(unique.len(), LANGUAGES.len(), "{texts:?}");
+            // An empty app section shows the localized hint.
+            let m = model("ja", "claude-only", false);
+            assert!(format!("{m:?}").contains("(プロバイダーなし)"));
+        }
     }
 }

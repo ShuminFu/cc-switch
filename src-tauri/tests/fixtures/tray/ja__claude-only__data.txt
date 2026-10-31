@@ -1,0 +1,49 @@
+TrayModel {
+    texts: TrayTexts {
+        show_main: "メインウィンドウを開く",
+        open_website: "公式サイトを開く",
+        no_providers_label: "(プロバイダーなし)",
+        lightweight_mode: "軽量モード",
+        quit: "終了",
+        _auto_label: "自動 (フェイルオーバー)",
+        projects_label: "プロジェクト",
+        no_project_label: "プロジェクトを使用しない",
+    },
+    sections: [
+        TraySectionModel {
+            section: 0,
+            body: Providers {
+                label: "Claude · Relay B",
+                items: [
+                    TrayProviderItem {
+                        id: "official",
+                        label: "Claude Official",
+                        enabled: true,
+                        checked: false,
+                    },
+                    TrayProviderItem {
+                        id: "relay",
+                        label: "Relay B",
+                        enabled: true,
+                        checked: true,
+                    },
+                ],
+            },
+        },
+    ],
+    profile_scopes: [
+        TrayProfileScopeModel {
+            scope: "claude",
+            label: "Claude Code",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: true,
+                },
+            ],
+            none_checked: false,
+        },
+    ],
+    lightweight: false,
+}
