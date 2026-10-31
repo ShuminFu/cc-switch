@@ -76,7 +76,9 @@ export function useSaveSettings() {
           appConfigDir !== (request.initialAppConfigDir ?? undefined);
         if (!request.silent) {
           toast.success(
-            t("notifications.settingsSaved", { defaultValue: "Settings saved" }),
+            t("notifications.settingsSaved", {
+              defaultValue: "Settings saved",
+            }),
             { closeButton: true },
           );
         }

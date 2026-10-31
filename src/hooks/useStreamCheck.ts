@@ -33,7 +33,8 @@ export function useStreamCheck(appId: AppId) {
             t("streamCheck.reachable", {
               providerName: providerName,
               responseTimeMs: result.responseTimeMs,
-              defaultValue: "{{providerName}} is reachable ({{responseTimeMs}}ms)",
+              defaultValue:
+                "{{providerName}} is reachable ({{responseTimeMs}}ms)",
             }),
             { closeButton: true },
           );
@@ -42,7 +43,8 @@ export function useStreamCheck(appId: AppId) {
             t("streamCheck.reachableSlow", {
               providerName: providerName,
               responseTimeMs: result.responseTimeMs,
-              defaultValue: "{{providerName}} reachable but slow ({{responseTimeMs}}ms)",
+              defaultValue:
+                "{{providerName}} reachable but slow ({{responseTimeMs}}ms)",
             }),
           );
         } else {

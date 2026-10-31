@@ -139,10 +139,12 @@ export const SETTINGS_SIDE_EFFECTS: readonly SettingsSideEffect[] = [
         toast.error(
           skip
             ? ctx.t("notifications.skipClaudeOnboardingFailed", {
-                defaultValue: "Failed to skip Claude Code first-run confirmation",
+                defaultValue:
+                  "Failed to skip Claude Code first-run confirmation",
               })
             : ctx.t("notifications.clearClaudeOnboardingSkipFailed", {
-                defaultValue: "Failed to restore Claude Code first-run confirmation",
+                defaultValue:
+                  "Failed to restore Claude Code first-run confirmation",
               }),
         );
       }
