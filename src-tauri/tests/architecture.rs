@@ -159,7 +159,7 @@ fn command_paths(code: &str, module_depth: usize) -> Vec<String> {
     for (idx, _) in compact.match_indices("crate::commands") {
         let rest = &compact[idx..];
         let end = rest
-            .find(|c: char| c == ';' || c == ' ' || c == '(' || c == ',' || c == '}')
+            .find([';', ' ', '(', ',', '}'])
             .unwrap_or(rest.len());
         hits.push(rest[..end].to_string());
     }
