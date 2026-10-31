@@ -361,7 +361,6 @@ jobs:
   coverage-rust:
     name: Coverage (Rust)
     runs-on: ubuntu-22.04
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -399,13 +398,15 @@ jobs:
         shell: bash
         run: mkdir -p dist coverage/rust
 
-      # --no-fail-fast still writes the report when a test fails; the job is
-      # report-only, so test failures are gated by the backend job instead.
+      # --no-fail-fast still writes the report when a test fails, so the
+      # summary below still runs (if: always()) before the job fails.
       - name: Tests with coverage
         run: >-
           cargo llvm-cov --manifest-path src-tauri/Cargo.toml --no-fail-fast
           --lcov --output-path coverage/rust/lcov.info
 
+      # Line-coverage floors (CCS-242): min(75, CCS-222 baseline of proxy/
+      # 92.27% and database/ 85.70%). Ratchet up, never down.
       - name: Per-directory summary
         if: always() && hashFiles('coverage/rust/lcov.info') != ''
         run: |
@@ -413,6 +414,7 @@ jobs:
             --lcov coverage/rust/lcov.info \
             --dir src-tauri/src/proxy --dir src-tauri/src/database \
             --dir src-tauri/src/services --dir src-tauri/src/commands \
+            --min src-tauri/src/proxy=75 --min src-tauri/src/database=75 \
             --json coverage/rust/summary-by-dir.json \
             >> "$GITHUB_STEP_SUMMARY"
 

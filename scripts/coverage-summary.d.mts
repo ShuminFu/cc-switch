@@ -24,3 +24,19 @@ export function summarize(
   root?: string,
 ): CoverageRow[];
 export function toMarkdown(title: string, rows: CoverageRow[]): string;
+
+export interface CoverageFloor {
+  dir: string;
+  min: number;
+}
+
+export interface CoverageFailure extends CoverageFloor {
+  actual: number | null;
+}
+
+export function parseMin(value: string): CoverageFloor;
+export function checkThresholds(
+  rows: CoverageRow[],
+  mins: CoverageFloor[],
+): CoverageFailure[];
+export function formatFailure(failure: CoverageFailure): string;
