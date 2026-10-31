@@ -247,7 +247,7 @@ export function OpenClawFormFields({
       {/* Base URL */}
       <div className="space-y-2">
         <FormLabel htmlFor="openclaw-baseurl">
-          {t("openclaw.baseUrl", { defaultValue: "API Endpoint" })}
+          {t("providerForm.apiEndpoint", { defaultValue: "API Endpoint" })}
         </FormLabel>
         <Input
           id="openclaw-baseurl"
