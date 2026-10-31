@@ -23,6 +23,7 @@ export function useUpsertMcpServer() {
     mutationFn: (server: McpServer) => mcpApi.upsertUnifiedServer(server),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.mcp.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.mcp.syncSkips });
     },
   });
 }
@@ -44,6 +45,8 @@ export function useToggleMcpApp() {
     }) => mcpApi.toggleApp(serverId, app, enabled),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.mcp.all });
+      // The returned skips only cover the app just written; refetch the full list.
+      queryClient.invalidateQueries({ queryKey: queryKeys.mcp.syncSkips });
     },
   });
 }

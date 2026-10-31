@@ -17,6 +17,8 @@ import { toast } from "sonner";
 import { MCP_APP_IDS } from "@/config/appConfig";
 import { ManagedItemsPanel } from "@/components/common/ManagedItemsPanel";
 import { useConfirm } from "@/components/common/useConfirm";
+import { McpSyncSkipBadges } from "./McpSyncSkipBadges";
+import { useMcpSyncSkips } from "@/lib/query/adapters";
 
 interface UnifiedMcpPanelProps {
   onOpenChange: (open: boolean) => void;
@@ -40,6 +42,7 @@ const UnifiedMcpPanel = React.forwardRef<
   const toggleAppMutation = useToggleMcpApp();
   const deleteServerMutation = useDeleteMcpServer();
   const importMutation = useImportMcpFromApps();
+  const { data: syncSkips } = useMcpSyncSkips();
 
   const serverEntries = useMemo((): Array<[string, McpServer]> => {
     if (!serversMap) return [];
@@ -118,6 +121,7 @@ const UnifiedMcpPanel = React.forwardRef<
       getId={getEntryId}
       totalLabel={t("mcp.serverCount", { count: serverEntries.length })}
       appIds={MCP_APP_IDS}
+      banner={<McpSyncSkipBadges skips={syncSkips} />}
       getApps={getEntryApps}
       onToggleApp={([id], app, enabled) => handleToggleApp(id, app, enabled)}
       renderPrimary={([id, server]) => (
