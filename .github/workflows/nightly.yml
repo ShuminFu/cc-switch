@@ -4,7 +4,8 @@ name: Nightly
 #
 # - property tests with a high case count (PROPTEST_CASES),
 # - the `#[ignore]` live S3 round-trips, when the S3_TEST_* secrets exist,
-# - the full Rust suite (no retries), so flaky tests surface as failures.
+# - the full Rust suite (no retries), so flaky tests surface as failures,
+# - a tauri-driver smoke test of the real debug binary (TEST-17 phase B).
 
 on:
   schedule:
@@ -68,3 +69,49 @@ jobs:
             exit 0
           fi
           cargo test --manifest-path src-tauri/Cargo.toml --locked --lib services::s3 -- --ignored
+
+  # TEST-17 phase B / PRODUCT-45: the real binary under tauri-driver. Builds a
+  # debug app (no bundle), starts it with HOME in a temp dir seeded with a
+  # Claude Code config, and checks the shell renders, the database is created
+  # and the seeded live config is left byte-identical (scripts/tauri-smoke.mjs).
+  tauri-smoke:
+    name: Tauri binary smoke (tauri-driver, Linux)
+    runs-on: ubuntu-22.04
+    # New job: report, do not block, until it has been green for a week.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust (from rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Install Linux system deps
+        uses: ./.github/actions/linux-deps
+
+      - name: Install WebKit WebDriver and xvfb
+        run: sudo apt-get install -y --no-install-recommends webkit2gtk-driver xvfb
+
+      - name: Setup Node.js and pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: smoke-${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: smoke-${{ runner.os }}-cargo-
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: Build debug app (no bundle)
+        run: pnpm tauri build --debug --no-bundle
+
+      - name: Smoke test
+        run: xvfb-run -a node scripts/tauri-smoke.mjs src-tauri/target/debug/cc-switch
