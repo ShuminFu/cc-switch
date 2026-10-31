@@ -1,13 +1,17 @@
 import { useEffect, useRef } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { AppEventName, AppEvents } from "@/lib/events";
 
 /**
- * 在 useEffect 中监听 Tauri 事件，自动管理异步注册和卸载清理。
- * 避免每次使用时重复编写 active flag + async setup 样板代码。
+ * Subscribe to a backend event for the lifetime of the component. The event
+ * name must be a key of the `AppEvents` contract (FE-ARCH-19), and the
+ * payload is typed from it. Handles the async `listen` registration so a
+ * StrictMode double mount or an unmount before registration finishes never
+ * leaks a listener. The latest `handler` is always called.
  */
-export function useTauriEvent<P>(
-  eventName: string,
-  handler: (payload: P) => void | Promise<void>,
+export function useTauriEvent<K extends AppEventName>(
+  eventName: K,
+  handler: (payload: AppEvents[K]) => void | Promise<void>,
 ): void {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
@@ -18,7 +22,7 @@ export function useTauriEvent<P>(
 
     void (async () => {
       try {
-        const off = await listen<P>(eventName, (event) => {
+        const off = await listen<AppEvents[K]>(eventName, (event) => {
           void handlerRef.current(event.payload);
         });
         if (disposed) {

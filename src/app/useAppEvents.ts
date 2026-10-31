@@ -3,15 +3,11 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
-import { providersApi, type ProviderSwitchEvent } from "@/lib/api";
+import { providersApi } from "@/lib/api";
 import { queryKeys } from "@/lib/query/keys";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 
-interface SyncStatusUpdatedPayload {
-  source?: string;
-  status?: string;
-  error?: string;
-}
+import type { SyncStatusUpdatedPayload } from "@/lib/events";
 
 /**
  * App-wide backend event subscriptions and one-time startup checks.
@@ -23,35 +19,11 @@ export function useAppEvents() {
 
   // Tray / failover / deep-link switches: refresh that app's provider list
   // whether or not the providers page is mounted.
-  useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
-    let active = true;
-
-    const setupListener = async () => {
-      try {
-        const off = await providersApi.onSwitched(
-          async (event: ProviderSwitchEvent) => {
-            await queryClient.invalidateQueries({
-              queryKey: queryKeys.providers.byApp(event.appType),
-            });
-          },
-        );
-        if (!active) {
-          off();
-          return;
-        }
-        unsubscribe = off;
-      } catch (error) {
-        console.error("[App] Failed to subscribe provider switch event", error);
-      }
-    };
-
-    void setupListener();
-    return () => {
-      active = false;
-      unsubscribe?.();
-    };
-  }, [queryClient]);
+  useTauriEvent("provider-switched", async (event) => {
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.providers.byApp(event.appType),
+    });
+  });
 
   useTauriEvent("universal-provider-synced", async () => {
     await queryClient.invalidateQueries({ queryKey: queryKeys.providers.all });
@@ -92,28 +64,25 @@ export function useAppEvents() {
       );
     };
 
-  useTauriEvent<SyncStatusUpdatedPayload | null | undefined>(
+  useTauriEvent(
     "webdav-sync-status-updated",
     handleSyncStatus("settings.webdavSync.autoSyncFailedToast"),
   );
 
-  useTauriEvent<SyncStatusUpdatedPayload | null | undefined>(
+  useTauriEvent(
     "s3-sync-status-updated",
     handleSyncStatus("settings.s3Sync.autoSyncFailedToast"),
   );
 
-  useTauriEvent<{ appType: string; providerName: string }>(
-    "proxy-official-warning",
-    (payload) => {
-      toast.warning(
-        t("notifications.proxyOfficialWarning", {
-          name: payload.providerName,
-          defaultValue: `当前供应商 ${payload.providerName} 是官方供应商，建议切换到第三方供应商后再使用代理接管`,
-        }),
-        { duration: 8000 },
-      );
-    },
-  );
+  useTauriEvent("proxy-official-warning", (payload) => {
+    toast.warning(
+      t("notifications.proxyOfficialWarning", {
+        name: payload.providerName,
+        defaultValue: `当前供应商 ${payload.providerName} 是官方供应商，建议切换到第三方供应商后再使用代理接管`,
+      }),
+      { duration: 8000 },
+    );
+  });
 
   useEffect(() => {
     const checkMigration = async () => {

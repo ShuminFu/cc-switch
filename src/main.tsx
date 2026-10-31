@@ -12,7 +12,6 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { queryClient } from "@/lib/query";
 import { Toaster } from "@/components/ui/sonner";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
-import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { message } from "@tauri-apps/plugin-dialog";
 import { exit } from "@tauri-apps/plugin-process";
@@ -65,15 +64,8 @@ async function handleConfigLoadError(
   await exit(1);
 }
 
-// 监听后端的配置加载错误事件：仅提醒用户并强制退出，不修改任何配置文件
-try {
-  void listen("configLoadError", async (evt) => {
-    await handleConfigLoadError(evt.payload as ConfigLoadErrorPayload | null);
-  });
-} catch (e) {
-  // 忽略事件订阅异常（例如在非 Tauri 环境下）
-  console.error("订阅 configLoadError 事件失败", e);
-}
+// The backend never emits a `configLoadError` event: init failures are pulled
+// once via `get_init_error` in bootstrap() below (FE-ARCH-19 event contract).
 
 async function bootstrap() {
   // Load the active locale chunk before the first render (no English flash).
