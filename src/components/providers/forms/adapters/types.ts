@@ -54,6 +54,13 @@ export type ProviderFormValues = ProviderFormData & {
   providerKey?: string;
   /** OpenClaw: suggested default model configuration. */
   suggestedDefaults?: OpenClawSuggestedDefaults;
+  /**
+   * Edit mode: the custom speed-test endpoints the user applied in the
+   * endpoint panel. Written by the edit dialog after the provider is saved,
+   * so cancelling the dialog leaves them untouched (FE-PROV-10). Absent when
+   * the endpoints were not changed.
+   */
+  customEndpoints?: string[];
 };
 
 /** Everything the shell hands to the active adapter's `Body`. */
@@ -100,6 +107,8 @@ export interface AdapterSerialization {
   /** Category to store when no preset supplied one (OMO). */
   presetCategory?: ProviderCategory;
   suggestedDefaults?: OpenClawSuggestedDefaults;
+  /** Edit mode: applied custom endpoints (see `ProviderFormValues`). */
+  customEndpoints?: string[];
 }
 
 export interface ProviderFormAdapterHandle {

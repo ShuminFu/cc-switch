@@ -67,6 +67,8 @@ interface CodexFormFieldsProps {
   isEndpointModalOpen: boolean;
   onEndpointModalToggle: (open: boolean) => void;
   onCustomEndpointsChange?: (endpoints: string[]) => void;
+  /** Edit mode: endpoints applied but not saved yet (FE-PROV-10). */
+  pendingCustomEndpoints?: string[];
   autoSelect: boolean;
   onAutoSelectChange: (checked: boolean) => void;
 
@@ -171,6 +173,7 @@ export function CodexFormFields({
   isEndpointModalOpen,
   onEndpointModalToggle,
   onCustomEndpointsChange,
+  pendingCustomEndpoints,
   autoSelect,
   onAutoSelectChange,
   codexModel = "",
@@ -1020,6 +1023,7 @@ export function CodexFormFields({
           autoSelect={autoSelect}
           onAutoSelectChange={onAutoSelectChange}
           onCustomEndpointsChange={onCustomEndpointsChange}
+          pendingCustomEndpoints={pendingCustomEndpoints}
         />
       )}
     </>

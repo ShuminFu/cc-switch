@@ -244,7 +244,11 @@ function ClaudeAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
             : undefined,
         isFullUrl: !isOfficial && isFullUrl ? true : undefined,
       };
-      return { settingsConfig: values.settingsConfig.trim(), meta };
+      return {
+        settingsConfig: values.settingsConfig.trim(),
+        meta,
+        customEndpoints: endpoints.pendingCustomEndpoints,
+      };
     },
     applyPreset: (entry, formValues) => {
       if (!entry) return formValues;
@@ -304,9 +308,8 @@ function ClaudeAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
         onBaseUrlChange={handleBaseUrlChange}
         isEndpointModalOpen={isEndpointModalOpen}
         onEndpointModalToggle={setIsEndpointModalOpen}
-        onCustomEndpointsChange={
-          isEditMode ? undefined : endpoints.setDraftCustomEndpoints
-        }
+        onCustomEndpointsChange={endpoints.setDraftCustomEndpoints}
+        pendingCustomEndpoints={endpoints.pendingCustomEndpoints}
         autoSelect={endpoints.endpointAutoSelect}
         onAutoSelectChange={endpoints.setEndpointAutoSelect}
         showEndpointTools

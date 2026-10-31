@@ -84,9 +84,17 @@ export function shouldShowApiKeyInput(
  * `meta.custom_endpoints` on save.
  */
 export function useEndpointDraftState(ctx: ProviderFormAdapterContext) {
-  const [draftCustomEndpoints, setDraftCustomEndpoints] = useState<string[]>(
-    [],
-  );
+  const [draftCustomEndpoints, setDraftState] = useState<string[]>([]);
+  // Edit mode: whether the user applied endpoint changes in the panel. Only
+  // then are they written, by the edit dialog after the provider is saved
+  // (FE-PROV-10).
+  const [endpointsTouched, setEndpointsTouched] = useState(false);
+  const setDraftCustomEndpoints = useCallback((urls: string[]) => {
+    setDraftState(urls);
+    setEndpointsTouched(true);
+  }, []);
+  const pendingCustomEndpoints =
+    ctx.isEditMode && endpointsTouched ? draftCustomEndpoints : undefined;
   const [endpointAutoSelect, setEndpointAutoSelect] = useState<boolean>(
     () => ctx.initialData?.meta?.endpointAutoSelect ?? true,
   );
@@ -108,6 +116,7 @@ export function useEndpointDraftState(ctx: ProviderFormAdapterContext) {
   return {
     draftCustomEndpoints,
     setDraftCustomEndpoints,
+    pendingCustomEndpoints,
     endpointAutoSelect,
     setEndpointAutoSelect,
     toMeta,

@@ -111,6 +111,8 @@ interface ClaudeFormFieldsProps {
   isEndpointModalOpen: boolean;
   onEndpointModalToggle: (open: boolean) => void;
   onCustomEndpointsChange?: (endpoints: string[]) => void;
+  /** Edit mode: endpoints applied but not saved yet (FE-PROV-10). */
+  pendingCustomEndpoints?: string[];
   autoSelect: boolean;
   onAutoSelectChange: (checked: boolean) => void;
   showEndpointTools?: boolean;
@@ -184,6 +186,7 @@ export function ClaudeFormFields({
   isEndpointModalOpen,
   onEndpointModalToggle,
   onCustomEndpointsChange,
+  pendingCustomEndpoints,
   autoSelect,
   onAutoSelectChange,
   showEndpointTools = true,
@@ -725,6 +728,7 @@ export function ClaudeFormFields({
           autoSelect={autoSelect}
           onAutoSelectChange={onAutoSelectChange}
           onCustomEndpointsChange={onCustomEndpointsChange}
+          pendingCustomEndpoints={pendingCustomEndpoints}
         />
       )}
 

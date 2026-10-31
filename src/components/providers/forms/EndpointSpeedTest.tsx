@@ -38,8 +38,14 @@ interface EndpointSpeedTestProps {
   autoSelect: boolean;
   onAutoSelectChange: (checked: boolean) => void;
   // 新建模式：当自定义端点列表变化时回传（仅包含 isCustom 的条目）
-  // 编辑模式：不使用此回调，端点直接保存到后端
+  // 编辑模式：点击保存时回传整份自定义端点列表；由外层编辑弹窗在保存供应商后
+  // 写入后端，取消外层弹窗即丢弃（FE-PROV-10）
   onCustomEndpointsChange?: (urls: string[]) => void;
+  /**
+   * Edit mode: endpoints applied earlier in this dialog session but not saved
+   * yet. When set they replace the stored list as the panel's starting point.
+   */
+  pendingCustomEndpoints?: string[];
 }
 
 interface EndpointEntry extends EndpointCandidate {
@@ -95,6 +101,7 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
   autoSelect,
   onAutoSelectChange,
   onCustomEndpointsChange,
+  pendingCustomEndpoints,
 }) => {
   const { t } = useTranslation();
   const [entries, setEntries] = useState<EndpointEntry[]>(() =>
@@ -104,7 +111,6 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
   const [addError, setAddError] = useState<string | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
 
   // 记录初始的自定义端点，用于对比变化
   const [initialCustomUrls, setInitialCustomUrls] = useState<Set<string>>(
@@ -124,10 +130,11 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
       try {
         if (!providerId) return; // 新建模式不加载
 
-        const customEndpoints = await endpointsApi.getCustomEndpoints(
-          appId,
-          providerId,
-        );
+        // Endpoints applied earlier in this dialog session win over the
+        // stored list: they are what the provider will be saved with.
+        const customEndpoints: CustomEndpoint[] = pendingCustomEndpoints
+          ? pendingCustomEndpoints.map((url) => ({ url, addedAt: 0 }))
+          : await endpointsApi.getCustomEndpoints(appId, providerId);
 
         if (cancelled) return;
 
@@ -194,6 +201,9 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
     return () => {
       cancelled = true;
     };
+    // pendingCustomEndpoints is read once per mount (the panel remounts on
+    // every open), so later changes must not reload the list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appId, providerId, t, initialEndpoints]);
 
   // 新建模式：将自定义端点变化透传给父组件（仅限 isCustom）
@@ -390,57 +400,35 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
     [normalizedSelected, onChange],
   );
 
-  // 保存端点变更
-  const handleSave = useCallback(async () => {
-    // 编辑模式：对比初始端点和当前端点，批量保存变更
-    if (isEditMode && providerId) {
-      setIsSaving(true);
-      setLastError(null);
-
-      try {
-        // 获取当前的自定义端点
-        const currentCustomUrls = new Set(
+  // 保存端点变更：编辑模式只回传草稿，不直接写库（FE-PROV-10）
+  const handleSave = useCallback(() => {
+    if (isEditMode && onCustomEndpointsChange) {
+      const currentCustomUrls = Array.from(
+        new Set(
           entries
             .filter((e) => e.isCustom)
-            .map((e) => normalizeEndpointUrl(e.url)),
-        );
-
-        // 找出新增的端点
-        const toAdd = Array.from(currentCustomUrls).filter(
-          (url) => !initialCustomUrls.has(url),
-        );
-
-        // 找出删除的端点
-        const toRemove = Array.from(initialCustomUrls).filter(
-          (url) => !currentCustomUrls.has(url),
-        );
-
-        // 批量添加
-        for (const url of toAdd) {
-          await endpointsApi.addCustomEndpoint(appId, providerId, url);
-        }
-
-        // 批量删除
-        for (const url of toRemove) {
-          await endpointsApi.removeCustomEndpoint(appId, providerId, url);
-        }
-
-        // 更新初始端点列表
-        setInitialCustomUrls(currentCustomUrls);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : t("endpointTest.saveFailed");
-        setLastError(message);
-        setIsSaving(false);
-        return;
-      } finally {
-        setIsSaving(false);
+            .map((e) => normalizeEndpointUrl(e.url))
+            .filter(Boolean),
+        ),
+      );
+      const changed =
+        currentCustomUrls.length !== initialCustomUrls.size ||
+        currentCustomUrls.some((url) => !initialCustomUrls.has(url));
+      if (changed) {
+        onCustomEndpointsChange(currentCustomUrls);
+        setInitialCustomUrls(new Set(currentCustomUrls));
       }
     }
 
     // 关闭弹窗
     onClose();
-  }, [isEditMode, providerId, entries, initialCustomUrls, appId, onClose, t]);
+  }, [
+    isEditMode,
+    entries,
+    initialCustomUrls,
+    onClose,
+    onCustomEndpointsChange,
+  ]);
 
   if (!visible) return null;
 
@@ -453,27 +441,12 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
           event.preventDefault();
           onClose();
         }}
-        disabled={isSaving}
       >
         {t("common.cancel")}
       </Button>
-      <Button
-        type="button"
-        onClick={handleSave}
-        disabled={isSaving}
-        className="gap-2"
-      >
-        {isSaving ? (
-          <>
-            <Loader2 className="w-4 h-4 animate-spin" />
-            {t("common.saving")}
-          </>
-        ) : (
-          <>
-            <Save className="w-4 h-4" />
-            {t("common.save")}
-          </>
-        )}
+      <Button type="button" onClick={handleSave} className="gap-2">
+        <Save className="w-4 h-4" />
+        {t("common.save")}
       </Button>
     </div>
   );

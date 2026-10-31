@@ -78,6 +78,9 @@ export function buildProviderPayload({
     payload.providerKey = result.providerKey;
   }
   if (result.presetCategory) payload.presetCategory = result.presetCategory;
+  if (isEditMode && result.customEndpoints) {
+    payload.customEndpoints = result.customEndpoints;
+  }
   if (activePreset) {
     payload.presetId = activePreset.id;
     if (activePreset.preset.category) {

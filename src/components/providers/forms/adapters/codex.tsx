@@ -356,7 +356,11 @@ function CodexAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
             : undefined,
         isFullUrl: !isOfficial && isFullUrl ? true : undefined,
       };
-      return { settingsConfig: JSON.stringify(configObj), meta };
+      return {
+        settingsConfig: JSON.stringify(configObj),
+        meta,
+        customEndpoints: endpoints.pendingCustomEndpoints,
+      };
     },
     applyPreset: (entry, formValues) => {
       if (!entry) {
@@ -407,9 +411,8 @@ function CodexAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
         onFullUrlChange={setIsFullUrl}
         isEndpointModalOpen={isEndpointModalOpen}
         onEndpointModalToggle={setIsEndpointModalOpen}
-        onCustomEndpointsChange={
-          isEditMode ? undefined : endpoints.setDraftCustomEndpoints
-        }
+        onCustomEndpointsChange={endpoints.setDraftCustomEndpoints}
+        pendingCustomEndpoints={endpoints.pendingCustomEndpoints}
         autoSelect={endpoints.endpointAutoSelect}
         onAutoSelectChange={endpoints.setEndpointAutoSelect}
         codexModel={codexModel}

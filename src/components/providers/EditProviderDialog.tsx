@@ -12,6 +12,8 @@ import {
   type ProviderFormValues,
 } from "@/components/providers/forms/ProviderForm";
 import { openclawApi, providersApi, endpointsApi, type AppId } from "@/lib/api";
+import { extractErrorMessage } from "@/utils/errorUtils";
+import { applyCustomEndpoints } from "@/components/providers/forms/shell/applyCustomEndpoints";
 
 interface EditProviderDialogProps {
   open: boolean;
@@ -196,6 +198,24 @@ export function EditProviderDialog({
         provider: updatedProvider,
         originalId: provider.id,
       });
+      // Endpoint-panel changes are written only now, after the provider was
+      // saved; cancelling the dialog discards them (FE-PROV-10).
+      if (values.customEndpoints) {
+        try {
+          await applyCustomEndpoints(
+            appId,
+            updatedProvider.id,
+            values.customEndpoints,
+          );
+        } catch (error) {
+          toast.error(
+            t("endpointTest.saveFailed", {
+              defaultValue: "Failed to save endpoints",
+            }),
+            { description: extractErrorMessage(error) || undefined },
+          );
+        }
+      }
       onOpenChange(false);
     },
     [appId, onSubmit, onOpenChange, provider, t],
