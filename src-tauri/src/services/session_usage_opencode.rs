@@ -144,6 +144,7 @@ fn sync_opencode_db(db: &Database, db_path: &Path) -> Result<SessionSyncResult, 
             key: &sync_key,
             last_modified: *time_updated,
             last_offset: 0,
+            byte: None,
         });
 
         // 消息与会话游标在同一事务内提交；失败时整体回滚，下次重试。

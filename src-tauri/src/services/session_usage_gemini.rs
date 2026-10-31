@@ -179,6 +179,7 @@ fn sync_single_gemini_file(
             key: &file_path_str,
             last_modified: file_modified,
             last_offset: message_count,
+            byte: None,
         }),
     )
 }
