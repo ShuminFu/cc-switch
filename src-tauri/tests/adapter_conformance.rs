@@ -455,6 +455,34 @@ fn gemini_mcp_projection_leaves_user_servers_alone() {
 }
 
 #[test]
+fn gemini_env_switch_keeps_comments_order_and_dotenv_quoting() {
+    let env = TestEnv::new();
+    install_all_apps(env.home());
+    let adapter = adapter_for(&AppType::Gemini);
+    let env_path = env.home().join(".gemini/.env");
+    let original = "# team gemini env\nexport GEMINI_API_KEY=\"abc\"\n\n# pinned model\nGEMINI_MODEL=gemini-pro\n";
+    write(&env_path, original);
+
+    // dotenv semantics: quotes and `export` are not part of the value (CFG-13)
+    let live = adapter.read_live().unwrap();
+    assert_eq!(live["env"]["GEMINI_API_KEY"], json!("abc"));
+
+    // re-applying the same snapshot leaves the file byte-identical
+    adapter.write_live(&provider("g", live.clone())).unwrap();
+    assert_eq!(fs::read_to_string(&env_path).unwrap(), original);
+
+    let mut changed = live;
+    changed["env"]["GEMINI_API_KEY"] = json!("xyz");
+    changed["env"]["GOOGLE_GEMINI_BASE_URL"] = json!("https://g.example");
+    adapter.write_live(&provider("g", changed)).unwrap();
+    assert_eq!(
+        fs::read_to_string(&env_path).unwrap(),
+        "# team gemini env\nexport GEMINI_API_KEY=\"xyz\"\n\n# pinned model\nGEMINI_MODEL=gemini-pro\nGOOGLE_GEMINI_BASE_URL=https://g.example\n"
+    );
+    assert!(backups(env.home(), "gemini").contains(&original.to_string()));
+}
+
+#[test]
 fn codex_mcp_projection_keeps_comments_and_stringifies_scalar_args() {
     let env = TestEnv::new();
     install_all_apps(env.home());

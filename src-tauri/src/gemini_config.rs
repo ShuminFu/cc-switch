@@ -1,4 +1,4 @@
-use crate::config::{get_home_dir, write_text_file_secret};
+use crate::config::get_home_dir;
 use crate::error::AppError;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -27,26 +27,171 @@ pub fn parse_env_file(content: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
 
     for line in content.lines() {
-        let line = line.trim();
-
-        // 跳过空行和注释
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        // 解析 KEY=VALUE
-        if let Some((key, value)) = line.split_once('=') {
-            let key = key.trim().to_string();
-            let value = value.trim().to_string();
-
-            // 验证 key 是否有效（不为空，只包含字母、数字和下划线）
-            if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                map.insert(key, value);
-            }
+        if let Some(entry) = parse_env_line(line) {
+            map.insert(entry.key, entry.value);
         }
     }
 
     map
+}
+
+/// Quoting used for a value in the `.env` file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EnvQuote {
+    None,
+    Single,
+    Double,
+}
+
+/// One `KEY=VALUE` assignment of a `.env` file (dotenv semantics, as read by
+/// Gemini CLI): optional `export ` prefix, matching quotes stripped, `\"`/`\n`
+/// escapes in double quotes, ` # comment` after unquoted values (CFG-13).
+#[derive(Debug, Clone)]
+struct EnvLine {
+    key: String,
+    value: String,
+    export: bool,
+    quote: EnvQuote,
+}
+
+fn is_env_key(key: &str) -> bool {
+    !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+fn parse_env_line(line: &str) -> Option<EnvLine> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let (export, rest) = match line.strip_prefix("export ") {
+        Some(rest) => (true, rest.trim_start()),
+        None => (false, line),
+    };
+    let (key, raw) = rest.split_once('=')?;
+    let key = key.trim();
+    if !is_env_key(key) {
+        return None;
+    }
+    let raw = raw.trim();
+    let (value, quote) = if raw.len() >= 2 && raw.starts_with('"') && raw[1..].contains('"') {
+        let mut out = String::new();
+        let mut chars = raw[1..].chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' => match chars.next() {
+                    Some('n') => out.push('\n'),
+                    Some('r') => out.push('\r'),
+                    Some('t') => out.push('\t'),
+                    Some(other) => out.push(other),
+                    None => out.push('\\'),
+                },
+                '"' => break,
+                other => out.push(other),
+            }
+        }
+        (out, EnvQuote::Double)
+    } else if raw.len() >= 2 && raw.starts_with('\'') && raw[1..].contains('\'') {
+        let end = raw[1..].find('\'').unwrap_or(raw.len() - 1) + 1;
+        (raw[1..end].to_string(), EnvQuote::Single)
+    } else {
+        let value = match raw.find(" #") {
+            Some(idx) => raw[..idx].trim_end(),
+            None => raw,
+        };
+        (value.to_string(), EnvQuote::None)
+    };
+    Some(EnvLine {
+        key: key.to_string(),
+        value,
+        export,
+        quote,
+    })
+}
+
+fn env_value_needs_quotes(value: &str) -> bool {
+    value.is_empty()
+        || value
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, '#' | '"' | '\'' | '\\' | '$' | '`'))
+}
+
+fn render_env_assignment(key: &str, value: &str, export: bool, quote: EnvQuote) -> String {
+    let quote = match quote {
+        EnvQuote::Single if !value.contains('\'') && !value.contains('\n') => EnvQuote::Single,
+        EnvQuote::None if !env_value_needs_quotes(value) => EnvQuote::None,
+        EnvQuote::None if value.is_empty() => EnvQuote::None,
+        _ => EnvQuote::Double,
+    };
+    let rendered = match quote {
+        EnvQuote::None => value.to_string(),
+        EnvQuote::Single => format!("'{value}'"),
+        EnvQuote::Double => {
+            let escaped = value
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r");
+            format!("\"{escaped}\"")
+        }
+    };
+    let prefix = if export { "export " } else { "" };
+    format!("{prefix}{key}={rendered}")
+}
+
+/// Render `map` as a `.env` file, editing `existing` in place: comments,
+/// blank lines, key order, `export` prefixes and quoting style are kept;
+/// unchanged assignments stay byte-identical, removed keys are dropped and
+/// new keys are appended (sorted). The result ends with a newline and uses
+/// the existing file's line ending (CFG-13).
+pub fn render_env_file(existing: Option<&str>, map: &HashMap<String, String>) -> String {
+    let existing = existing.unwrap_or("");
+    let eol = if existing.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut out = String::with_capacity(existing.len() + 64);
+    let mut seen = std::collections::HashSet::new();
+
+    for line in existing.lines() {
+        match parse_env_line(line) {
+            Some(entry) => {
+                if seen.contains(&entry.key) {
+                    // duplicate assignment: the first one is rewritten, drop the rest
+                    continue;
+                }
+                let Some(new_value) = map.get(&entry.key) else {
+                    continue;
+                };
+                seen.insert(entry.key.clone());
+                if *new_value == entry.value {
+                    out.push_str(line);
+                } else {
+                    out.push_str(&render_env_assignment(
+                        &entry.key,
+                        new_value,
+                        entry.export,
+                        entry.quote,
+                    ));
+                }
+            }
+            None => out.push_str(line),
+        }
+        out.push_str(eol);
+    }
+
+    let mut new_keys: Vec<_> = map.keys().filter(|k| !seen.contains(*k)).collect();
+    new_keys.sort();
+    for key in new_keys {
+        out.push_str(&render_env_assignment(
+            key,
+            &map[key],
+            false,
+            EnvQuote::None,
+        ));
+        out.push_str(eol);
+    }
+    out
 }
 
 /// 严格解析 .env 文件内容，返回详细的错误信息
@@ -122,21 +267,10 @@ pub fn parse_env_file_strict(content: &str) -> Result<HashMap<String, String>, A
     Ok(map)
 }
 
-/// 将键值对序列化为 .env 格式
+/// 将键值对序列化为新的 .env 文件（键排序、以换行结尾）
+#[cfg(test)]
 pub fn serialize_env_file(map: &HashMap<String, String>) -> String {
-    let mut lines = Vec::new();
-
-    // 按键排序以保证输出稳定
-    let mut keys: Vec<_> = map.keys().collect();
-    keys.sort();
-
-    for key in keys {
-        if let Some(value) = map.get(key) {
-            lines.push(format!("{key}={value}"));
-        }
-    }
-
-    lines.join("\n")
+    render_env_file(None, map)
 }
 
 /// 读取 Gemini .env 文件
@@ -147,34 +281,49 @@ pub fn read_gemini_env() -> Result<HashMap<String, String>, AppError> {
         return Ok(HashMap::new());
     }
 
-    let content = fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
+    let content = crate::adapters::live_file::read_text_lenient(&path)?
+        .map(|live| live.text)
+        .unwrap_or_default();
 
     Ok(parse_env_file(&content))
 }
 
 /// 写入 Gemini .env 文件（原子操作）
+///
+/// 在原文件上逐行编辑（保留注释、顺序、引号风格），内容未变化时不写；
+/// 写入前备份旧文件，文件权限为 0600。只有目录由 cc-switch 新建时才收紧
+/// 目录权限为 0700，不再修改用户已有的 `~/.gemini` 目录（CFG-13）。
 pub fn write_gemini_env_atomic(map: &HashMap<String, String>) -> Result<(), AppError> {
     let path = get_gemini_env_path();
 
     // 确保目录存在
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+        if !parent.exists() {
+            fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
 
-        // 设置目录权限为 700（仅所有者可读写执行）
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(parent)
-                .map_err(|e| AppError::io(parent, e))?
-                .permissions();
-            perms.set_mode(0o700);
-            fs::set_permissions(parent, perms).map_err(|e| AppError::io(parent, e))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(parent)
+                    .map_err(|e| AppError::io(parent, e))?
+                    .permissions();
+                perms.set_mode(0o700);
+                fs::set_permissions(parent, perms).map_err(|e| AppError::io(parent, e))?;
+            }
         }
     }
 
-    let content = serialize_env_file(map);
-    crate::config::backup_live_file("gemini", &path);
-    write_text_file_secret(&path, &content)?;
+    let existing = crate::adapters::live_file::read_text_lenient(&path)?;
+    let content = render_env_file(existing.as_ref().map(|live| live.text.as_str()), map);
+    let content = match &existing {
+        Some(live) => live.style.apply(&content),
+        None => content,
+    };
+    crate::adapters::live_file::write_live_text(
+        &path,
+        &content,
+        crate::adapters::live_file::WriteOptions::backup("gemini").secret(),
+    )?;
 
     // 设置文件权限为 600（仅所有者可读写）
     #[cfg(unix)]
@@ -183,8 +332,10 @@ pub fn write_gemini_env_atomic(map: &HashMap<String, String>) -> Result<(), AppE
         let mut perms = fs::metadata(&path)
             .map_err(|e| AppError::io(&path, e))?
             .permissions();
-        perms.set_mode(0o600);
-        fs::set_permissions(&path, perms).map_err(|e| AppError::io(&path, e))?;
+        if perms.mode() & 0o777 != 0o600 {
+            perms.set_mode(0o600);
+            fs::set_permissions(&path, perms).map_err(|e| AppError::io(&path, e))?;
+        }
     }
 
     Ok(())
@@ -525,6 +676,42 @@ GEMINI_MODEL=gemini-3.5-flash
         assert_eq!(
             map.get("GEMINI_MODEL"),
             Some(&"gemini-3.5-flash".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_env_file_follows_dotenv_quoting() {
+        let content = "export GEMINI_API_KEY=\"abc\"\nGEMINI_MODEL='gemini-pro' \nURL=https://x # note\nESC=\"a\\\"b\"\n";
+        let map = parse_env_file(content);
+        assert_eq!(map["GEMINI_API_KEY"], "abc");
+        assert_eq!(map["GEMINI_MODEL"], "gemini-pro");
+        assert_eq!(map["URL"], "https://x");
+        assert_eq!(map["ESC"], "a\"b");
+    }
+
+    #[test]
+    fn render_env_file_edits_in_place() {
+        let existing = "# my gemini env\r\nexport GEMINI_API_KEY=\"old\"\r\n\r\n# model\r\nGEMINI_MODEL=gemini-pro\r\nSTALE=1\r\n";
+        let mut map = HashMap::new();
+        map.insert("GEMINI_API_KEY".to_string(), "new key".to_string());
+        map.insert("GEMINI_MODEL".to_string(), "gemini-pro".to_string());
+        map.insert(
+            "GOOGLE_GEMINI_BASE_URL".to_string(),
+            "https://g".to_string(),
+        );
+        let out = render_env_file(Some(existing), &map);
+        assert_eq!(
+            out,
+            "# my gemini env\r\nexport GEMINI_API_KEY=\"new key\"\r\n\r\n# model\r\nGEMINI_MODEL=gemini-pro\r\nGOOGLE_GEMINI_BASE_URL=https://g\r\n"
+        );
+        // re-parsing gives back exactly the map
+        assert_eq!(parse_env_file(&out), map);
+        // unchanged map -> identical text
+        assert_eq!(render_env_file(Some(&out), &map), out);
+        // new file: sorted, trailing newline
+        assert_eq!(
+            render_env_file(None, &map),
+            "GEMINI_API_KEY=\"new key\"\nGEMINI_MODEL=gemini-pro\nGOOGLE_GEMINI_BASE_URL=https://g\n"
         );
     }
 
