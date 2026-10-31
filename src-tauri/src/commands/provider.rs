@@ -45,8 +45,16 @@ pub async fn add_provider(
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
     run_blocking_with_state(handle, move |state| {
-        ProviderService::add(state, app_type, provider, addToLive.unwrap_or(true))
-            .map_err(|e| e.to_string())
+        let id = provider.id.clone();
+        crate::features::config_history::track_provider_change(
+            state,
+            &app_type.clone(),
+            &id,
+            &id,
+            "ui",
+            || ProviderService::add(state, app_type, provider, addToLive.unwrap_or(true)),
+        )
+        .map_err(|e| e.to_string())
     })
     .await
 }
@@ -60,8 +68,17 @@ pub async fn update_provider(
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
     run_blocking_with_state(handle, move |state| {
-        ProviderService::update(state, app_type, originalId.as_deref(), provider)
-            .map_err(|e| e.to_string())
+        let after_id = provider.id.clone();
+        let before_id = originalId.clone().unwrap_or_else(|| after_id.clone());
+        crate::features::config_history::track_provider_change(
+            state,
+            &app_type.clone(),
+            &before_id,
+            &after_id,
+            "ui",
+            || ProviderService::update(state, app_type, originalId.as_deref(), provider),
+        )
+        .map_err(|e| e.to_string())
     })
     .await
 }
@@ -71,9 +88,16 @@ pub async fn update_provider(
 pub async fn delete_provider(handle: AppHandle, app: String, id: String) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
     run_blocking_with_state(handle, move |state| {
-        ProviderService::delete(state, app_type, &id)
-            .map(|_| true)
-            .map_err(|e| e.to_string())
+        crate::features::config_history::track_provider_change(
+            state,
+            &app_type.clone(),
+            &id,
+            &id,
+            "ui",
+            || ProviderService::delete(state, app_type, &id),
+        )
+        .map(|_| true)
+        .map_err(|e| e.to_string())
     })
     .await
 }
@@ -99,7 +123,9 @@ fn switch_provider_internal(
     app_type: AppType,
     id: &str,
 ) -> Result<SwitchResult, AppError> {
-    ProviderService::switch(state, app_type, id)
+    crate::features::config_history::track_switch(state, &app_type.clone(), id, "ui", || {
+        ProviderService::switch(state, app_type, id)
+    })
 }
 
 #[cfg(any(test, feature = "test-hooks"))]

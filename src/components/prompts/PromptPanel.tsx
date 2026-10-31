@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Edit3, FileText, Trash2 } from "lucide-react";
+import { AlertTriangle, Copy, Edit3, FileText, Trash2 } from "lucide-react";
+import { PromptCopyDialog } from "@/components/workbench/PromptCopyDialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { promptsApi, type AppId, type Prompt } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
     const queryClient = useQueryClient();
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
+    const [copyingId, setCopyingId] = useState<string | null>(null);
     const confirm = useConfirm();
 
     const {
@@ -175,6 +177,14 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
             onClick: () => handleEdit(id),
           },
           {
+            key: "copyToApps",
+            label: t("workbench.promptCopy.title", {
+              defaultValue: "Use in other apps",
+            }),
+            icon: <Copy size={14} />,
+            onClick: () => setCopyingId(id),
+          },
+          {
             key: "delete",
             label: t("common.delete"),
             icon: <Trash2 size={14} />,
@@ -202,6 +212,12 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
             onClose={() => setIsFormOpen(false)}
           />
         )}
+        <PromptCopyDialog
+          appId={appId}
+          promptId={copyingId}
+          promptName={copyingId ? prompts[copyingId]?.name : undefined}
+          onClose={() => setCopyingId(null)}
+        />
       </ManagedItemsPanel>
     );
   },

@@ -196,6 +196,17 @@ export const queryKeys = {
     streamCheck: ["streamCheckRetention"] as const,
   },
 
+  /** Workbench features in `src/components/workbench` (PRODUCT-14/21/22/25/43). */
+  workbench: {
+    customTools: ["customTools"] as const,
+    history: ["configHistory"] as const,
+    providerHistory: (app: string, id: string) =>
+      ["configHistory", app, id] as const,
+    audit: (limit: number) => ["auditEvents", limit] as const,
+    sessionUsage: (sessionId: string) => ["sessionUsage", sessionId] as const,
+    projectUsage: (days: number) => ["projectUsage", days] as const,
+  },
+
   proxy: {
     status: ["proxyStatus"] as const,
     takeoverStatus: ["proxyTakeoverStatus"] as const,

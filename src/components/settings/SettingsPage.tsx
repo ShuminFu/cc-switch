@@ -68,6 +68,8 @@ import {
   type SettingsSearchEntry,
 } from "./settingsSearchIndex";
 import { focusSettingByTitle } from "./focusSetting";
+import { WorkbenchAccordionItems } from "@/components/workbench/WorkbenchAccordionItems";
+import { ProjectUsagePanel } from "@/components/workbench/ProjectUsagePanel";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -584,6 +586,8 @@ export function SettingsPage({
                           <LogConfigPanel />
                         </AccordionContent>
                       </AccordionItem>
+
+                      <WorkbenchAccordionItems />
                     </Accordion>
                   </motion.div>
                 ) : null}
@@ -600,6 +604,9 @@ export function SettingsPage({
                     handleAutoSave({ usageDashboardRefreshIntervalMs })
                   }
                 />
+                <div className="mt-6">
+                  <ProjectUsagePanel />
+                </div>
               </TabsContent>
             </div>
 
