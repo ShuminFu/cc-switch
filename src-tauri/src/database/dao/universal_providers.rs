@@ -74,43 +74,41 @@ impl Database {
         Ok(providers.get(id).cloned())
     }
 
+    fn lock_universal_providers(&self) -> Result<std::sync::MutexGuard<'_, ()>, AppError> {
+        self.universal_providers_lock
+            .lock()
+            .map_err(|e| AppError::Lock(e.to_string()))
+    }
+
     /// 保存统一供应商（添加或更新）
+    ///
+    /// DB-16: the read-modify-write of the stored map is serialised, and only
+    /// this provider's entry is re-encoded, so concurrent saves of different
+    /// ids no longer lose one another.
     pub fn save_universal_provider(&self, provider: &UniversalProvider) -> Result<(), AppError> {
-        let mut providers = self.get_all_universal_providers()?;
-        providers.insert(provider.id.clone(), provider.clone());
-        self.save_all_universal_providers(&providers)
+        let _guard = self.lock_universal_providers()?;
+        let mut raw = self.load_raw_universal_providers()?;
+        let value = serde_json::to_value(provider)
+            .map_err(|e| AppError::Database(format!("序列化统一供应商失败: {e}")))?;
+        let stored = provider_vault::for_storage(UNIVERSAL_VAULT_APP, &provider.id, &value);
+        let previous = raw.insert(provider.id.clone(), stored.clone());
+        self.store_raw_universal_providers(&raw)?;
+        if let Some(old) = previous {
+            provider_vault::forget_stale(UNIVERSAL_VAULT_APP, &provider.id, &old, Some(&stored));
+        }
+        Ok(())
     }
 
     /// 删除统一供应商
     pub fn delete_universal_provider(&self, id: &str) -> Result<bool, AppError> {
-        let mut providers = self.get_all_universal_providers()?;
-        let existed = providers.remove(id).is_some();
-        if existed {
-            self.save_all_universal_providers(&providers)?;
-        }
-        Ok(existed)
-    }
-
-    /// 保存所有统一供应商（内部方法）
-    fn save_all_universal_providers(
-        &self,
-        providers: &HashMap<String, UniversalProvider>,
-    ) -> Result<(), AppError> {
-        let previous = self.load_raw_universal_providers().unwrap_or_default();
-        let mut stored = Map::new();
-        for (id, provider) in providers {
-            let value = serde_json::to_value(provider)
-                .map_err(|e| AppError::Database(format!("序列化统一供应商失败: {e}")))?;
-            stored.insert(
-                id.clone(),
-                provider_vault::for_storage(UNIVERSAL_VAULT_APP, id, &value),
-            );
-        }
-        self.store_raw_universal_providers(&stored)?;
-        for (id, old) in &previous {
-            provider_vault::forget_stale(UNIVERSAL_VAULT_APP, id, old, stored.get(id));
-        }
-        Ok(())
+        let _guard = self.lock_universal_providers()?;
+        let mut raw = self.load_raw_universal_providers()?;
+        let Some(old) = raw.remove(id) else {
+            return Ok(false);
+        };
+        self.store_raw_universal_providers(&raw)?;
+        provider_vault::forget_stale(UNIVERSAL_VAULT_APP, id, &old, None);
+        Ok(true)
     }
 
     /// Stored universal providers as vault rows (app `universal`), DB-02.
@@ -131,6 +129,7 @@ impl Database {
         if rows.is_empty() {
             return Ok(());
         }
+        let _guard = self.lock_universal_providers()?;
         let mut map = self.load_raw_universal_providers()?;
         for row in rows {
             if map.contains_key(&row.id) {
@@ -138,5 +137,38 @@ impl Database {
             }
         }
         self.store_raw_universal_providers(&map)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::database::Database;
+    use crate::provider::UniversalProvider;
+
+    /// DB-16: concurrent saves of different ids keep both.
+    #[test]
+    fn concurrent_saves_of_different_ids_keep_both() {
+        let db = Database::memory().expect("db");
+        std::thread::scope(|scope| {
+            for t in 0..2 {
+                let db = &db;
+                scope.spawn(move || {
+                    for i in 0..25 {
+                        let mut p: UniversalProvider = serde_json::from_value(serde_json::json!({
+                            "id": format!("t{t}-{i}"),
+                            "name": format!("t{t}-{i}"),
+                            "providerType": "custom",
+                            "apps": {},
+                            "baseUrl": "https://example.com",
+                            "apiKey": "",
+                        }))
+                        .expect("provider json");
+                        p.id = format!("t{t}-{i}");
+                        db.save_universal_provider(&p).expect("save");
+                    }
+                });
+            }
+        });
+        assert_eq!(db.get_all_universal_providers().expect("load").len(), 50);
     }
 }

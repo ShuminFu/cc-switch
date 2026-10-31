@@ -96,9 +96,16 @@ impl Database {
     pub fn save_profile(&self, profile: &Profile) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         conn.execute(
-            "INSERT OR REPLACE INTO profiles
+            // DB-23: a real upsert (REPLACE would delete + re-insert the row).
+            "INSERT INTO profiles
              (id, name, payload, sort_order, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                payload = excluded.payload,
+                sort_order = excluded.sort_order,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at",
             params![
                 profile.id,
                 profile.name,

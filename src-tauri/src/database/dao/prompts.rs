@@ -57,9 +57,17 @@ impl Database {
     pub fn save_prompt(&self, app_type: &str, prompt: &Prompt) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         conn.execute(
-            "INSERT OR REPLACE INTO prompts (
+            // DB-23: a real upsert (REPLACE would delete + re-insert the row).
+            "INSERT INTO prompts (
                 id, app_type, name, content, description, enabled, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(id, app_type) DO UPDATE SET
+                name = excluded.name,
+                content = excluded.content,
+                description = excluded.description,
+                enabled = excluded.enabled,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at",
             params![
                 prompt.id,
                 app_type,

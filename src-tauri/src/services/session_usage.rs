@@ -612,7 +612,8 @@ pub(crate) fn update_sync_state(
 
 /// 查询数据来源分布统计
 pub fn get_data_source_breakdown(db: &Database) -> Result<Vec<DataSourceSummary>, AppError> {
-    let conn = lock_conn!(db.conn);
+    // Read-only aggregate: use the WAL read pool, not the writer connection.
+    let conn = db.read_conn()?;
 
     let effective_filter = effective_usage_log_filter("l");
     let sql = format!(

@@ -34,10 +34,33 @@ impl Database {
                 let enabled_opencode: bool = row.get(11)?;
                 let enabled_hermes: bool = row.get(12)?;
 
-                let server = serde_json::from_str(&server_config_str).unwrap_or_default();
-                let tags = serde_json::from_str(&tags_str).unwrap_or_default();
+                // DB-24: a row whose JSON does not parse is skipped (and logged)
+                // instead of being coerced to an empty config that a later save
+                // would write back over the original bytes.
+                let server = match serde_json::from_str(&server_config_str) {
+                    Ok(server) => server,
+                    Err(e) => {
+                        log::warn!(
+                            "[DB] Skipping MCP server '{id}': server_config is not valid JSON: {e}"
+                        );
+                        return Ok(None);
+                    }
+                };
+                let tags = if tags_str.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    match serde_json::from_str(&tags_str) {
+                        Ok(tags) => tags,
+                        Err(e) => {
+                            log::warn!(
+                                "[DB] Skipping MCP server '{id}': tags is not valid JSON: {e}"
+                            );
+                            return Ok(None);
+                        }
+                    }
+                };
 
-                Ok((
+                Ok(Some((
                     id.clone(),
                     McpServer {
                         id,
@@ -56,14 +79,15 @@ impl Database {
                         docs,
                         tags,
                     },
-                ))
+                )))
             })
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let mut servers = IndexMap::new();
         for server_res in server_iter {
-            let (id, server) = server_res.map_err(|e| AppError::Database(e.to_string()))?;
-            servers.insert(id, server);
+            if let Some((id, server)) = server_res.map_err(|e| AppError::Database(e.to_string()))? {
+                servers.insert(id, server);
+            }
         }
         Ok(servers)
     }
@@ -72,10 +96,24 @@ impl Database {
     pub fn save_mcp_server(&self, server: &McpServer) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         conn.execute(
-            "INSERT OR REPLACE INTO mcp_servers (
+            // DB-23: a real upsert (no DELETE+INSERT pair, rowid kept).
+            "INSERT INTO mcp_servers (
                 id, name, server_config, description, homepage, docs, tags,
                 enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild, enabled_opencode, enabled_hermes
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                server_config = excluded.server_config,
+                description = excluded.description,
+                homepage = excluded.homepage,
+                docs = excluded.docs,
+                tags = excluded.tags,
+                enabled_claude = excluded.enabled_claude,
+                enabled_codex = excluded.enabled_codex,
+                enabled_gemini = excluded.enabled_gemini,
+                enabled_grokbuild = excluded.enabled_grokbuild,
+                enabled_opencode = excluded.enabled_opencode,
+                enabled_hermes = excluded.enabled_hermes",
             params![
                 server.id,
                 server.name,

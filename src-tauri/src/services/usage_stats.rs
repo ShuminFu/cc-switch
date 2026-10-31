@@ -248,6 +248,29 @@ fn folded_app_type_sql(column: &str) -> String {
     format!("CASE WHEN {column} = 'claude-desktop' THEN 'claude' ELSE {column} END")
 }
 
+/// Largest page the request-log list returns (DB-40).
+pub(crate) const MAX_REQUEST_LOG_PAGE_SIZE: u32 = 500;
+
+/// Sargable form of `folded_app_type_sql(column) = ?` (PERF-48): `claude`
+/// matches `claude` and `claude-desktop` through `IN`, every other app is a
+/// plain equality, so an `(app_type, created_at)` index stays usable.
+fn push_folded_app_type_filter(
+    conditions: &mut Vec<String>,
+    params: &mut Vec<Box<dyn rusqlite::ToSql>>,
+    column: &str,
+    app_type: &str,
+) {
+    if app_type == "claude" {
+        conditions.push(format!("{column} IN ('claude', 'claude-desktop')"));
+    } else if app_type == "claude-desktop" {
+        // Folded rows never compare equal to 'claude-desktop'.
+        conditions.push("0".to_string());
+    } else {
+        conditions.push(format!("{column} = ?"));
+        params.push(Box::new(app_type.to_string()));
+    }
+}
+
 /// SQL 片段：把日志/汇总行 LEFT JOIN 到 providers 表以取得供应商名称。
 /// `proxy_request_logs` 与 `usage_daily_rollups` 的 (provider_id, app_type)
 /// 形状相同，两者皆可作为 `log_alias`。providers 主键即 (id, app_type)，
@@ -1529,6 +1552,13 @@ impl Database {
         page: u32,
         page_size: u32,
     ) -> Result<PaginatedLogs, AppError> {
+        // DB-40: IPC pagination is untrusted; clamp the page size and reject an
+        // offset that would overflow instead of panicking / wrapping.
+        let page_size = page_size.clamp(1, MAX_REQUEST_LOG_PAGE_SIZE);
+        let offset = page
+            .checked_mul(page_size)
+            .ok_or_else(|| AppError::InvalidInput(format!("请求日志页码超出范围: page={page}")))?;
+
         let conn = self.read_conn()?;
 
         let mut conditions = vec![effective_usage_log_filter("l")];
@@ -1537,8 +1567,9 @@ impl Database {
         if let Some(ref app_type) = filters.app_type {
             // 仅过滤口径折叠 claude-desktop→claude；行投影仍返回原始 app_type，
             // 详情面板据此展示真实入口（路由接管账单审计需要）。
-            conditions.push(format!("{} = ?", folded_app_type_sql("l.app_type")));
-            params.push(Box::new(app_type.clone()));
+            // PERF-48: sargable predicate so idx_request_logs_app_created_at is
+            // usable even without a date range.
+            push_folded_app_type_filter(&mut conditions, &mut params, "l.app_type", app_type);
         }
         // 与 Dashboard 顶部下拉筛选同口径：Provider 按展示名精确匹配（会话占位
         // 行如 "Claude (Session)" 也能命中），模型按有效计价模型匹配。
@@ -1581,7 +1612,6 @@ impl Database {
         })?;
 
         // 获取数据
-        let offset = page * page_size;
         params.push(Box::new(page_size as i64));
         params.push(Box::new(offset as i64));
 
@@ -1610,7 +1640,7 @@ impl Database {
 
         for row in rows {
             let mut log = row?;
-            Self::maybe_backfill_log_costs(&conn, &mut log, &mut pricing_cache)?;
+            Self::price_log_in_memory(&conn, &mut log, &mut pricing_cache)?;
             logs.push(log);
         }
 
@@ -1627,7 +1657,7 @@ impl Database {
         &self,
         request_id: &str,
     ) -> Result<Option<RequestLogDetail>, AppError> {
-        let conn = lock_conn!(self.conn);
+        let conn = self.read_conn()?;
 
         let detail_pname = provider_name_coalesce("l", "p");
         let detail_sql = format!(
@@ -1647,7 +1677,7 @@ impl Database {
         match result {
             Ok(mut detail) => {
                 let mut pricing_cache = HashMap::new();
-                Self::maybe_backfill_log_costs(&conn, &mut detail, &mut pricing_cache)?;
+                Self::price_log_in_memory(&conn, &mut detail, &mut pricing_cache)?;
                 Ok(Some(detail))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -1703,8 +1733,11 @@ impl Database {
                     bounds.next_day_start,
                     bounds.day
                 ],
-                |row| row.get(0),
+                |row| row.get::<_, Option<f64>>(0),
             )
+            // DB-39: a query error must not read as "nothing spent" (that would
+            // let budget enforcement wave requests through).
+            .map_err(|e| AppError::Database(format!("统计今日用量失败: {e}")))?
             .unwrap_or(0.0);
 
         // 计算本月使用量 (detail logs + rollup)
@@ -1719,8 +1752,9 @@ impl Database {
                     bounds.month_first_day,
                     bounds.next_month_first_day
                 ],
-                |row| row.get(0),
+                |row| row.get::<_, Option<f64>>(0),
             )
+            .map_err(|e| AppError::Database(format!("统计本月用量失败: {e}")))?
             .unwrap_or(0.0);
 
         let daily_exceeded = limit_daily
@@ -1918,7 +1952,24 @@ impl Database {
     }
 
     /// 尝试为单条 log 回填成本字段。返回是否实际写入（true=已 UPDATE，false=跳过）。
+    /// Price an unpriced row and persist the result (backfill jobs only).
     fn maybe_backfill_log_costs(
+        conn: &Connection,
+        log: &mut RequestLogDetail,
+        pricing_cache: &mut HashMap<String, PricingInfo>,
+    ) -> Result<bool, AppError> {
+        if !Self::price_log_in_memory(conn, log, pricing_cache)? {
+            return Ok(false);
+        }
+        Self::persist_log_costs(conn, log)?;
+        Ok(true)
+    }
+
+    /// Fill the cost fields of an unpriced row from the pricing table without
+    /// writing anything (read paths: DB-40/PERF-23 — listing logs never issues
+    /// UPDATEs; the backfill jobs persist the same values). Returns whether
+    /// the row was priced.
+    fn price_log_in_memory(
         conn: &Connection,
         log: &mut RequestLogDetail,
         pricing_cache: &mut HashMap<String, PricingInfo>,
@@ -1955,7 +2006,10 @@ impl Database {
         // 1. 历史 Codex/Gemini 行只包含 cache read；新 total 行还包含 cache write。
         // 2. Claude/Anthropic 的 input_tokens 已经是 fresh input，不能再次扣减
         // 3. 各项成本是基础成本（不含倍率），倍率只作用于最终总价
-        let cache_inclusive_app = matches!(log.app_type.as_str(), "codex" | "gemini");
+        // DB-36: one source of truth for which apps record cache-inclusive input.
+        let cache_inclusive_app =
+            crate::proxy::usage::calculator::InputTokenSemantics::for_app_type(&log.app_type)
+                == crate::proxy::usage::calculator::InputTokenSemantics::Total;
         let billable_input_tokens =
             if !cache_inclusive_app || log.input_token_semantics == INPUT_TOKEN_SEMANTICS_FRESH {
                 log.input_tokens as u64
@@ -1986,7 +2040,10 @@ impl Database {
         log.cache_read_cost_usd = format!("{cache_read_cost:.6}");
         log.cache_creation_cost_usd = format!("{cache_creation_cost:.6}");
         log.total_cost_usd = format!("{total_cost:.6}");
+        Ok(true)
+    }
 
+    fn persist_log_costs(conn: &Connection, log: &RequestLogDetail) -> Result<(), AppError> {
         conn.execute(
             "UPDATE proxy_request_logs
              SET input_cost_usd = ?1,
@@ -2005,8 +2062,7 @@ impl Database {
             ],
         )
         .map_err(|e| AppError::Database(format!("更新请求成本失败: {e}")))?;
-
-        Ok(true)
+        Ok(())
     }
 
     fn get_model_pricing_cached(
@@ -2467,14 +2523,24 @@ impl Database {
         Ok(pricing)
     }
 
-    /// 插入或替换一条模型定价（调用方负责校验输入）。
+    /// 插入或更新一条模型定价（调用方负责校验输入）。
+    ///
+    /// DB-19: the row becomes `source = 'user'`, so built-in seeding never
+    /// overwrites it again.
     pub fn upsert_model_pricing(&self, pricing: &ModelPricingInfo) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         conn.execute(
-            "INSERT OR REPLACE INTO model_pricing (
+            "INSERT INTO model_pricing (
                 model_id, display_name, input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                cache_read_cost_per_million, cache_creation_cost_per_million, source
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'user')
+            ON CONFLICT(model_id) DO UPDATE SET
+                display_name = excluded.display_name,
+                input_cost_per_million = excluded.input_cost_per_million,
+                output_cost_per_million = excluded.output_cost_per_million,
+                cache_read_cost_per_million = excluded.cache_read_cost_per_million,
+                cache_creation_cost_per_million = excluded.cache_creation_cost_per_million,
+                source = 'user'",
             params![
                 pricing.model_id,
                 pricing.display_name,
@@ -2864,6 +2930,157 @@ mod tests {
             ]
         );
 
+        Ok(())
+    }
+
+    /// DB-40: untrusted pagination is clamped / rejected and the list prices
+    /// unpriced rows for display without writing them back.
+    #[test]
+    fn test_request_logs_pagination_is_clamped_and_read_only() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        {
+            let conn = lock_conn!(db.conn);
+            for i in 0..3 {
+                insert_usage_log(
+                    &conn,
+                    &format!("unpriced-{i}"),
+                    "codex",
+                    "p1",
+                    "gpt-5.5",
+                    "proxy",
+                    1000 + i,
+                    1_000_000,
+                    0,
+                    0,
+                    0,
+                    200,
+                    "0",
+                )?;
+            }
+        }
+
+        let err = db
+            .get_request_logs(&LogFilters::default(), u32::MAX, 2)
+            .expect_err("overflowing offset is rejected");
+        assert!(matches!(err, AppError::InvalidInput(_)), "{err}");
+
+        let zero = db.get_request_logs(&LogFilters::default(), 0, 0)?;
+        assert_eq!(zero.page_size, 1);
+        assert_eq!(zero.data.len(), 1);
+        let huge = db.get_request_logs(&LogFilters::default(), 0, 10_000)?;
+        assert_eq!(huge.page_size, MAX_REQUEST_LOG_PAGE_SIZE);
+        assert_eq!(huge.data.len(), 3);
+        assert!(
+            huge.data.iter().all(|l| l.total_cost_usd != "0"),
+            "rows are priced for display"
+        );
+
+        let conn = lock_conn!(db.conn);
+        let persisted: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM proxy_request_logs WHERE total_cost_usd != '0'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(persisted, 0, "listing logs performs no writes");
+        Ok(())
+    }
+
+    /// PERF-48: the request-log app filter keeps the (app_type, created_at)
+    /// index usable without a date range.
+    #[test]
+    fn test_request_log_app_filter_is_sargable() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let conn = lock_conn!(db.conn);
+        for app in ["claude", "codex"] {
+            let mut conditions = Vec::new();
+            let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            push_folded_app_type_filter(&mut conditions, &mut params, "l.app_type", app);
+            let sql = format!(
+                "EXPLAIN QUERY PLAN SELECT l.request_id FROM proxy_request_logs l
+                 WHERE {} ORDER BY l.created_at DESC LIMIT 20",
+                conditions.join(" AND ")
+            );
+            let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+            let mut stmt = conn.prepare(&sql)?;
+            let plan = stmt
+                .query_map(refs.as_slice(), |row| row.get::<_, String>(3))?
+                .collect::<Result<Vec<_>, _>>()?
+                .join("\n");
+            assert!(
+                plan.contains("USING INDEX") || plan.contains("USING COVERING INDEX"),
+                "{app}: {plan}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DB-36: the backfill and the live calculator price a row the same way for
+    /// every app type (grokbuild used to be billed on cache-inclusive input).
+    #[test]
+    fn test_backfill_matches_live_calculator_for_every_app_type() -> Result<(), AppError> {
+        use crate::proxy::usage::calculator::{CostCalculator, InputTokenSemantics};
+        use crate::proxy::usage::parser::TokenUsage;
+
+        let db = Database::memory()?;
+        let apps = ["codex", "gemini", "grokbuild", "claude"];
+        {
+            let conn = lock_conn!(db.conn);
+            for (i, app) in apps.iter().enumerate() {
+                let request_id = format!("semantics-{app}");
+                insert_usage_log(
+                    &conn,
+                    &request_id,
+                    app,
+                    "p1",
+                    "gpt-5.5",
+                    "proxy",
+                    2000 + i as i64,
+                    1_000_000,
+                    0,
+                    600_000,
+                    100_000,
+                    200,
+                    "0",
+                )?;
+                let semantics = match InputTokenSemantics::for_app_type(app) {
+                    InputTokenSemantics::Total => INPUT_TOKEN_SEMANTICS_TOTAL,
+                    InputTokenSemantics::Fresh => INPUT_TOKEN_SEMANTICS_FRESH,
+                };
+                conn.execute(
+                    "UPDATE proxy_request_logs SET input_token_semantics = ?1 WHERE request_id = ?2",
+                    params![semantics, request_id],
+                )?;
+            }
+        }
+        assert_eq!(db.backfill_missing_usage_costs()?, apps.len() as u64);
+
+        let pricing = {
+            let conn = lock_conn!(db.conn);
+            find_model_pricing(&conn, "gpt-5.5").expect("gpt-5.5 has builtin pricing")
+        };
+        for app in apps {
+            let usage = TokenUsage {
+                input_tokens: 1_000_000,
+                output_tokens: 0,
+                cache_read_tokens: 600_000,
+                cache_creation_tokens: 100_000,
+                model: None,
+                message_id: None,
+            };
+            let live = CostCalculator::calculate_for_app(
+                app,
+                &usage,
+                &pricing,
+                rust_decimal::Decimal::ONE,
+            );
+            let conn = lock_conn!(db.conn);
+            let stored: String = conn.query_row(
+                "SELECT input_cost_usd FROM proxy_request_logs WHERE request_id = ?1",
+                [format!("semantics-{app}")],
+                |row| row.get(0),
+            )?;
+            assert_eq!(stored, format!("{:.6}", live.input_cost), "app {app}");
+        }
         Ok(())
     }
 
