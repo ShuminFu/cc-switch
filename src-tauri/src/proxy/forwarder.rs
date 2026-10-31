@@ -216,6 +216,8 @@ pub struct ForwarderSettings {
     pub copilot_optimizer_config: CopilotOptimizerConfig,
     /// Per-app routing config (PROXY-19).
     pub routing_config: Arc<RoutingConfig>,
+    /// Label of the model routing rule that selected the providers (PRODUCT-13).
+    pub routing_rule: Option<String>,
 }
 
 pub struct RequestForwarder {
@@ -245,6 +247,8 @@ pub struct RequestForwarder {
     pub(crate) copilot_optimizer_config: CopilotOptimizerConfig,
     /// Per-app routing config (PROXY-19): concurrency limits, sticky pins.
     routing_config: Arc<RoutingConfig>,
+    /// Decisions and rewrites recorded for the flight recorder (PRODUCT-57).
+    trace: std::sync::Mutex<Vec<flight_recorder::TraceEntry>>,
     /// 本次请求的超时策略（PROXY-08）
     timeouts: TimeoutPolicy,
     /// 单个客户端请求最多尝试的 provider 数。
@@ -283,10 +287,33 @@ impl RequestForwarder {
             optimizer_config: settings.optimizer_config,
             copilot_optimizer_config: settings.copilot_optimizer_config,
             routing_config: settings.routing_config,
+            trace: std::sync::Mutex::new(
+                settings
+                    .routing_rule
+                    .map(|rule| vec![flight_recorder::TraceEntry::new("routingRule", rule, None)])
+                    .unwrap_or_default(),
+            ),
             timeouts: settings.timeouts,
             // max_retries 是「失败后重试次数」语义，attempt 上限 = retries + 1。
             max_attempts: (settings.max_retries as usize).saturating_add(1),
         }
+    }
+
+    /// Append a request-trace entry (PRODUCT-57).
+    pub(crate) fn push_trace(
+        &self,
+        kind: &str,
+        detail: impl Into<String>,
+        provider_id: Option<&str>,
+    ) {
+        self.trace
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(flight_recorder::TraceEntry::new(kind, detail, provider_id));
+    }
+
+    fn take_trace(&self) -> Vec<flight_recorder::TraceEntry> {
+        std::mem::take(&mut *self.trace.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
     /// 预防式 media 降级：发送前对 text-only 模型把图片块替换为标记。
@@ -304,6 +331,11 @@ impl RequestForwarder {
             self.rectifier_config.request_media_heuristic,
         );
         if replaced_images > 0 {
+            self.push_trace(
+                "mediaFallback",
+                format!("replaced {replaced_images} image block(s) for a text-only model"),
+                Some(&provider.id),
+            );
             let model = body.get("model").and_then(Value::as_str).unwrap_or("");
             log::info!(
                 "[Media] Replaced {replaced_images} image block(s) with {} for text-only provider={}, model={}",
@@ -428,6 +460,7 @@ impl RequestForwarder {
             duration_ms: request_started.elapsed().as_millis() as u64,
             success: result.is_ok(),
             attempts,
+            trace: self.take_trace(),
         });
         // Err 路径：guard 在函数 scope 内随返回值落地时自动 drop。
         result.map(|mut fr| {
@@ -586,6 +619,14 @@ impl RequestForwarder {
                 matches!(outcome, AttemptOutcome::Served { .. }),
                 attempt_started.elapsed(),
             );
+            if matches!(outcome, AttemptOutcome::Served { .. }) {
+                // PRODUCT-13: feed the least-latency strategy.
+                self.router.routing().record_latency(
+                    app_type_str,
+                    &provider.id,
+                    attempt_started.elapsed(),
+                );
+            }
             attempts.push(attempt_record(
                 provider,
                 &outcome,
@@ -689,7 +730,41 @@ impl RequestForwarder {
         position: (usize, usize),
     ) -> AttemptOutcome {
         let app_type_str = request.app_type.as_str();
-        let error = match self.forward(request, provider, &provider_body).await {
+        // PRODUCT-32: with a key pool, start at the next key and move on to
+        // the following keys on 429/401 before this provider fails over.
+        let keys = super::key_pool::ordered_keys(app_type_str, provider);
+        let keyed;
+        let provider: &Provider = match keys.first() {
+            Some(first) => {
+                keyed = super::key_pool::with_key(provider, &first.key);
+                &keyed
+            }
+            None => provider,
+        };
+        let mut result = self.forward(request, provider, &provider_body).await;
+        let mut rotated: Option<Provider> = None;
+        for (i, next) in keys.iter().enumerate().skip(1) {
+            match &result {
+                Err(e) if super::key_pool::should_rotate(e) => {}
+                _ => break,
+            }
+            super::key_pool::mark_failed(app_type_str, provider, &keys[i - 1].label);
+            self.push_trace(
+                "keyRotation",
+                format!("{} → {}", keys[i - 1].label, next.label),
+                Some(&provider.id),
+            );
+            let candidate = super::key_pool::with_key(provider, &next.key);
+            result = self.forward(request, &candidate, &provider_body).await;
+            rotated = Some(candidate);
+        }
+        if let (Err(e), Some(last)) = (&result, keys.last()) {
+            if keys.len() > 1 && super::key_pool::should_rotate(e) {
+                super::key_pool::mark_failed(app_type_str, provider, &last.label);
+            }
+        }
+        let provider: &Provider = rotated.as_ref().unwrap_or(provider);
+        let error = match result {
             Ok(served) => return AttemptOutcome::served(served),
             Err(error) => error,
         };
@@ -726,6 +801,7 @@ impl RequestForwarder {
             RectifyDecision::Retry(kind) => kind,
         };
 
+        self.push_trace("rectifier", kind.label(), Some(&provider.id));
         log::info!(
             "[{app_type_str}] [{}] {} rectifier rewrote the request; retrying provider={}",
             kind.log_code(),
@@ -840,6 +916,13 @@ impl RequestForwarder {
         outbound_model: Option<String>,
         after_failover: bool,
     ) -> ForwardResult {
+        if let Some(format) = claude_api_format.as_deref().filter(|f| *f != "anthropic") {
+            self.push_trace(
+                "bridge",
+                format!("anthropic → {format}"),
+                Some(&provider.id),
+            );
+        }
         // 普通闭合熔断状态异步记录，避免阻塞流式首包返回；HalfOpen 探测同步等待，
         // 保证 permit 与熔断状态及时释放。
         let stream_health = self
@@ -1799,6 +1882,7 @@ mod tests {
             optimizer_config: OptimizerConfig::default(),
             copilot_optimizer_config: CopilotOptimizerConfig::default(),
             routing_config: Arc::new(RoutingConfig::default()),
+            trace: std::sync::Mutex::new(Vec::new()),
             timeouts: TimeoutPolicy::from_secs(
                 non_streaming_timeout.as_secs(),
                 streaming_first_byte_timeout.as_secs(),
@@ -2275,6 +2359,99 @@ mod tests {
         );
         // The client's own body is never mutated.
         assert!(contains_thinking_block(&body));
+    }
+
+    #[tokio::test]
+    async fn key_pool_rotates_on_429_without_provider_failover() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        // Upstream: key A is rate limited, key B works.
+        let seen_keys = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let app = {
+            let seen_keys = seen_keys.clone();
+            axum::Router::new().fallback(move |headers: HeaderMap| {
+                let seen_keys = seen_keys.clone();
+                async move {
+                    let auth = headers
+                        .get(http::header::AUTHORIZATION)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or_default()
+                        .to_string();
+                    seen_keys.lock().unwrap().push(auth.clone());
+                    if auth.contains("sk-pool-a") {
+                        (
+                            StatusCode::TOO_MANY_REQUESTS,
+                            [(http::header::CONTENT_TYPE, "application/json")],
+                            r#"{"error":{"message":"rate limited"}}"#.to_string(),
+                        )
+                    } else {
+                        (
+                            StatusCode::OK,
+                            [(http::header::CONTENT_TYPE, "application/json")],
+                            serde_json::to_string(&json!({
+                                "id": "msg_1", "type": "message", "role": "assistant",
+                                "model": "claude-test",
+                                "content": [{"type": "text", "text": "ok"}],
+                                "usage": {"input_tokens": 1, "output_tokens": 1}
+                            }))
+                            .unwrap(),
+                        )
+                    }
+                }
+            })
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let mut provider = claude_provider("pool-provider", &format!("http://{addr}"));
+        provider.settings_config["env"]["ANTHROPIC_AUTH_TOKEN"] = json!("sk-pool-a");
+        provider.meta = Some(crate::provider::ProviderMeta {
+            api_key_pool: vec![crate::provider::ApiKeyPoolEntry {
+                label: "B".to_string(),
+                key: "sk-pool-b".to_string(),
+            }],
+            ..Default::default()
+        });
+
+        let forwarder = test_forwarder(Duration::from_secs(5), Duration::from_secs(5));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_TYPE,
+            http::HeaderValue::from_static("application/json"),
+        );
+        let mut attempts = Vec::new();
+        let result = forwarder
+            .forward_with_retry_inner(
+                &AppType::Claude,
+                http::Method::POST,
+                "/v1/messages",
+                &json!({"model": "claude-test", "max_tokens": 8,
+                        "messages": [{"role": "user", "content": "hi"}]}),
+                headers,
+                Extensions::new(),
+                vec![provider],
+                &mut attempts,
+            )
+            .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(err) => panic!("expected success on key B, got {}", err.error),
+        };
+        assert_eq!(result.provider.id, "pool-provider");
+        assert_eq!(attempts.len(), 1, "one provider attempt, no failover");
+        let seen = seen_keys.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        assert!(seen[0].contains("sk-pool-a") && seen[1].contains("sk-pool-b"));
+        let trace = forwarder.take_trace();
+        assert!(
+            trace
+                .iter()
+                .any(|t| t.kind == "keyRotation" && t.detail == "primary → B"),
+            "{trace:?}"
+        );
+        assert!(trace.iter().all(|t| !t.detail.contains("sk-pool")));
     }
 
     fn sse_headers() -> HeaderMap {

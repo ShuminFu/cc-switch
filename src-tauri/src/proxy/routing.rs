@@ -14,6 +14,16 @@
 //!   breaker allows it) it is tried first, so a conversation keeps its prompt
 //!   cache and thinking-signature domain after an earlier provider recovers.
 //!   The pin expires `stickyTtlSecs` after its last use. The map is bounded.
+//! - **Model rules** (PRODUCT-13) route by requested model: the first rule
+//!   whose glob `pattern` matches the request's `model` restricts the
+//!   candidates to its `providers` (in that order; empty = every provider)
+//!   and may override the strategy. When none of a rule's providers is
+//!   available the request falls back to the full list unless the rule is
+//!   `exclusive`. The rule that fired is reported for the request trace.
+//! - **Least latency** orders providers by an exponentially weighted moving
+//!   average of their recent successful attempt latency (providers without a
+//!   sample yet are tried first, so each gets measured); **cheapest** orders
+//!   them by the provider's `costMultiplier` (missing = 1).
 //! - **Concurrency limit** caps in-flight requests per provider
 //!   (`maxConcurrentPerProvider`, 0 = unlimited). A provider at its limit is
 //!   skipped like an open breaker; the permit is held until the response
@@ -55,6 +65,81 @@ pub enum RoutingStrategy {
     RoundRobin,
     /// Smooth weighted round-robin over [`RoutingConfig::weights`].
     Weighted,
+    /// Lowest recent latency first (EWMA of successful attempts).
+    LeastLatency,
+    /// Lowest `costMultiplier` first.
+    Cheapest,
+}
+
+/// Route requests for matching models to specific providers (PRODUCT-13).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ModelRoutingRule {
+    /// Label shown in the request trace; defaults to the pattern.
+    pub name: String,
+    /// Glob on the requested model, `*` matches any run of characters
+    /// (case-insensitive), e.g. `claude-haiku-*`.
+    pub pattern: String,
+    /// Candidate provider ids in preference order; empty = all providers.
+    pub providers: Vec<String>,
+    /// Strategy among the candidates; `None` = the app's strategy.
+    pub strategy: Option<RoutingStrategy>,
+    /// Never fall back to providers outside `providers`.
+    pub exclusive: bool,
+}
+
+impl ModelRoutingRule {
+    pub fn label(&self) -> &str {
+        if self.name.trim().is_empty() {
+            &self.pattern
+        } else {
+            &self.name
+        }
+    }
+
+    pub fn matches(&self, model: &str) -> bool {
+        glob_match(
+            &self.pattern.to_ascii_lowercase(),
+            &model.to_ascii_lowercase(),
+        )
+    }
+}
+
+/// `*`-only glob match (no `?` or classes), iterative with backtracking.
+pub fn glob_match(pattern: &str, text: &str) -> bool {
+    let (p, t) = (pattern.as_bytes(), text.as_bytes());
+    let (mut pi, mut ti) = (0usize, 0usize);
+    let mut star: Option<(usize, usize)> = None;
+    while ti < t.len() {
+        if pi < p.len() && p[pi] == b'*' {
+            star = Some((pi, ti));
+            pi += 1;
+        } else if pi < p.len() && p[pi] == t[ti] {
+            pi += 1;
+            ti += 1;
+        } else if let Some((sp, st)) = star {
+            pi = sp + 1;
+            ti = st + 1;
+            star = Some((sp, st + 1));
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == b'*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// Result of routing one request.
+#[derive(Debug, Clone)]
+pub struct RoutingDecision {
+    pub providers: Vec<Provider>,
+    /// Label of the model rule that fired.
+    pub rule: Option<String>,
+    /// Whether the rule's candidates were unavailable and the full list was used.
+    pub rule_fell_back: bool,
+    pub strategy: RoutingStrategy,
 }
 
 /// Per-app routing settings. Every default reproduces the fixed priority list.
@@ -69,6 +154,8 @@ pub struct RoutingConfig {
     pub max_concurrent_per_provider: u32,
     /// Provider id -> weight for [`RoutingStrategy::Weighted`]; missing = 1, 0 = never first.
     pub weights: HashMap<String, u32>,
+    /// Model-aware rules, first match wins (PRODUCT-13).
+    pub model_rules: Vec<ModelRoutingRule>,
 }
 
 impl RoutingConfig {
@@ -77,6 +164,12 @@ impl RoutingConfig {
         self.strategy == RoutingStrategy::Priority
             && !self.sticky_sessions
             && self.max_concurrent_per_provider == 0
+            && self.model_rules.is_empty()
+    }
+
+    /// The first model rule matching `model`.
+    pub fn rule_for(&self, model: &str) -> Option<&ModelRoutingRule> {
+        self.model_rules.iter().find(|r| r.matches(model))
     }
 
     fn sticky_ttl(&self) -> Duration {
@@ -154,6 +247,21 @@ pub struct RoutingState {
     /// Smooth WRR current weights per app, keyed by provider id.
     weighted: Mutex<HashMap<String, HashMap<String, i64>>>,
     limits: Mutex<HashMap<String, LimitEntry>>,
+    /// EWMA of successful attempt latency in ms, keyed by `app:provider`.
+    latency: Mutex<HashMap<String, f64>>,
+}
+
+/// Weight of the newest sample in the latency EWMA.
+const LATENCY_EWMA_ALPHA: f64 = 0.3;
+
+fn cost_multiplier(provider: &Provider) -> f64 {
+    provider
+        .meta
+        .as_ref()
+        .and_then(|m| m.cost_multiplier.as_deref())
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .unwrap_or(1.0)
 }
 
 /// Why a provider was not attempted.
@@ -199,19 +307,91 @@ impl RoutingState {
     ///
     /// `session_id` must be a client-provided id; generated ids are unique
     /// per request and would only churn the sticky map.
+    #[cfg(test)]
     pub fn order(
         &self,
         app_type: &str,
         config: &RoutingConfig,
         session_id: Option<&str>,
+        providers: Vec<Provider>,
+    ) -> Vec<Provider> {
+        self.route(app_type, config, session_id, "", providers)
+            .providers
+    }
+
+    /// Route one request for `model`: apply the first matching model rule,
+    /// then the strategy and sticky pin (PRODUCT-13).
+    pub fn route(
+        &self,
+        app_type: &str,
+        config: &RoutingConfig,
+        session_id: Option<&str>,
+        model: &str,
+        providers: Vec<Provider>,
+    ) -> RoutingDecision {
+        let mut decision = RoutingDecision {
+            providers,
+            rule: None,
+            rule_fell_back: false,
+            strategy: config.strategy,
+        };
+        if config.is_default_behaviour() {
+            return decision;
+        }
+        if let Some(rule) = config.rule_for(model) {
+            decision.rule = Some(rule.label().to_string());
+            if let Some(strategy) = rule.strategy {
+                decision.strategy = strategy;
+            }
+            if !rule.providers.is_empty() {
+                let candidates: Vec<Provider> = rule
+                    .providers
+                    .iter()
+                    .filter_map(|id| decision.providers.iter().find(|p| &p.id == id).cloned())
+                    .collect();
+                if !candidates.is_empty() || rule.exclusive {
+                    decision.providers = candidates;
+                } else {
+                    decision.rule_fell_back = true;
+                }
+            }
+        }
+        let providers = std::mem::take(&mut decision.providers);
+        decision.providers =
+            self.apply_strategy(app_type, config, decision.strategy, session_id, providers);
+        decision
+    }
+
+    fn apply_strategy(
+        &self,
+        app_type: &str,
+        config: &RoutingConfig,
+        strategy: RoutingStrategy,
+        session_id: Option<&str>,
         mut providers: Vec<Provider>,
     ) -> Vec<Provider> {
-        if providers.len() <= 1 || config.is_default_behaviour() {
+        if providers.len() <= 1 {
             return providers;
         }
+        // Whole-list orderings: the failover chain follows the same metric.
+        // Stable sorts keep queue order among equals.
+        if strategy == RoutingStrategy::LeastLatency {
+            let latency = self.latency.lock().unwrap_or_else(|e| e.into_inner());
+            let key = |p: &Provider| {
+                latency
+                    .get(&format!("{app_type}:{}", p.id))
+                    .copied()
+                    .unwrap_or(0.0)
+            };
+            providers.sort_by(|a, b| key(a).total_cmp(&key(b)));
+        } else if strategy == RoutingStrategy::Cheapest {
+            providers.sort_by(|a, b| cost_multiplier(a).total_cmp(&cost_multiplier(b)));
+        }
 
-        let first = match config.strategy {
-            RoutingStrategy::Priority => 0,
+        let first = match strategy {
+            RoutingStrategy::Priority
+            | RoutingStrategy::LeastLatency
+            | RoutingStrategy::Cheapest => 0,
             RoutingStrategy::RoundRobin => {
                 let mut counters = self.round_robin.lock().unwrap_or_else(|e| e.into_inner());
                 let counter = counters.entry(app_type.to_string()).or_insert(0);
@@ -323,6 +503,27 @@ impl RoutingState {
                 last_used: Instant::now(),
             },
         );
+    }
+
+    /// Feed one successful attempt's latency into the EWMA used by
+    /// [`RoutingStrategy::LeastLatency`].
+    pub fn record_latency(&self, app_type: &str, provider_id: &str, elapsed: Duration) {
+        let ms = elapsed.as_secs_f64() * 1000.0;
+        let mut latency = self.latency.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = latency
+            .entry(format!("{app_type}:{provider_id}"))
+            .or_insert(ms);
+        *entry = LATENCY_EWMA_ALPHA * ms + (1.0 - LATENCY_EWMA_ALPHA) * *entry;
+    }
+
+    /// Current latency estimate in ms (`None` before the first sample).
+    #[cfg(test)]
+    pub fn latency_ms(&self, app_type: &str, provider_id: &str) -> Option<f64> {
+        self.latency
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&format!("{app_type}:{provider_id}"))
+            .copied()
     }
 
     /// Number of remembered session pins.
@@ -542,6 +743,12 @@ mod tests {
             sticky_ttl_secs: 60,
             max_concurrent_per_provider: 4,
             weights: HashMap::from([("p1".to_string(), 2)]),
+            model_rules: vec![ModelRoutingRule {
+                pattern: "claude-haiku-*".to_string(),
+                providers: vec!["p2".to_string()],
+                strategy: Some(RoutingStrategy::Cheapest),
+                ..Default::default()
+            }],
         };
         save_routing_config(&db, "claude", &config).unwrap();
         save_routing_config(
@@ -568,6 +775,140 @@ mod tests {
         .unwrap();
         assert_eq!(parsed.strategy, RoutingStrategy::RoundRobin);
         assert_eq!(parsed.max_concurrent_per_provider, 3);
+    }
+
+    fn priced(id: &str, multiplier: Option<&str>) -> Provider {
+        let mut p = provider(id);
+        if let Some(m) = multiplier {
+            p.meta = Some(crate::provider::ProviderMeta {
+                cost_multiplier: Some(m.to_string()),
+                ..Default::default()
+            });
+        }
+        p
+    }
+
+    #[test]
+    fn glob_matches_star_patterns_case_insensitively() {
+        assert!(glob_match("claude-haiku-*", "claude-haiku-4-5"));
+        assert!(glob_match("*opus*", "claude-opus-4-8"));
+        assert!(glob_match("gpt-5", "gpt-5"));
+        assert!(!glob_match("gpt-5", "gpt-5-mini"));
+        assert!(glob_match("*", ""));
+        assert!(!glob_match("a*b", "acd"));
+        let rule = ModelRoutingRule {
+            pattern: "Claude-Haiku-*".to_string(),
+            ..Default::default()
+        };
+        assert!(rule.matches("claude-HAIKU-4"));
+        assert_eq!(rule.label(), "Claude-Haiku-*");
+    }
+
+    #[test]
+    fn haiku_rule_routes_to_the_cheapest_candidate_and_names_the_rule() {
+        let state = RoutingState::new();
+        let config = RoutingConfig {
+            model_rules: vec![
+                ModelRoutingRule {
+                    name: "haiku → cheapest".to_string(),
+                    pattern: "claude-haiku-*".to_string(),
+                    strategy: Some(RoutingStrategy::Cheapest),
+                    ..Default::default()
+                },
+                ModelRoutingRule {
+                    pattern: "claude-opus-*".to_string(),
+                    providers: vec!["official".to_string()],
+                    exclusive: true,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(!config.is_default_behaviour());
+        let providers = vec![
+            priced("official", None),
+            priced("relay-a", Some("0.8")),
+            priced("relay-b", Some("0.3")),
+        ];
+        let d = state.route(
+            "claude",
+            &config,
+            None,
+            "claude-haiku-4-5",
+            providers.clone(),
+        );
+        assert_eq!(d.rule.as_deref(), Some("haiku → cheapest"));
+        assert_eq!(ids(&d.providers), ["relay-b", "relay-a", "official"]);
+
+        let d = state.route(
+            "claude",
+            &config,
+            None,
+            "claude-opus-4-8",
+            providers.clone(),
+        );
+        assert_eq!(ids(&d.providers), ["official"]);
+        // An exclusive rule whose provider is unavailable yields no candidates.
+        let d = state.route(
+            "claude",
+            &config,
+            None,
+            "claude-opus-4-8",
+            providers[1..].to_vec(),
+        );
+        assert!(d.providers.is_empty());
+
+        // No rule matches: default priority order, no rule reported.
+        let d = state.route("claude", &config, None, "claude-sonnet-4", providers);
+        assert_eq!(d.rule, None);
+        assert_eq!(ids(&d.providers), ["official", "relay-a", "relay-b"]);
+    }
+
+    #[test]
+    fn non_exclusive_rule_falls_back_when_its_providers_are_unavailable() {
+        let state = RoutingState::new();
+        let config = RoutingConfig {
+            model_rules: vec![ModelRoutingRule {
+                pattern: "gpt-*".to_string(),
+                providers: vec!["missing".to_string(), "p3".to_string()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let d = state.route("codex", &config, None, "gpt-5", three());
+        assert_eq!(ids(&d.providers), ["p3"], "candidates keep rule order");
+        assert!(!d.rule_fell_back);
+        let d = state.route(
+            "codex",
+            &config,
+            None,
+            "gpt-5",
+            vec![provider("p1"), provider("p2")],
+        );
+        assert!(d.rule_fell_back);
+        assert_eq!(ids(&d.providers), ["p1", "p2"]);
+    }
+
+    #[test]
+    fn least_latency_prefers_unmeasured_then_fastest() {
+        let state = RoutingState::new();
+        let config = RoutingConfig {
+            strategy: RoutingStrategy::LeastLatency,
+            ..Default::default()
+        };
+        state.record_latency("claude", "p1", Duration::from_millis(900));
+        state.record_latency("claude", "p2", Duration::from_millis(200));
+        let ordered = state.order("claude", &config, None, three());
+        assert_eq!(ids(&ordered), ["p3", "p2", "p1"]);
+        state.record_latency("claude", "p3", Duration::from_millis(500));
+        let ordered = state.order("claude", &config, None, three());
+        assert_eq!(ids(&ordered), ["p2", "p3", "p1"]);
+        // EWMA: one slow sample moves the estimate only partway.
+        state.record_latency("claude", "p2", Duration::from_millis(1200));
+        let est = state.latency_ms("claude", "p2").unwrap();
+        assert!((est - 500.0).abs() < 1.0, "{est}");
+        // Other apps keep their own estimates.
+        assert_eq!(state.latency_ms("codex", "p2"), None);
     }
 
     #[test]

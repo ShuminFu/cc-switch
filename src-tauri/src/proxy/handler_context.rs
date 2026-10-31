@@ -77,6 +77,8 @@ pub struct RequestContext {
     pub copilot_optimizer_config: CopilotOptimizerConfig,
     /// Per-app routing config (PROXY-19; default = fixed priority order).
     pub routing_config: Arc<RoutingConfig>,
+    /// Model routing rule that fired for this request (PRODUCT-13/57).
+    pub routing_rule: Option<String>,
 }
 
 impl RequestContext {
@@ -160,7 +162,21 @@ impl RequestContext {
         let sticky_session = session_result
             .client_provided
             .then_some(session_id.as_str());
-        let providers = routing.order(app_type_str, &routing_config, sticky_session, providers);
+        let decision = routing.route(
+            app_type_str,
+            &routing_config,
+            sticky_session,
+            &request_model,
+            providers,
+        );
+        if let Some(rule) = &decision.rule {
+            log::debug!(
+                "[{tag}] routing rule '{rule}' matched model {request_model} (fell back: {})",
+                decision.rule_fell_back
+            );
+        }
+        let routing_rule = decision.rule.clone();
+        let providers = decision.providers;
 
         let provider = providers
             .first()
@@ -194,6 +210,7 @@ impl RequestContext {
             optimizer_config,
             copilot_optimizer_config,
             routing_config,
+            routing_rule,
         })
     }
 
@@ -250,6 +267,7 @@ impl RequestContext {
                 optimizer_config: self.optimizer_config.clone(),
                 copilot_optimizer_config: self.copilot_optimizer_config.clone(),
                 routing_config: self.routing_config.clone(),
+                routing_rule: self.routing_rule.clone(),
             },
         )
     }

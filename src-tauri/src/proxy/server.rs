@@ -9,6 +9,7 @@
 //! a direct (non-proxied) CLI request.
 
 pub(crate) mod access_guard;
+mod dashboard;
 mod header_capture;
 mod ip_limit;
 
@@ -430,6 +431,10 @@ impl ProxyServer {
             .route("/status", get(status_endpoint))
             // Prometheus text metrics (PROXY-20)
             .route("/metrics", get(metrics_endpoint))
+            // Read-only web dashboard (PRODUCT-30)
+            .route("/dashboard", get(dashboard::page))
+            .route("/api/status", get(dashboard::api_status))
+            .route("/api/requests", get(dashboard::api_requests))
             // Claude API (支持带前缀和不带前缀两种格式)
             .route("/v1/messages", post(handlers::handle_messages))
             .route("/claude/v1/messages", post(handlers::handle_messages))

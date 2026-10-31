@@ -41,6 +41,9 @@
 pub(crate) mod anthropic;
 pub(crate) mod chat;
 pub(crate) mod gemini;
+// Request-side IR, not wired into the request path yet (see its module docs).
+#[allow(dead_code)]
+pub(crate) mod request;
 pub(crate) mod responses;
 pub(crate) mod stream;
 
