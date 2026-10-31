@@ -387,6 +387,9 @@ export function OpenClawFormFields({
                             <Button
                               variant="outline"
                               size="icon"
+                              aria-label={t("providerForm.chooseModel", {
+                                defaultValue: "Choose a model",
+                              })}
                               className="shrink-0"
                             >
                               <ChevronDown className="h-4 w-4" />

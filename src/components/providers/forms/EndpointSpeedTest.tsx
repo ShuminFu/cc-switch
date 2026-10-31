@@ -549,6 +549,7 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
               onClick={handleAddEndpoint}
               variant="outline"
               size="icon"
+              aria-label={t("common.add", { defaultValue: "Add" })}
             >
               <Plus className="h-4 w-4" />
             </Button>
@@ -571,7 +572,17 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
               return (
                 <div
                   key={entry.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={isSelected}
                   onClick={() => handleSelect(entry.url)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      handleSelect(entry.url);
+                    }
+                  }}
                   className={`group flex cursor-pointer items-center justify-between px-3 py-2.5 rounded-lg border transition text-foreground ${
                     isSelected
                       ? "border-primary/70 bg-primary/5 shadow-sm"

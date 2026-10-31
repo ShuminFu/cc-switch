@@ -443,7 +443,14 @@ export function ClaudeFormFields({
           />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon" className="shrink-0">
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label={t("providerForm.chooseModel", {
+                  defaultValue: "Choose a model",
+                })}
+                className="shrink-0"
+              >
                 <ChevronDown className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -483,7 +490,13 @@ export function ClaudeFormFields({
             autoComplete="off"
             className="flex-1"
           />
-          <Button variant="outline" size="icon" className="shrink-0" disabled>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label={t("common.loading", { defaultValue: "Loading" })}
+            className="shrink-0"
+            disabled
+          >
             <Loader2 className="h-4 w-4 animate-spin" />
           </Button>
         </div>

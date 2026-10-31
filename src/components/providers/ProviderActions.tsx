@@ -338,8 +338,10 @@ export function ProviderActions({
           size="icon"
           variant="ghost"
           onClick={onTest || undefined}
-          disabled={isTesting}
-          title={t("provider.connectivityCheck", "检测连通")}
+          disabled={isTesting || !onTest}
+          title={t("provider.connectivityCheck", {
+            defaultValue: "Check connectivity",
+          })}
           className={cn(
             iconButtonClass,
             !onTest && "opacity-40 cursor-not-allowed text-muted-foreground",
@@ -356,6 +358,7 @@ export function ProviderActions({
           size="icon"
           variant="ghost"
           onClick={onConfigureUsage || undefined}
+          disabled={!onConfigureUsage}
           title={t("provider.configureUsage")}
           className={cn(
             iconButtonClass,
@@ -371,7 +374,9 @@ export function ProviderActions({
             size="icon"
             variant="ghost"
             onClick={onOpenTerminal}
-            title={t("provider.openTerminal", "打开终端")}
+            title={t("provider.openTerminal", {
+              defaultValue: "Open terminal",
+            })}
             className={cn(
               iconButtonClass,
               "hover:text-emerald-600 dark:hover:text-emerald-400",
@@ -385,6 +390,7 @@ export function ProviderActions({
           size="icon"
           variant="ghost"
           onClick={canDelete ? onDelete : undefined}
+          disabled={!canDelete}
           title={isReadOnly ? readOnlyHint : t("common.delete")}
           className={cn(
             iconButtonClass,

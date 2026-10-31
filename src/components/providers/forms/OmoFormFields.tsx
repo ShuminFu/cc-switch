@@ -1124,6 +1124,7 @@ export function OmoFormFields({
             type="button"
             variant="ghost"
             size="icon"
+            aria-label={t("common.delete", { defaultValue: "Delete" })}
             className="h-7 w-7 shrink-0 text-destructive"
             onClick={() => {
               const next = customs.filter((_, idx) => idx !== index);

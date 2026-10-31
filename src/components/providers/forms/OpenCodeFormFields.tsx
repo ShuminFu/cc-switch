@@ -843,6 +843,7 @@ export function OpenCodeFormFields({
                     type="button"
                     variant="ghost"
                     size="icon"
+                    aria-label={t("common.delete", { defaultValue: "Delete" })}
                     onClick={() => handleRemoveExtraOption(key)}
                     className="h-9 w-9 text-muted-foreground hover:text-destructive"
                   >
@@ -956,6 +957,7 @@ export function OpenCodeFormFields({
                     type="button"
                     variant="ghost"
                     size="icon"
+                    aria-label={t("common.delete", { defaultValue: "Delete" })}
                     onClick={() => handleRemoveModel(key)}
                     className="h-9 w-9 text-muted-foreground hover:text-destructive"
                   >
@@ -1092,6 +1094,9 @@ export function OpenCodeFormFields({
                                 type="button"
                                 variant="ghost"
                                 size="icon"
+                                aria-label={t("common.delete", {
+                                  defaultValue: "Delete",
+                                })}
                                 onClick={() =>
                                   handleRemoveModelExtraField(key, fKey)
                                 }
@@ -1172,6 +1177,9 @@ export function OpenCodeFormFields({
                                 type="button"
                                 variant="ghost"
                                 size="icon"
+                                aria-label={t("common.delete", {
+                                  defaultValue: "Delete",
+                                })}
                                 onClick={() =>
                                   handleRemoveModelOption(key, optKey)
                                 }

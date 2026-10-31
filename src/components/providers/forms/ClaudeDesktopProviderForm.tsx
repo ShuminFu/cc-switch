@@ -1125,6 +1125,9 @@ export function ClaudeDesktopProviderForm({
                               type="button"
                               variant="ghost"
                               size="icon"
+                              aria-label={t("common.delete", {
+                                defaultValue: "Delete",
+                              })}
                               onClick={() =>
                                 setRoutes((current) =>
                                   current.filter((_, i) => i !== index),
