@@ -58,7 +58,8 @@ export const SETTINGS_FORM_DEFAULTS = {
   enableClaudePluginIntegration: false,
   silentStartup: false,
   skipClaudeOnboarding: false,
-  preserveCodexOfficialAuthOnSwitch: false,
+  // Backend default is true for new installs (CFG-38).
+  preserveCodexOfficialAuthOnSwitch: true,
   unifyCodexSessionHistory: false,
 } satisfies Partial<Settings>;
 

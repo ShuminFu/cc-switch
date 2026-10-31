@@ -66,6 +66,20 @@ const ctx = (overrides: Partial<SideEffectContext>): SideEffectContext => ({
   ...overrides,
 });
 
+describe("settings form defaults", () => {
+  it("treats a missing preserveCodexOfficialAuthOnSwitch as on, like the backend (CFG-38)", () => {
+    const rest = { ...(baseForm() as Settings) };
+    delete rest.preserveCodexOfficialAuthOnSwitch;
+    const form = normalizeSettingsForm(rest, () => "en");
+    expect(form.preserveCodexOfficialAuthOnSwitch).toBe(true);
+    const explicitOff = normalizeSettingsForm(
+      { ...rest, preserveCodexOfficialAuthOnSwitch: false },
+      () => "en",
+    );
+    expect(explicitOff.preserveCodexOfficialAuthOnSwitch).toBe(false);
+  });
+});
+
 describe("settings save pipeline: directory fields", () => {
   it("covers every *ConfigDir field exactly once", () => {
     const fields = DIRECTORY_APP_IDS.map(

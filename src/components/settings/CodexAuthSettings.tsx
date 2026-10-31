@@ -98,8 +98,14 @@ export function CodexAuthSettings({
       <ToggleRow
         icon={<KeyRound className="h-4 w-4 text-emerald-500" />}
         title={t("settings.preserveCodexOfficialAuthOnSwitch")}
-        description={t("settings.preserveCodexOfficialAuthOnSwitchDescription")}
-        checked={settings.preserveCodexOfficialAuthOnSwitch ?? false}
+        description={t(
+          "settings.preserveCodexOfficialAuthOnSwitchDefaultOnDescription",
+          {
+            defaultValue:
+              "On by default. Controls third-party switches when local routing is off. Takeover routing always preserves the Codex official login.",
+          },
+        )}
+        checked={settings.preserveCodexOfficialAuthOnSwitch ?? true}
         onCheckedChange={(value) =>
           onChange({ preserveCodexOfficialAuthOnSwitch: value })
         }
