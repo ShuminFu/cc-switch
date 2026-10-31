@@ -44,3 +44,20 @@ export function hasScopeSnapshot(profile: Profile, scope: ProfileScope) {
       prompts[app] !== null,
   );
 }
+
+/**
+ * What applying `profile` changes in `scope` (FE-PROV-40): the provider it
+ * activates and how many MCP servers it enables, from the scope's first slot.
+ * `null` means the snapshot does not touch that part.
+ */
+export function scopePreview(
+  profile: Profile,
+  scope: ProfileScope,
+): { providerId: string | null; mcpCount: number | null } {
+  const slot = SCOPE_SLOT_KEYS[scope][0];
+  const mcp = profile.payload.mcp[slot];
+  return {
+    providerId: profile.payload.providers[slot] ?? null,
+    mcpCount: mcp ? mcp.length : null,
+  };
+}

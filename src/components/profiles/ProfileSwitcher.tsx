@@ -40,7 +40,8 @@ import {
   useProfilesQuery,
 } from "@/lib/query/profiles";
 import { ProfileManageDialog } from "./ProfileManageDialog";
-import { APP_PROFILE_SCOPE, hasScopeSnapshot } from "./scope";
+import { APP_PROFILE_SCOPE, hasScopeSnapshot, scopePreview } from "./scope";
+import { useProvidersQuery } from "@/lib/query/queries";
 import type { CurrentProfileIds, ProfileScope } from "@/lib/api/profiles";
 
 const CURRENT_ID_KEY: Record<ProfileScope, keyof CurrentProfileIds> = {
@@ -74,6 +75,7 @@ export function ProfileSwitcher({ activeApp }: ProfileSwitcherProps) {
   const [newName, setNewName] = useState("");
 
   const { data } = useProfilesQuery();
+  const { data: providersData } = useProvidersQuery(activeApp);
   const applyMutation = useApplyProfileMutation();
   const clearMutation = useClearProfileMutation();
   const createMutation = useCreateProfileMutation();
@@ -160,10 +162,17 @@ export function ProfileSwitcher({ activeApp }: ProfileSwitcherProps) {
                         )}
                       />
                       <span className="truncate">{profile.name}</span>
-                      {!hasScopeSnapshot(profile, scope) && (
+                      {!hasScopeSnapshot(profile, scope) ? (
                         <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground">
                           {t("profiles.noSnapshotForScope")}
                         </span>
+                      ) : (
+                        <ProfileScopePreview
+                          preview={scopePreview(profile, scope)}
+                          providerName={(id) =>
+                            providersData?.providers?.[id]?.name ?? id
+                          }
+                        />
                       )}
                     </CommandItem>
                   ))}
@@ -260,5 +269,40 @@ export function ProfileSwitcher({ activeApp }: ProfileSwitcherProps) {
         onClose={() => setIsManageOpen(false)}
       />
     </>
+  );
+}
+
+/** "→ Provider · 3 MCP": what applying the profile switches to (FE-PROV-40). */
+function ProfileScopePreview({
+  preview,
+  providerName,
+}: {
+  preview: ReturnType<typeof scopePreview>;
+  providerName: (id: string) => string;
+}) {
+  const { t } = useTranslation();
+  const parts: string[] = [];
+  if (preview.providerId) parts.push(providerName(preview.providerId));
+  if (preview.mcpCount !== null) {
+    parts.push(
+      t("profiles.previewMcp", {
+        defaultValue: "{{count}} MCP",
+        count: preview.mcpCount,
+      }),
+    );
+  }
+  if (parts.length === 0) return null;
+  const text = parts.join(" · ");
+  return (
+    <span
+      className="ml-auto shrink-0 truncate pl-2 text-xs text-muted-foreground"
+      title={t("profiles.previewTitle", {
+        defaultValue: "Applying activates: {{summary}}",
+        summary: text,
+      })}
+      data-testid="profile-scope-preview"
+    >
+      → {text}
+    </span>
   );
 }
