@@ -70,6 +70,11 @@ impl AppAdapter for ClaudeAdapter {
 struct ClaudeMcp;
 
 impl McpProjector for ClaudeMcp {
+    fn missing_config_dir(&self) -> Option<std::path::PathBuf> {
+        let dir = crate::config::get_claude_config_dir();
+        (!dir.exists() && !crate::config::get_claude_mcp_path().exists()).then_some(dir)
+    }
+
     fn upsert_server(&self, id: &str, spec: &Value) -> Result<(), AppError> {
         self.project(&[(id, spec)], &[])
     }

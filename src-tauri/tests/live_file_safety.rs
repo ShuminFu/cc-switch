@@ -13,6 +13,102 @@ use cc_switch_lib::{AppType, MultiAppConfig, Provider, ProviderService};
 mod support;
 use support::{create_test_state_with_config, ensure_test_home, TestEnv};
 
+fn codex_config_with(providers: Vec<Provider>, current: &str) -> MultiAppConfig {
+    let mut config = MultiAppConfig::default();
+    let manager = config
+        .get_manager_mut(&AppType::Codex)
+        .expect("codex manager");
+    manager.current = current.to_string();
+    for p in providers {
+        manager.providers.insert(p.id.clone(), p);
+    }
+    config
+}
+
+fn codex_provider(id: &str, category: &str, auth: serde_json::Value, config: &str) -> Provider {
+    let mut p = Provider::with_id(
+        id.to_string(),
+        id.to_string(),
+        json!({ "auth": auth, "config": config }),
+        None,
+    );
+    p.category = Some(category.to_string());
+    p
+}
+
+/// CFG-38: with default settings a ChatGPT login in auth.json survives a
+/// round trip official -> third-party -> official.
+#[test]
+fn codex_default_switch_keeps_chatgpt_login_in_auth_json() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+    let codex_dir = home.join(".codex");
+    fs::create_dir_all(&codex_dir).unwrap();
+    let oauth = r#"{"auth_mode":"chatgpt","tokens":{"access_token":"at","refresh_token":"rt"},"last_refresh":"2026-01-01T00:00:00Z"}"#;
+    fs::write(codex_dir.join("auth.json"), oauth).unwrap();
+    fs::write(codex_dir.join("config.toml"), "model = \"gpt-5\"\n").unwrap();
+
+    let official = codex_provider(
+        "official",
+        "official",
+        serde_json::from_str(oauth).unwrap(),
+        "model = \"gpt-5\"\n",
+    );
+    let third = codex_provider(
+        "third",
+        "custom",
+        json!({ "OPENAI_API_KEY": "sk-third" }),
+        "model_provider = \"custom\"\nmodel = \"m\"\n\n[model_providers.custom]\nname = \"custom\"\nbase_url = \"https://third.example.com/v1\"\nwire_api = \"responses\"\n",
+    );
+    let config = codex_config_with(vec![official, third], "official");
+    let state = create_test_state_with_config(&config).expect("state");
+
+    ProviderService::switch(&state, AppType::Codex, "third").expect("switch to third");
+    assert_eq!(
+        fs::read_to_string(codex_dir.join("auth.json")).unwrap(),
+        oauth,
+        "third-party switch must not touch the ChatGPT login"
+    );
+    let live_config = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+    assert!(live_config.contains("sk-third"), "{live_config}");
+
+    ProviderService::switch(&state, AppType::Codex, "official").expect("switch back");
+    let auth: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(codex_dir.join("auth.json")).unwrap()).unwrap();
+    assert_eq!(auth["tokens"]["refresh_token"], "rt");
+    assert!(auth.get("OPENAI_API_KEY").is_none());
+}
+
+/// CFG-38: switching to an official provider without stored login material
+/// never leaves a third-party key in auth.json.
+#[test]
+fn codex_official_switch_strips_leftover_third_party_key() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+    let codex_dir = home.join(".codex");
+    fs::create_dir_all(&codex_dir).unwrap();
+    fs::write(
+        codex_dir.join("auth.json"),
+        r#"{"OPENAI_API_KEY":"sk-third"}"#,
+    )
+    .unwrap();
+    fs::write(codex_dir.join("config.toml"), "model = \"m\"\n").unwrap();
+
+    let official = codex_provider("official", "official", json!({}), "model = \"gpt-5\"\n");
+    let third = codex_provider(
+        "third",
+        "custom",
+        json!({ "OPENAI_API_KEY": "sk-third" }),
+        "model = \"m\"\n",
+    );
+    let config = codex_config_with(vec![official, third], "third");
+    let state = create_test_state_with_config(&config).expect("state");
+
+    ProviderService::switch(&state, AppType::Codex, "official").expect("switch");
+    let raw = fs::read_to_string(codex_dir.join("auth.json")).unwrap();
+    assert!(!raw.contains("sk-third"), "{raw}");
+}
+
 fn backups_in(dir: &Path) -> Vec<(String, Vec<u8>)> {
     let mut out: Vec<(String, Vec<u8>)> = match fs::read_dir(dir) {
         Ok(rd) => rd
@@ -198,6 +294,12 @@ fn claude_switch_backs_up_live_settings_and_warns_when_unreadable() {
 fn codex_switch_backs_up_auth_and_config() {
     let _env = TestEnv::new();
     let home = ensure_test_home();
+    // compat mode: third-party switches replace auth.json
+    cc_switch_lib::update_settings(cc_switch_lib::AppSettings {
+        preserve_codex_official_auth_on_switch: false,
+        ..Default::default()
+    })
+    .unwrap();
 
     let codex_dir = home.join(".codex");
     fs::create_dir_all(&codex_dir).unwrap();

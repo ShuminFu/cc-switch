@@ -365,11 +365,16 @@ pub fn sync_single_server_to_codex(
         doc["mcp_servers"] = toml_edit::table();
     }
 
-    // 将 JSON 服务器规范转换为 TOML 表
+    // 将 JSON 服务器规范转换为 TOML 表；已有条目只替换传输字段，保留
+    // startup_timeout_sec / enabled_tools 等 Codex 原生字段（CFG-42）
     let toml_table = json_server_to_toml_table(server_spec)?;
+    let merged = super::merge::merge_live_toml_table(
+        doc["mcp_servers"].get(id).and_then(Item::as_table),
+        toml_table,
+    );
 
     // 使用唯一正确的格式：[mcp_servers]
-    doc["mcp_servers"][id] = Item::Table(toml_table);
+    doc["mcp_servers"][id] = Item::Table(merged);
 
     // 写回文件（内容未变化时不写；先备份；config.toml 可能含密钥）
     let new_text = doc.to_string();

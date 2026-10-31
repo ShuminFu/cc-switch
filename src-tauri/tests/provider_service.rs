@@ -703,10 +703,15 @@ wire_api = "responses"
 #[test]
 fn provider_service_switch_codex_default_overwrites_official_auth_when_preservation_off() {
     let _env = TestEnv::new();
-    // Intentionally do NOT enable preservation: this locks the default opt-out
-    // behavior where switching to a third-party provider rewrites auth.json,
-    // discarding the user's ChatGPT OAuth login. It is the dual of
+    // Preservation is on by default since CFG-38; turn it off explicitly to
+    // lock the compat behavior where switching to a third-party provider
+    // rewrites auth.json. It is the dual of
     // `provider_service_switch_codex_preserves_oauth_and_backfills_api_key_from_live_token`.
+    cc_switch_lib::update_settings(cc_switch_lib::AppSettings {
+        preserve_codex_official_auth_on_switch: false,
+        ..Default::default()
+    })
+    .expect("disable Codex auth preservation");
     let _home = ensure_test_home();
 
     let live_auth = json!({

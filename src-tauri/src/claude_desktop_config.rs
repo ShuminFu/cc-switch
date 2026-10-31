@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 #[cfg(any(target_os = "macos", windows))]
 use crate::config::get_home_dir;
-use crate::config::{atomic_write, delete_file, read_json_file, write_json_file};
+use crate::config::{delete_file, read_json_file};
 use crate::database::Database;
 use crate::database::CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID;
 use crate::error::AppError;
@@ -977,6 +977,7 @@ fn apply_provider_to_paths_inner(
                 &credentials.base_url,
                 &credentials.api_key,
                 (!model_specs.is_empty()).then_some(model_specs.as_slice()),
+                &extra_egress_hosts(provider),
             )
         }
         ClaudeDesktopMode::Proxy => {
@@ -991,13 +992,18 @@ fn apply_provider_to_paths_inner(
                     supports_1m: route.supports_1m,
                 })
                 .collect::<Vec<_>>();
-            build_gateway_profile(&base_url, &api_key, Some(model_specs.as_slice()))
+            build_gateway_profile(
+                &base_url,
+                &api_key,
+                Some(model_specs.as_slice()),
+                &extra_egress_hosts(provider),
+            )
         }
     };
 
     write_deployment_mode(&paths.normal_config_path, "3p")?;
     write_deployment_mode(&paths.threep_config_path, "3p")?;
-    write_json_file(&paths.profile_path, &profile)?;
+    write_desktop_json(&paths.profile_path, &profile)?;
     write_meta(&paths.meta_path, Some(PROFILE_ID))?;
 
     Ok(())
@@ -1016,13 +1022,67 @@ fn restore_official_at_paths_inner(paths: &ClaudeDesktopPaths) -> Result<(), App
     Ok(())
 }
 
+/// Write a Claude Desktop JSON file: keep the file's key order/indent (the
+/// normal config also holds the user's Desktop `mcpServers`), skip no-op
+/// writes and create new files owner-only, since the profile carries the
+/// gateway API key.
+fn write_desktop_json(path: &Path, value: &Value) -> Result<(), AppError> {
+    use crate::adapters::live_file::{to_json_string, write_live_text, JsonStyle, WriteOptions};
+    let content = to_json_string(value, &JsonStyle::of_file(path))?;
+    write_live_text(path, &content, WriteOptions::default().secret())?;
+    Ok(())
+}
+
+/// Additional Cowork egress hosts the user opted into via
+/// `settings_config.coworkEgressAllowedHosts` (`"*"` allows every host).
+fn extra_egress_hosts(provider: &Provider) -> Vec<String> {
+    provider
+        .settings_config
+        .get("coworkEgressAllowedHosts")
+        .and_then(Value::as_array)
+        .map(|hosts| {
+            hosts
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|h| !h.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Minimal Cowork egress allowlist for a profile (CFG-47): the gateway's
+/// host (with an explicit port when it has one) plus the user's extra hosts.
+fn cowork_egress_hosts(base_url: &str, extra: &[String]) -> Vec<String> {
+    let mut hosts = Vec::new();
+    if let Ok(url) = url::Url::parse(base_url.trim()) {
+        if let Some(host) = url.host_str() {
+            hosts.push(match url.port() {
+                Some(port) => format!("{host}:{port}"),
+                None => host.to_string(),
+            });
+        }
+    }
+    for host in extra {
+        if !hosts.contains(host) {
+            hosts.push(host.clone());
+        }
+    }
+    if hosts.iter().any(|h| h == "*") {
+        log::warn!("Claude Desktop profile allows Cowork egress to every host (\"*\")");
+    }
+    hosts
+}
+
 fn build_gateway_profile(
     base_url: &str,
     api_key: &str,
     model_specs: Option<&[InferenceModelSpec]>,
+    extra_egress_hosts: &[String],
 ) -> Value {
     let mut profile = json!({
-        "coworkEgressAllowedHosts": ["*"],
+        "coworkEgressAllowedHosts": cowork_egress_hosts(base_url, extra_egress_hosts),
         "disableDeploymentModeChooser": true,
         "inferenceGatewayApiKey": api_key,
         "inferenceGatewayAuthScheme": "bearer",
@@ -1081,7 +1141,7 @@ fn restore_snapshots(snapshots: &[FileSnapshot]) -> Result<(), AppError> {
                 if let Some(parent) = snapshot.path.parent() {
                     fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
                 }
-                atomic_write(&snapshot.path, content)?;
+                crate::config::atomic_write_secret(&snapshot.path, content)?;
             }
             None => {
                 delete_file(&snapshot.path)?;
@@ -1102,7 +1162,7 @@ fn write_deployment_mode(path: &Path, mode: &str) -> Result<(), AppError> {
             Value::String(mode.to_string()),
         );
     }
-    write_json_file(path, &value)
+    write_desktop_json(path, &value)
 }
 
 fn remove_cc_switch_enterprise_config(path: &Path) -> Result<(), AppError> {
@@ -1135,7 +1195,7 @@ fn remove_cc_switch_enterprise_config(path: &Path) -> Result<(), AppError> {
         obj.remove("enterpriseConfig");
     }
 
-    write_json_file(path, &value)
+    write_desktop_json(path, &value)
 }
 
 fn write_meta(path: &Path, applied_profile_id: Option<&str>) -> Result<(), AppError> {
@@ -1180,7 +1240,7 @@ fn write_meta(path: &Path, applied_profile_id: Option<&str>) -> Result<(), AppEr
     }
 
     obj.insert("entries".to_string(), Value::Array(entries));
-    write_json_file(path, &value)
+    write_desktop_json(path, &value)
 }
 
 fn read_applied_id(path: &Path) -> Option<String> {
@@ -1296,23 +1356,27 @@ fn pick_windows_claude_dir(local_app_data: &Path, threep: bool) -> Option<PathBu
     if exact.exists() {
         return Some(exact);
     }
-
-    let mut candidates: Vec<PathBuf> = std::fs::read_dir(local_app_data)
+    let names: Vec<String> = std::fs::read_dir(local_app_data)
         .ok()?
         .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .filter(|path| {
-            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-                return false;
-            };
-            let starts = name.starts_with("Claude");
-            let is_threep = name.contains("-3p");
-            starts && is_threep == threep
-        })
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
         .collect();
-    candidates.sort();
-    candidates.into_iter().next()
+    pick_claude_dir_name(&names, threep).map(|name| local_app_data.join(name))
+}
+
+/// Pick Claude Desktop's data directory among `names` (CFG-34). Only the
+/// exact name (ignoring case) is accepted: a fuzzy match used to select
+/// stale copies such as `Claude-3p-backup` when `Claude-3p` was missing.
+#[cfg(any(windows, test))]
+fn pick_claude_dir_name(names: &[String], threep: bool) -> Option<String> {
+    let exact_name = if threep { "Claude-3p" } else { "Claude" };
+    let mut matches: Vec<&String> = names
+        .iter()
+        .filter(|name| name.eq_ignore_ascii_case(exact_name))
+        .collect();
+    matches.sort();
+    matches.first().map(|name| (*name).clone())
 }
 
 fn paths_from_dirs(normal_dir: PathBuf, threep_dir: PathBuf) -> ClaudeDesktopPaths {
@@ -1356,6 +1420,7 @@ fn unsupported_platform_error() -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::write_json_file;
 
     #[test]
     fn linux_paths_follow_xdg_config_home_and_require_the_claude_dir() {
@@ -1543,6 +1608,59 @@ mod tests {
     }
 
     #[test]
+    fn claude_dir_pick_rejects_stale_copies() {
+        let names: Vec<String> = ["Claude-3p-old", "Claude-3p-backup", "Claude"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(pick_claude_dir_name(&names, true), None);
+        assert_eq!(pick_claude_dir_name(&names, false), Some("Claude".into()));
+        let names = vec!["claude-3P".to_string()];
+        assert_eq!(pick_claude_dir_name(&names, true), Some("claude-3P".into()));
+    }
+
+    #[test]
+    fn claude_desktop_profile_egress_hosts_are_minimal_unless_opted_in() {
+        assert_eq!(
+            cowork_egress_hosts("https://gateway.example.com/v1", &[]),
+            vec!["gateway.example.com".to_string()]
+        );
+        assert_eq!(
+            cowork_egress_hosts("http://127.0.0.1:15721/claude-desktop", &[]),
+            vec!["127.0.0.1:15721".to_string()]
+        );
+        assert_eq!(
+            cowork_egress_hosts("https://gw.example.com", &["*".to_string()]),
+            vec!["gw.example.com".to_string(), "*".to_string()]
+        );
+    }
+
+    #[test]
+    fn claude_desktop_writes_keep_user_config_order_and_profile_is_private() {
+        let temp = TempDir::new().expect("tempdir");
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(paths.normal_config_path.parent().unwrap()).unwrap();
+        let original = "{\n    \"mcpServers\": {\n        \"zeta\": {\n            \"command\": \"z\"\n        },\n        \"alpha\": {\n            \"command\": \"a\"\n        }\n    },\n    \"deploymentMode\": \"1p\"\n}\n";
+        fs::write(&paths.normal_config_path, original).unwrap();
+        let provider = direct_provider("direct");
+        let db = test_db();
+        apply_provider_to_paths(&db, &provider, &paths).expect("apply provider");
+
+        let written = fs::read_to_string(&paths.normal_config_path).unwrap();
+        assert_eq!(written, original.replace("\"1p\"", "\"3p\""));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&paths.profile_path)
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+    }
+
+    #[test]
     fn claude_desktop_apply_writes_3p_profile_and_meta() {
         let temp = TempDir::new().expect("tempdir");
         let paths = test_paths(temp.path());
@@ -1565,8 +1683,11 @@ mod tests {
         );
         assert_eq!(profile["inferenceGatewayApiKey"], json!("test-token"));
         assert_eq!(profile["inferenceGatewayAuthScheme"], json!("bearer"));
+        assert_eq!(
+            profile["coworkEgressAllowedHosts"],
+            json!(["gateway.example.com"])
+        );
         assert_eq!(profile["disableDeploymentModeChooser"], json!(true));
-        assert_eq!(profile["coworkEgressAllowedHosts"], json!(["*"]));
         assert!(profile.get("inferenceModels").is_none());
         assert_eq!(meta["appliedId"], json!(PROFILE_ID));
         assert!(meta["entries"]
@@ -1627,7 +1748,10 @@ mod tests {
             json!("http://127.0.0.1:15721/claude-desktop")
         );
         assert_eq!(profile["inferenceGatewayAuthScheme"], json!("bearer"));
-        assert_eq!(profile["coworkEgressAllowedHosts"], json!(["*"]));
+        assert_eq!(
+            profile["coworkEgressAllowedHosts"],
+            json!(["127.0.0.1:15721"])
+        );
         assert_ne!(profile["inferenceGatewayApiKey"], json!("test-token"));
         assert!(profile["inferenceGatewayApiKey"]
             .as_str()

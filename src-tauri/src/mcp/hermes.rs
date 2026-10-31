@@ -23,21 +23,9 @@ use crate::hermes_config;
 
 use super::validation::validate_server_spec;
 
-/// Hermes-specific fields preserved on merge-on-write, stripped on import.
-/// Update this list when Hermes adds new per-server config fields.
-///
-/// `auth` ("oauth" / absent) is an OAuth-type declaration read by Hermes —
-/// CC Switch has no OAuth UI, but losing the field on round-trip downgrades
-/// the server to unauthenticated calls.
-const HERMES_EXTRA_FIELDS: &[&str] = &[
-    "enabled",
-    "timeout",
-    "connect_timeout",
-    "tools",
-    "sampling",
-    "roots",
-    "auth",
-];
+// Hermes-specific per-server fields (enabled, timeout, tools, sampling, auth,
+// …) survive merge-on-write through the shared policy in `mcp::merge`, which
+// keeps every non-transport key instead of a hand-maintained allowlist.
 
 // ============================================================================
 // Helper Functions
@@ -206,35 +194,12 @@ pub fn sync_single_server_to_hermes(
     })
 }
 
-/// Merge new spec into existing Hermes spec, preserving Hermes-specific fields.
-///
-/// Core fields (command, args, env, url, headers) come from `new_spec`.
-/// Hermes-specific fields (enabled, tools, sampling, etc.) are kept from
-/// `existing` — this prevents CC Switch from overwriting user customizations.
+/// Merge new spec into existing Hermes spec with the shared policy (CFG-42):
+/// core fields (command, args, env, url, headers) come from `new_spec`, every
+/// other key already in the Hermes entry (tools, sampling, auth, keys Hermes
+/// adds later, …) is preserved, and `enabled` follows cc-switch's toggle.
 fn merge_hermes_spec(existing: &Value, new_spec: &Value) -> Value {
-    let mut result = serde_json::Map::new();
-
-    // Copy Hermes-specific fields from existing config
-    if let Some(existing_obj) = existing.as_object() {
-        for &field in HERMES_EXTRA_FIELDS {
-            if let Some(val) = existing_obj.get(field) {
-                result.insert(field.to_string(), val.clone());
-            }
-        }
-    }
-
-    // Overwrite with core fields from new spec; for Hermes-specific fields,
-    // only apply from new_spec if existing didn't already have them
-    if let Some(new_obj) = new_spec.as_object() {
-        for (key, val) in new_obj {
-            if HERMES_EXTRA_FIELDS.contains(&key.as_str()) && result.contains_key(key) {
-                continue; // Existing Hermes-specific field takes precedence
-            }
-            result.insert(key.clone(), val.clone());
-        }
-    }
-
-    Value::Object(result)
+    crate::mcp::merge::merge_live_json_entry(Some(existing), new_spec.clone())
 }
 
 /// Remove a single MCP server from Hermes live config
@@ -556,6 +521,20 @@ mod tests {
             result.get("auth").is_none(),
             "auth stays Hermes-specific; stripped from unified format"
         );
+    }
+
+    #[test]
+    fn test_merge_keeps_unknown_hermes_keys_and_enables() {
+        let existing = json!({
+            "command": "old",
+            "enabled": false,
+            "future_hermes_field": {"x": 1}
+        });
+        let new_spec = json!({"command": "new", "enabled": true});
+        let merged = merge_hermes_spec(&existing, &new_spec);
+        assert_eq!(merged["future_hermes_field"]["x"], 1);
+        assert_eq!(merged["enabled"], true);
+        assert_eq!(merged["command"], "new");
     }
 
     #[test]

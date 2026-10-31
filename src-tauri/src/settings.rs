@@ -415,8 +415,10 @@ pub struct AppSettings {
     #[serde(default = "default_show_profile_switcher")]
     pub show_profile_switcher: bool,
     /// Keep Codex ChatGPT login material in auth.json when switching to third-party providers.
-    /// Opt-in: defaults to false so third-party switches cleanly overwrite auth.json.
-    #[serde(default)]
+    /// Defaults to true for new installs (CFG-38): third-party providers get a
+    /// provider-scoped bearer token in config.toml and the login cache survives.
+    /// An explicit `false` in an existing settings file is honoured.
+    #[serde(default = "default_true")]
     pub preserve_codex_official_auth_on_switch: bool,
     /// Run official Codex providers under the shared "custom" model_provider id
     /// so official sessions share one resume-history bucket with third-party
@@ -576,7 +578,7 @@ impl Default for AppSettings {
             usage_dashboard_refresh_interval_ms: None,
             enable_failover_toggle: false,
             show_profile_switcher: true,
-            preserve_codex_official_auth_on_switch: false,
+            preserve_codex_official_auth_on_switch: true,
             unify_codex_session_history: false,
             unify_codex_migrate_existing: None,
             failover_confirmed: None,

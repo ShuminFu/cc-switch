@@ -5,13 +5,22 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// 获取 Gemini 配置目录路径（支持设置覆盖）
-pub fn get_gemini_dir() -> PathBuf {
-    if let Some(custom) = crate::settings::get_gemini_override_dir() {
-        return custom;
-    }
+/// Gemini config directory and where it came from (CFG-12).
+///
+/// cc-switch override → `$GEMINI_CLI_HOME/.gemini` (Gemini CLI's own home
+/// override) → `~/.gemini`.
+pub fn resolve_gemini_dir() -> (PathBuf, crate::config::ConfigDirSource) {
+    crate::config::resolve_tool_dir(
+        crate::settings::get_gemini_override_dir(),
+        crate::config::tool_env_dir("GEMINI_CLI_HOME")
+            .map(|home| ("GEMINI_CLI_HOME", home.join(".gemini"))),
+        || get_home_dir().join(".gemini"),
+    )
+}
 
-    get_home_dir().join(".gemini")
+/// 获取 Gemini 配置目录路径（设置覆盖 → `GEMINI_CLI_HOME` → `~/.gemini`）
+pub fn get_gemini_dir() -> PathBuf {
+    resolve_gemini_dir().0
 }
 
 /// 获取 Gemini .env 文件路径
@@ -545,10 +554,14 @@ fn update_selected_type_at(
         }
     }
 
-    if backup {
-        crate::config::backup_live_file("gemini", settings_path);
-    }
-    crate::config::write_json_file(settings_path, &settings_content)?;
+    // Gemini CLI allows comments in settings.json: patch the document in
+    // place instead of re-serialising it (comments and key order survive).
+    let opts = if backup {
+        crate::adapters::live_file::WriteOptions::backup("gemini")
+    } else {
+        crate::adapters::live_file::WriteOptions::default()
+    };
+    crate::adapters::live_file::write_json_preserving(settings_path, &settings_content, opts)?;
 
     Ok(())
 }
@@ -641,7 +654,10 @@ mod tests {
         .unwrap();
 
         update_selected_type_at(&path, "gemini-api-key", false).unwrap();
-        let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        // the JSONC comment survives the in-place edit
+        assert!(written.starts_with("// keep\n"), "{written}");
+        let value: Value = json5::from_str(&written).unwrap();
         assert_eq!(value["theme"], "dark");
         assert_eq!(value["mcpServers"]["x"]["command"], "x");
         assert_eq!(value["security"]["auth"]["selectedType"], "gemini-api-key");

@@ -20,6 +20,10 @@
 //! * keys the adapter does not own are preserved (exclusive-mode apps
 //!   replace the provider-owned files; additive-mode apps only touch their
 //!   provider/MCP entries).
+//!
+//! The per-app ownership matrix (files, owned keys, backfill stripping, env
+//! overrides, backup locations) is in `docs/dev/config-adapters.md`; each
+//! adapter module's header names its row there (CFG-26).
 
 pub mod json5_doc;
 pub mod live_file;
@@ -79,6 +83,35 @@ pub struct AdapterCapabilities {
     pub common_config: CommonConfigShape,
 }
 
+/// One provider found in an app's live config that can be imported (CFG-23).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportCandidate {
+    /// Stable id derived from the live config (e.g. the Codex
+    /// `model_providers` key); callers may use it as a provider id hint.
+    pub id_hint: String,
+    pub name: String,
+    /// Provider `settings_config` to store.
+    pub settings_config: Value,
+    /// Hash of the endpoint and credential, for de-duplicating against
+    /// providers that were already imported. Never contains the secret.
+    pub fingerprint: String,
+}
+
+/// Fingerprint of an endpoint/credential pair (SHA-256, hex).
+pub fn credential_fingerprint(endpoint: &str, credential: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(endpoint.trim().trim_end_matches('/').as_bytes());
+    hasher.update([0u8]);
+    hasher.update(credential.trim().as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 /// MCP projection for one app: DB (unified spec) → the app's native config.
 pub trait McpProjector: Send + Sync {
     /// Insert or replace one server in the app's live config.
@@ -90,6 +123,14 @@ pub trait McpProjector: Send + Sync {
     /// Import the app's servers into `config.mcp.servers` (enabling this app
     /// for servers that already exist). Returns how many entries changed.
     fn import_servers(&self, config: &mut MultiAppConfig) -> Result<usize, AppError>;
+
+    /// The app's config directory when it does not exist. MCP sync never
+    /// creates directories for apps that are not installed, so every write
+    /// for this app is skipped; callers surface that as a warning instead of
+    /// reporting the server as applied (CFG-46).
+    fn missing_config_dir(&self) -> Option<PathBuf> {
+        None
+    }
 
     /// Project the desired state in one go: `enabled` servers are written,
     /// `disabled` ones removed. Adapters whose config is one file override
@@ -130,6 +171,23 @@ pub trait AppAdapter: Send + Sync {
     /// Snapshot used when importing the current live config as a provider.
     fn import_live(&self) -> Result<Value, AppError> {
         self.read_live()
+    }
+
+    /// Every provider the live config defines, for a repeatable "import from
+    /// live config" (CFG-23). The default offers the current live snapshot
+    /// as a single candidate.
+    fn import_candidates(&self) -> Result<Vec<ImportCandidate>, AppError> {
+        let settings = self.import_live()?;
+        let fingerprint = credential_fingerprint(
+            self.app().as_str(),
+            &serde_json::to_string(&settings).unwrap_or_default(),
+        );
+        Ok(vec![ImportCandidate {
+            id_hint: "default".to_string(),
+            name: "default".to_string(),
+            settings_config: settings,
+            fingerprint,
+        }])
     }
 
     /// Additive mode: whether the live file already contains `provider_id`.
@@ -174,6 +232,28 @@ pub fn all_adapters() -> impl Iterator<Item = &'static dyn AppAdapter> {
 /// Adapters whose apps consume cc-switch MCP servers.
 pub fn mcp_adapters() -> impl Iterator<Item = &'static dyn AppAdapter> {
     all_adapters().filter(|adapter| adapter.mcp().is_some())
+}
+
+/// An app whose MCP sync was skipped because its config directory is missing.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSyncSkip {
+    pub app: String,
+    pub missing_dir: PathBuf,
+}
+
+/// For each of `apps` that consumes MCP, report the ones whose config
+/// directory is missing, i.e. where a sync writes nothing (CFG-46).
+pub fn mcp_sync_skips(apps: impl IntoIterator<Item = AppType>) -> Vec<McpSyncSkip> {
+    apps.into_iter()
+        .filter_map(|app| {
+            let dir = adapter_for(&app).mcp()?.missing_config_dir()?;
+            Some(McpSyncSkip {
+                app: app.as_str().to_string(),
+                missing_dir: dir,
+            })
+        })
+        .collect()
 }
 
 /// Adapters whose live config can be taken over by the local proxy.

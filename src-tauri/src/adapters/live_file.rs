@@ -198,13 +198,39 @@ impl WriteOutcome {
     }
 }
 
+/// Refuse to write a secrets-vault placeholder (`cc-switch-secret:v1:…`) into
+/// a live file. Placeholders only belong in cc-switch's database; one that
+/// reaches a tool's config means a provider was not resolved before the
+/// write, and the tool would send the placeholder as its API key.
+pub fn ensure_no_vault_placeholder(path: &Path, content: &str) -> Result<(), AppError> {
+    if content.contains(crate::secrets::provider_vault::PLACEHOLDER_PREFIX) {
+        log::error!(
+            "Refusing to write an unresolved secrets-vault placeholder into {}",
+            path.display()
+        );
+        return Err(AppError::localized(
+            "secrets.placeholderInLiveConfig",
+            format!(
+                "未写入 {}：配置中仍含有未解析的密钥库占位符，请解锁密钥库后重试。",
+                path.display()
+            ),
+            format!(
+                "{} was not written: the config still contains an unresolved secrets-vault placeholder. Unlock the vault and retry.",
+                path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Write `content` to a live file: no-op when unchanged, backup first, atomic
-/// replace.
+/// replace. Content carrying a vault placeholder is rejected.
 pub fn write_live_text(
     path: &Path,
     content: &str,
     opts: WriteOptions,
 ) -> Result<WriteOutcome, AppError> {
+    ensure_no_vault_placeholder(path, content)?;
     if let Ok(existing) = fs::read(path) {
         if existing == content.as_bytes() {
             return Ok(WriteOutcome::Unchanged);
@@ -291,6 +317,39 @@ pub fn to_json_string<T: Serialize + ?Sized>(
         text.push('\n');
     }
     Ok(style.text.apply(&text))
+}
+
+/// Write `value` to a JSON or JSONC live file, keeping the existing
+/// document's comments, key order and formatting: only the parts that differ
+/// are re-rendered (via [`super::json5_doc::Json5Doc`]). Falls back to a
+/// style-preserving plain rewrite (previous content backed up per `opts`)
+/// when the document cannot be edited in place.
+pub fn write_json_preserving(
+    path: &Path,
+    value: &Value,
+    opts: WriteOptions,
+) -> Result<WriteOutcome, AppError> {
+    let content = match read_text_lenient(path)? {
+        Some(live) if !live.text.trim().is_empty() => {
+            match super::json5_doc::Json5Doc::parse(&live.text) {
+                Ok(mut doc) => {
+                    doc.apply(value)?;
+                    live.style.apply(&doc.render())
+                }
+                Err(err) => {
+                    log::warn!(
+                        "{} could not be edited in place ({err}); rewriting it",
+                        path.display()
+                    );
+                    let mut style = JsonStyle::detect(&live.text);
+                    style.text.bom = live.style.bom;
+                    to_json_string(value, &style)?
+                }
+            }
+        }
+        _ => to_json_string(value, &JsonStyle::default())?,
+    };
+    write_live_text(path, &content, opts)
 }
 
 /// Parse JSON text, tolerating a BOM.
@@ -411,6 +470,34 @@ mod tests {
             to_json_string(&value, &JsonStyle::detect(no_newline)).unwrap(),
             no_newline
         );
+    }
+
+    #[test]
+    fn write_json_preserving_keeps_jsonc_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let raw = "{\n  // theme picked by hand\n  \"theme\": \"dark\",\n  \"security\": {\n    \"auth\": { \"selectedType\": \"oauth-personal\" }\n  }\n}\n";
+        fs::write(&path, raw).unwrap();
+        let mut value: Value = json5::from_str(raw).unwrap();
+        value["security"]["auth"]["selectedType"] = json!("gemini-api-key");
+        write_json_preserving(&path, &value, WriteOptions::default()).unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(written.contains("// theme picked by hand"), "{written}");
+        assert_eq!(written, raw.replace("oauth-personal", "gemini-api-key"));
+    }
+
+    #[test]
+    fn write_live_text_refuses_vault_placeholders() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "{}").unwrap();
+        let content = format!(
+            "{{\"env\":{{\"ANTHROPIC_AUTH_TOKEN\":\"{}abc\"}}}}",
+            crate::secrets::provider_vault::PLACEHOLDER_PREFIX
+        );
+        assert!(write_live_text(&path, &content, WriteOptions::default()).is_err());
+        assert!(crate::config::write_text_file_secret(&path, &content).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{}");
     }
 
     #[test]
