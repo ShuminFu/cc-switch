@@ -1,5 +1,6 @@
 import type { ProviderCategory, OpenCodeProviderConfig } from "../types";
 import type { PresetTheme, TemplateValueConfig } from "./claudeProviderPresets";
+import { registerPresetCatalog } from "./presetCatalog";
 
 export interface OpenCodeProviderPreset {
   name: string;
@@ -2052,3 +2053,6 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
     isCustomTemplate: true,
   },
 ];
+
+// Remote signed catalog overlay (PRODUCT-07); the list above stays the default.
+registerPresetCatalog("opencode", opencodeProviderPresets);

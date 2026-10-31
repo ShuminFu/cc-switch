@@ -9,6 +9,7 @@ import type {
   PromptCacheRoutingMode,
 } from "../types";
 import type { PresetTheme } from "./claudeProviderPresets";
+import { registerPresetCatalog } from "./presetCatalog";
 
 export interface CodexProviderPreset {
   name: string;
@@ -1520,3 +1521,6 @@ base_url = "https://cc-api.pipellm.ai/v1"`,
     category: "aggregator",
   },
 ];
+
+// Remote signed catalog overlay (PRODUCT-07); the list above stays the default.
+registerPresetCatalog("codex", codexProviderPresets);

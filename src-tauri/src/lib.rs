@@ -971,6 +971,9 @@ pub fn run() {
             commands::merge_deeplink_config,
             commands::import_from_deeplink,
             commands::import_from_deeplink_unified,
+            commands::get_preset_catalog,
+            commands::refresh_preset_catalog,
+            commands::set_preset_catalog_auto_update,
             update_tray_menu,
             // Environment variable management
             commands::check_env_conflicts,

@@ -1,5 +1,6 @@
 pub mod balance;
 pub mod budget;
+pub mod catalog;
 pub mod cli_tools;
 pub mod codex_oauth_models;
 pub mod coding_plan;

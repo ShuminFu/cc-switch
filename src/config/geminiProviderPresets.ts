@@ -1,4 +1,5 @@
 import type { ProviderCategory } from "@/types";
+import { registerPresetCatalog } from "./presetCatalog";
 
 /**
  * Gemini 预设供应商的视觉主题配置
@@ -459,3 +460,6 @@ export function getGeminiPresetByUrl(
       url.toLowerCase().includes(preset.baseURL.toLowerCase()),
   );
 }
+
+// Remote signed catalog overlay (PRODUCT-07); the list above stays the default.
+registerPresetCatalog("gemini", geminiProviderPresets);
