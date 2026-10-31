@@ -37,7 +37,16 @@ const SENSITIVE_KEYS: &[&str] = &[
 const SENSITIVE_HEADER_FRAGMENTS: &[&str] = &["auth", "token", "secret", "api_key", "cookie"];
 
 fn normalize_key(key: &str) -> String {
-    key.trim().to_ascii_lowercase().replace('-', "_")
+    key.trim()
+        .chars()
+        .map(|c| {
+            if c == '-' {
+                '_'
+            } else {
+                c.to_ascii_lowercase()
+            }
+        })
+        .collect()
 }
 
 fn is_sensitive_key(key: &str) -> bool {
@@ -121,8 +130,27 @@ static TEXT_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
     ]
 });
 
+/// 文本是否可能命中 [`TEXT_RULES`] 中的任一规则。
+///
+/// 每条规则都含有一个必需的字面量：`"`（JSON 键值）、`:`（头部行）、`=`（查询参数）、
+/// `_`（GitHub token）、`sk-`、`AIza` 或不区分大小写的 `bearer`。都不含时没有规则能
+/// 匹配，可跳过正则扫描——代理热路径上请求追踪会对每个请求头值调用 [`redact_text`]，
+/// 而大多数头值（`application/json`、版本号等）不含这些字面量。
+fn may_contain_secret(text: &str) -> bool {
+    text.bytes().any(|b| matches!(b, b'"' | b':' | b'=' | b'_'))
+        || text.contains("sk-")
+        || text.contains("AIza")
+        || text
+            .as_bytes()
+            .windows(6)
+            .any(|window| window.eq_ignore_ascii_case(b"bearer"))
+}
+
 /// 替换文本中的密钥形态
 pub fn redact_text(text: &str) -> String {
+    if !may_contain_secret(text) {
+        return text.to_string();
+    }
     let mut out = std::borrow::Cow::Borrowed(text);
     for rule in TEXT_RULES.iter() {
         if let std::borrow::Cow::Owned(replaced) = rule.pattern.replace_all(&out, rule.replacement)
@@ -173,4 +201,75 @@ pub fn redact_headers(headers: &HeaderMap) -> Vec<(String, String)> {
 /// 脱敏原始字节（SSE 体等）：按 UTF-8 解码后替换；非 UTF-8 字节按 lossy 处理
 pub fn redact_bytes(bytes: &[u8]) -> Vec<u8> {
     redact_text(&String::from_utf8_lossy(bytes)).into_bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 预检查只是快速路径：被它跳过的文本必须确实不会被任何规则匹配。
+    /// 新增规则时若引入了新的必需字面量，这里会失败，提醒同步 [`may_contain_secret`]。
+    #[test]
+    fn may_contain_secret_never_skips_a_rule_match() {
+        // 不含 `"` `:` `=` `_` 的片段（含大小写与 Unicode 折叠变体、转义与空白），
+        // 让跳过正则的分支真正被覆盖
+        let pieces: Vec<&str> = concat!(
+            "a|b|e|r|s|k|A|B|E|R|S|K|I|z|0|9|-|?|&|/|.| |\\|\\n|\n|\t|ſ|\u{212a}|",
+            "gh|ghp|ghu|github|pat|key|token|auth|cookie|Cookie|x-api-key|authorization|",
+            "Bearer|bear|sk|sk-|AIza|AIz",
+        )
+        .split('|')
+        .collect();
+        let mut state: u64 = 0x5eed;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as usize
+        };
+        let mut skipped = 0;
+        for _ in 0..20_000 {
+            let len = next() % 24;
+            let text: String = (0..len).map(|_| pieces[next() % pieces.len()]).collect();
+            if may_contain_secret(&text) {
+                continue;
+            }
+            skipped += 1;
+            for rule in TEXT_RULES.iter() {
+                assert!(
+                    !rule.pattern.is_match(&text),
+                    "prefilter skipped {text:?} but {} matches",
+                    rule.pattern.as_str()
+                );
+            }
+        }
+        assert!(
+            skipped > 1_000,
+            "only {skipped} samples exercised the skip path"
+        );
+    }
+
+    #[test]
+    fn may_contain_secret_accepts_every_rule_shape() {
+        for text in [
+            r#""api_key": "x""#,
+            "x-api-key: abc",
+            "BeArEr abcdefgh",
+            "https://h/v1?key=abc",
+            "sk-abcdefgh12",
+            "AIzaSyD9tSrke72PouQMnMXa7eZSW0jkFMBWY",
+            concat!("ghp", "_wWPw5k4aXcaT4fNP0UcnZwJUVFk6LO0pINUx"),
+        ] {
+            assert!(may_contain_secret(text), "{text}");
+            assert!(redact_text(text).contains(REDACTED), "{text}");
+        }
+        for text in [
+            "application/json",
+            "2023-06-01",
+            "claude-cli/1.0.0 (external, cli)",
+        ] {
+            assert!(!may_contain_secret(text), "{text}");
+            assert_eq!(redact_text(text), text);
+        }
+    }
 }

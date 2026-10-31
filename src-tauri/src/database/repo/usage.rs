@@ -2373,8 +2373,11 @@ pub(crate) struct ProxyUsageRow<'a> {
 
 /// 写入代理请求日志（同 request_id 覆盖）。
 pub(crate) fn insert_proxy_row(conn: &Connection, row: &ProxyUsageRow<'_>) -> Result<(), AppError> {
-    conn.execute(
-        "INSERT OR REPLACE INTO proxy_request_logs (
+    // 每个代理请求都会写一行；缓存预编译语句，避免每次重新解析该语句及
+    // proxy_request_logs 上的 superseded_by 触发器
+    let mut stmt = conn
+        .prepare_cached(
+            "INSERT OR REPLACE INTO proxy_request_logs (
             request_id, provider_id, app_type, model, request_model, pricing_model,
             input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
             input_token_semantics,
@@ -2382,34 +2385,35 @@ pub(crate) fn insert_proxy_row(conn: &Connection, row: &ProxyUsageRow<'_>) -> Re
             latency_ms, first_token_ms, status_code, error_message, session_id,
             provider_type, is_streaming, cost_multiplier, created_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
-        params![
-            row.request_id,
-            row.provider_id,
-            row.app_type,
-            row.model,
-            row.request_model,
-            row.pricing_model,
-            row.input_tokens,
-            row.output_tokens,
-            row.cache_read_tokens,
-            row.cache_creation_tokens,
-            input_token_semantics_for_app_type(row.app_type),
-            row.costs.input,
-            row.costs.output,
-            row.costs.cache_read,
-            row.costs.cache_creation,
-            row.costs.total,
-            row.latency_ms as i64,
-            row.first_token_ms.map(|v| v as i64),
-            row.status_code as i64,
-            row.error_message,
-            row.session_id,
-            row.provider_type,
-            row.is_streaming as i64,
-            row.cost_multiplier,
-            row.created_at,
-        ],
-    )
+        )
+        .map_err(|e| AppError::Database(format!("记录请求日志失败: {e}")))?;
+    stmt.execute(params![
+        row.request_id,
+        row.provider_id,
+        row.app_type,
+        row.model,
+        row.request_model,
+        row.pricing_model,
+        row.input_tokens,
+        row.output_tokens,
+        row.cache_read_tokens,
+        row.cache_creation_tokens,
+        input_token_semantics_for_app_type(row.app_type),
+        row.costs.input,
+        row.costs.output,
+        row.costs.cache_read,
+        row.costs.cache_creation,
+        row.costs.total,
+        row.latency_ms as i64,
+        row.first_token_ms.map(|v| v as i64),
+        row.status_code as i64,
+        row.error_message,
+        row.session_id,
+        row.provider_type,
+        row.is_streaming as i64,
+        row.cost_multiplier,
+        row.created_at,
+    ])
     .map_err(|e| AppError::Database(format!("记录请求日志失败: {e}")))?;
     Ok(())
 }
