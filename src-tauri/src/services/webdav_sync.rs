@@ -56,6 +56,10 @@ struct RemoteSnapshot {
 /// Check WebDAV connectivity and ensure remote directory structure.
 pub async fn check_connection(settings: &WebDavSyncSettings) -> Result<(), AppError> {
     settings.validate()?;
+    crate::services::sync_protocol::validate_remote_layout(
+        &settings.remote_root,
+        &settings.profile,
+    )?;
     let auth = auth_for(settings);
     test_connection(&settings.base_url, &auth).await?;
     let dir_segs = remote_dir_segments(settings, RemoteLayout::Current);
@@ -74,7 +78,31 @@ pub async fn upload(
     settings: &mut WebDavSyncSettings,
     force: bool,
 ) -> Result<Value, AppError> {
+    upload_inner(db, settings, force, false).await
+}
+
+/// Auto-sync upload: like `upload(.., force = false)` but a no-op when the
+/// local content is unchanged since the last successful sync (SVC-52), so a
+/// stale change signal never republishes the same snapshot under this
+/// device's name.
+pub(crate) async fn upload_if_changed(
+    db: &crate::database::Database,
+    settings: &mut WebDavSyncSettings,
+) -> Result<Value, AppError> {
+    upload_inner(db, settings, false, true).await
+}
+
+async fn upload_inner(
+    db: &crate::database::Database,
+    settings: &mut WebDavSyncSettings,
+    force: bool,
+    skip_if_unchanged: bool,
+) -> Result<Value, AppError> {
     settings.validate()?;
+    crate::services::sync_protocol::validate_remote_layout(
+        &settings.remote_root,
+        &settings.profile,
+    )?;
     let insecure = warn_if_insecure("WebDAV", &settings.base_url);
     let auth = auth_for(settings);
     let dir_segs = remote_dir_segments(settings, RemoteLayout::Current);
@@ -86,6 +114,15 @@ pub async fn upload(
         .transpose()?;
     let snapshot = build_snapshot(db, encryption.as_ref())?;
     let local_fingerprint = snapshot.local_fingerprint.clone();
+    if skip_if_unchanged
+        && crate::services::sync_protocol::local_unchanged_since_sync(
+            &settings.status,
+            &local_fingerprint,
+        )
+    {
+        log::debug!("[WebDAV] Local content unchanged since last sync; skipping upload");
+        return Ok(serde_json::json!({ "status": "unchanged" }));
+    }
 
     // Precondition: the remote must still be what this device last synced.
     let manifest_url = remote_file_url(settings, RemoteLayout::Current, REMOTE_MANIFEST)?;
@@ -154,6 +191,10 @@ pub async fn download(
     force: bool,
 ) -> Result<Value, AppError> {
     settings.validate()?;
+    crate::services::sync_protocol::validate_remote_layout(
+        &settings.remote_root,
+        &settings.profile,
+    )?;
     let insecure = warn_if_insecure("WebDAV", &settings.base_url);
     ensure_local_unchanged(db, &settings.status, force)?;
     let auth = auth_for(settings);
@@ -215,6 +256,10 @@ pub async fn download(
 /// Fetch remote manifest info without downloading artifacts.
 pub async fn fetch_remote_info(settings: &WebDavSyncSettings) -> Result<Option<Value>, AppError> {
     settings.validate()?;
+    crate::services::sync_protocol::validate_remote_layout(
+        &settings.remote_root,
+        &settings.profile,
+    )?;
     let auth = auth_for(settings);
     let Some(snapshot) = find_remote_snapshot(settings, &auth).await? else {
         return Ok(None);

@@ -1,3 +1,4 @@
+pub(crate) mod auto_sync;
 pub mod balance;
 pub mod budget;
 pub mod catalog;
@@ -30,6 +31,7 @@ pub mod sql_helpers;
 pub mod stream_check;
 pub mod subscription;
 pub mod sync_protocol;
+pub(crate) mod sync_transport;
 pub mod usage_cache;
 pub mod usage_query;
 pub mod usage_stats;
