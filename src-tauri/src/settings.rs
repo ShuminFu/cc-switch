@@ -2030,6 +2030,7 @@ mod tests {
             }
         }
 
+        #[cfg(unix)]
         fn dir_entries(dir: &Path) -> Vec<String> {
             let mut names: Vec<String> = fs::read_dir(dir)
                 .unwrap()

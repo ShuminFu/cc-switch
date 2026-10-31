@@ -799,7 +799,7 @@ fn profile_switch_auto_disables_takeover_before_apply() {
 #[cfg(any(target_os = "macos", windows))]
 #[test]
 fn claude_desktop_profile_scope_is_independent() {
-    let test_env = TestEnv::new();
+    let _test_env = TestEnv::new();
 
     let state = create_test_state().expect("create test state");
 

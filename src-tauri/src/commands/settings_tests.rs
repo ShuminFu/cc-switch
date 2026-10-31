@@ -1,4 +1,6 @@
-use super::{merge_settings_for_save, validate_app_config_dir_override};
+use super::merge_settings_for_save;
+#[cfg(not(target_os = "windows"))]
+use super::validate_app_config_dir_override;
 use crate::settings::{
     AppSettings, CodexOfficialHistoryUnifyMigration, CodexProviderTemplateMigration,
     CodexThirdPartyHistoryProviderBucketMigration, LocalMigrations, S3SyncSettings,

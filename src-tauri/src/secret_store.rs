@@ -176,7 +176,7 @@ impl FileSecretStore {
         Self { path: path.into() }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub fn path(&self) -> &Path {
         &self.path
     }
