@@ -290,6 +290,8 @@ pub async fn get_common_config_snippet(
     app_type: String,
     state: tauri::State<'_, crate::store::AppState>,
 ) -> Result<Option<String>, String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     state
         .db
         .get_config_snippet(&app_type)
@@ -323,6 +325,8 @@ pub async fn set_common_config_snippet(
     snippet: String,
     handle: tauri::AppHandle,
 ) -> Result<(), String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     super::run_blocking_with_state(handle, move |state| {
         let is_cleared = snippet.trim().is_empty();
         let old_snippet = state

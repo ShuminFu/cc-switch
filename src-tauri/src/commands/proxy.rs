@@ -59,6 +59,8 @@ pub async fn set_proxy_takeover_for_app(
     app_type: String,
     enabled: bool,
 ) -> Result<(), String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     state
         .proxy_service
         .set_takeover_for_app(&app_type, enabled)
@@ -123,6 +125,8 @@ pub async fn get_proxy_config_for_app(
     state: tauri::State<'_, AppState>,
     app_type: String,
 ) -> Result<AppProxyConfig, String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     let db = &state.db;
     db.get_proxy_config_for_app(&app_type)
         .await
@@ -174,6 +178,8 @@ pub async fn get_default_cost_multiplier(
     state: tauri::State<'_, AppState>,
     app_type: String,
 ) -> Result<String, String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     get_default_cost_multiplier_internal(&state, &app_type)
         .await
         .map_err(|e| e.to_string())
@@ -205,6 +211,8 @@ pub async fn set_default_cost_multiplier(
     app_type: String,
     value: String,
 ) -> Result<(), String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     set_default_cost_multiplier_internal(&state, &app_type, &value)
         .await
         .map_err(|e| e.to_string())
@@ -233,6 +241,8 @@ pub async fn get_pricing_model_source(
     state: tauri::State<'_, AppState>,
     app_type: String,
 ) -> Result<String, String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     get_pricing_model_source_internal(&state, &app_type)
         .await
         .map_err(|e| e.to_string())
@@ -264,6 +274,8 @@ pub async fn set_pricing_model_source(
     app_type: String,
     value: String,
 ) -> Result<(), String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     set_pricing_model_source_internal(&state, &app_type, &value)
         .await
         .map_err(|e| e.to_string())
@@ -291,6 +303,8 @@ pub async fn switch_proxy_provider(
     app_type: String,
     provider_id: String,
 ) -> Result<(), String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     // Codex's built-in official provider can use the client's native OpenAI
     // login through takeover. Other official providers remain blocked.
     let provider = state
@@ -324,10 +338,53 @@ pub async fn get_provider_health(
     provider_id: String,
     app_type: String,
 ) -> Result<ProviderHealth, String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     let db = &state.db;
     db.get_provider_health(&provider_id, &app_type)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Health of several providers of one app in one IPC round trip (the
+/// failover queue renders one row per provider). Unknown ids get the default
+/// "healthy, never checked" entry, like `get_provider_health`.
+#[tauri::command]
+pub async fn get_providers_health(
+    state: tauri::State<'_, AppState>,
+    app_type: String,
+    provider_ids: Vec<String>,
+) -> Result<Vec<ProviderHealth>, String> {
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
+    let mut out = Vec::with_capacity(provider_ids.len());
+    for provider_id in provider_ids {
+        out.push(
+            state
+                .db
+                .get_provider_health(&provider_id, &app_type)
+                .await
+                .map_err(|e| e.to_string())?,
+        );
+    }
+    Ok(out)
+}
+
+/// Proxy status and takeover flags together, for pages that need both.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyOverview {
+    pub status: ProxyStatus,
+    pub takeover: ProxyTakeoverStatus,
+}
+
+/// `get_proxy_status` + `get_proxy_takeover_status` in one call.
+#[tauri::command]
+pub async fn get_proxy_overview(
+    state: tauri::State<'_, AppState>,
+) -> Result<ProxyOverview, String> {
+    let status = state.proxy_service.get_status().await?;
+    let takeover = state.proxy_service.get_takeover_status().await?;
+    Ok(ProxyOverview { status, takeover })
 }
 
 /// 重置熔断器
@@ -343,6 +400,8 @@ pub async fn reset_circuit_breaker(
     provider_id: String,
     app_type: String,
 ) -> Result<(), String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     // 1. 重置数据库健康状态
     let db = &state.db;
     db.update_provider_health(&provider_id, &app_type, true, None)
@@ -397,9 +456,10 @@ pub async fn reset_circuit_breaker(
 
                     // 获取供应商名称用于日志和事件
                     let provider_name = db
-                        .get_all_providers(&app_type)
+                        .get_provider_by_id(&provider_id, &app_type)
                         .ok()
-                        .and_then(|providers| providers.get(&provider_id).map(|p| p.name.clone()))
+                        .flatten()
+                        .map(|p| p.name)
                         .unwrap_or_else(|| provider_id.clone());
 
                     // 创建故障转移切换管理器并执行切换

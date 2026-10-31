@@ -258,6 +258,10 @@ pub async fn check_provider_limits(
     provider_id: String,
     app_type: String,
 ) -> Result<crate::services::usage_stats::ProviderLimitStatus, AppError> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = crate::app_config::AppType::from_str(&app_type)?
+        .as_str()
+        .to_string();
     run_blocking_with_state(handle, move |state| {
         state.db.check_provider_limits(&provider_id, &app_type)
     })

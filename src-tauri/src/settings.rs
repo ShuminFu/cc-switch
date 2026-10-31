@@ -744,12 +744,22 @@ impl AppSettings {
             }
             Err(err) => {
                 match backup_corrupt_settings_file(path) {
-                    Ok(backup) => log::error!(
-                        "设置文件已损坏，已备份为 {} 并使用默认设置。路径: {}, 错误: {}",
-                        backup.display(),
-                        path.display(),
-                        err
-                    ),
+                    Ok(backup) => {
+                        log::error!(
+                            "设置文件已损坏，已备份为 {} 并使用默认设置。路径: {}, 错误: {}",
+                            backup.display(),
+                            path.display(),
+                            err
+                        );
+                        crate::init_status::push_startup_warning(
+                            crate::init_status::StartupWarning {
+                                kind: "settings_corrupt".to_string(),
+                                app_type: None,
+                                path: Some(backup.display().to_string()),
+                                message: err.to_string(),
+                            },
+                        );
+                    }
                     Err(backup_err) => log::error!(
                         "设置文件已损坏且备份失败，将使用默认设置。路径: {}, 解析错误: {}, 备份错误: {}",
                         path.display(),

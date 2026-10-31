@@ -69,6 +69,7 @@ pub async fn bind_project_directory(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn unbind_project_directory(handle: AppHandle, path: String) -> Result<bool, String> {
     run_blocking_with_state(handle, move |state| {
         project_binding::unbind(&state.db, &path).map_err(|e| e.to_string())

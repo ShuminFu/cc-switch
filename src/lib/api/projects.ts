@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ProfileScope } from "@/lib/api/profiles";
+import { call } from "./invoke";
+import { commands } from "@/lib/bindings";
 
 /**
  * 目录 → 项目绑定（与后端 services/project_binding.rs 严格对应）
@@ -66,7 +68,7 @@ export const projectsApi = {
   },
 
   async unbind(path: string): Promise<boolean> {
-    return await invoke("unbind_project_directory", { path });
+    return await call(commands.unbindProjectDirectory(path));
   },
 
   /** 检测目录所属的项目绑定（不改动配置） */

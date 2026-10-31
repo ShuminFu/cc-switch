@@ -1,6 +1,6 @@
 import { http, HttpResponse } from "msw";
 import type { AppId } from "@/lib/api/types";
-import type { McpServer, Provider, Settings } from "@/types";
+import type { Provider, Settings } from "@/types";
 import {
   addProvider,
   deleteProvider,
@@ -19,10 +19,6 @@ import {
   setSettings,
   getAppConfigDirOverride,
   setAppConfigDirOverrideState,
-  getMcpConfig,
-  setMcpServerEnabled,
-  upsertMcpServer,
-  deleteMcpServer,
 } from "./state";
 
 const TAURI_ENDPOINT = "http://tauri.local";
@@ -257,45 +253,62 @@ export const handlers = [
     );
   }),
 
-  // MCP APIs
-  http.post(`${TAURI_ENDPOINT}/get_mcp_config`, async ({ request }) => {
-    const { app } = await withJson<{ app: AppId }>(request);
-    return success(getMcpConfig(app));
-  }),
+  http.post(`${TAURI_ENDPOINT}/restart_app`, () => success(true)),
 
-  http.post(`${TAURI_ENDPOINT}/set_mcp_enabled`, async ({ request }) => {
-    const { app, id, enabled } = await withJson<{
-      app: AppId;
-      id: string;
-      enabled: boolean;
-    }>(request);
-    setMcpServerEnabled(app, id, enabled);
+  http.post(`${TAURI_ENDPOINT}/patch_settings`, async ({ request }) => {
+    const { patch } = await withJson<{ patch: Partial<Settings> }>(request);
+    setSettings({ ...getSettings(), ...patch });
     return success(true);
   }),
 
-  http.post(
-    `${TAURI_ENDPOINT}/upsert_mcp_server_in_config`,
-    async ({ request }) => {
-      const { app, id, spec } = await withJson<{
-        app: AppId;
-        id: string;
-        spec: McpServer;
-      }>(request);
-      upsertMcpServer(app, id, spec);
-      return success(true);
-    },
-  ),
+  http.post(`${TAURI_ENDPOINT}/get_startup_warnings`, () => success([])),
 
-  http.post(
-    `${TAURI_ENDPOINT}/delete_mcp_server_in_config`,
-    async ({ request }) => {
-      const { app, id } = await withJson<{ app: AppId; id: string }>(request);
-      deleteMcpServer(app, id);
-      return success(true);
-    },
-  ),
+  http.post(`${TAURI_ENDPOINT}/get_providers_health`, async ({ request }) => {
+    const { providerIds } = await withJson<{ providerIds: string[] }>(request);
+    return success(
+      (providerIds ?? []).map((providerId) => ({
+        provider_id: providerId,
+        app_type: "claude",
+        is_healthy: true,
+        consecutive_failures: 0,
+        last_success_at: null,
+        last_failure_at: null,
+        last_error: null,
+        updated_at: new Date(0).toISOString(),
+      })),
+    );
+  }),
 
-  http.post(`${TAURI_ENDPOINT}/restart_app`, () => success(true)),
+  http.post(`${TAURI_ENDPOINT}/get_proxy_overview`, () =>
+    success({
+      status: {
+        running: false,
+        address: "127.0.0.1",
+        port: 0,
+        active_connections: 0,
+        total_requests: 0,
+        success_requests: 0,
+        failed_requests: 0,
+        success_rate: 0,
+        uptime_seconds: 0,
+        current_provider: null,
+        current_provider_id: null,
+        last_request_at: null,
+        last_error: null,
+        failover_count: 0,
+        active_targets: [],
+      },
+      takeover: {
+        claude: false,
+        codex: false,
+        gemini: false,
+        grokbuild: false,
+        opencode: false,
+        openclaw: false,
+        hermes: false,
+      },
+    }),
+  ),
 
   http.post(`${TAURI_ENDPOINT}/get_settings`, () => success(getSettings())),
 

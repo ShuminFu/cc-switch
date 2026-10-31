@@ -114,12 +114,12 @@ pub fn emit_profile_events(
             "autoFailoverEnabled": auto_failover_enabled,
             "providerId": provider_id,
         });
-        if let Err(e) = app.emit("provider-switched", event_data) {
+        if let Err(e) = app.emit(crate::events::PROVIDER_SWITCHED, event_data) {
             log::error!("发射 provider-switched 事件失败: {e}");
         }
     }
     if let Err(e) = app.emit(
-        "profile-applied",
+        crate::events::PROFILE_APPLIED,
         serde_json::json!({ "profileId": profile_id, "scope": scope.as_str() }),
     ) {
         log::error!("发射 profile-applied 事件失败: {e}");

@@ -78,19 +78,103 @@ pub async fn get_settings() -> Result<crate::settings::AppSettings, String> {
 /// 保存设置
 #[tauri::command]
 pub async fn save_settings(
+    app: AppHandle,
     state: tauri::State<'_, crate::store::AppState>,
     settings: crate::settings::AppSettings,
 ) -> Result<bool, String> {
+    apply_settings_update(&app, state.inner(), move |existing| {
+        Ok(merge_settings_for_save(settings, existing))
+    })
+}
+
+/// Overlay a partial settings object (camelCase keys, as `get_settings`
+/// returns them) onto `existing`. Unknown keys are rejected so a typo does
+/// not silently do nothing.
+fn apply_settings_patch(
+    existing: &crate::settings::AppSettings,
+    patch: &serde_json::Value,
+) -> Result<crate::settings::AppSettings, String> {
+    let serde_json::Value::Object(patch) = patch else {
+        return Err("settings patch must be a JSON object".to_string());
+    };
+    let mut current =
+        serde_json::to_value(existing).map_err(|e| format!("serialize settings: {e}"))?;
+    let Some(fields) = current.as_object_mut() else {
+        return Err("settings did not serialize to an object".to_string());
+    };
+    for (key, value) in patch {
+        fields.insert(key.clone(), value.clone());
+    }
+    let parsed: crate::settings::AppSettings =
+        serde_json::from_value(current).map_err(|e| format!("invalid settings patch: {e}"))?;
+    // serde ignores unknown keys; a non-null key that does not survive the
+    // round trip is not a settings field (or not a writable one).
+    let round_trip = serde_json::to_value(&parsed).map_err(|e| e.to_string())?;
+    for (key, value) in patch {
+        if !value.is_null() && round_trip.get(key).is_none() {
+            return Err(format!("unknown settings field: {key}"));
+        }
+    }
+    Ok(parsed)
+}
+
+/// Update only the given settings fields (PATCH semantics).
+///
+/// The frontend's `save_settings` sends the whole settings object, so a
+/// settings page holding a stale copy can roll back fields changed meanwhile.
+/// This command reads-merges-writes under the settings lock and touches only
+/// the keys in `patch`; backend-owned fields (current-provider pointers,
+/// migrations, sync secrets) are still protected by `merge_settings_for_save`.
+#[tauri::command]
+#[specta::specta]
+pub async fn patch_settings(
+    app: AppHandle,
+    state: tauri::State<'_, crate::store::AppState>,
+    patch: serde_json::Value,
+) -> Result<bool, String> {
+    apply_settings_update(&app, state.inner(), move |existing| {
+        let incoming = apply_settings_patch(existing, &patch)?;
+        Ok(merge_settings_for_save(incoming, existing))
+    })
+}
+
+/// Shared tail of `save_settings` / `patch_settings`: persist under the
+/// settings write lock, then apply the side effects of changed fields.
+fn apply_settings_update<F>(
+    app: &AppHandle,
+    state: &crate::store::AppState,
+    build: F,
+) -> Result<bool, String>
+where
+    F: FnOnce(&crate::settings::AppSettings) -> Result<crate::settings::AppSettings, String>,
+{
     // 读取-合并-写入在同一把写锁内完成，避免与并发的 set_current_provider /
     // 同步状态更新交错导致丢失更新。
     let mut unify_codex_enabled = false;
-    let existing = crate::settings::update_settings_with(|existing| {
-        let merged = merge_settings_for_save(settings, existing);
-        unify_codex_enabled = merged.unify_codex_session_history;
-        merged
+    let mut build_error: Option<String> = None;
+    let existing = crate::settings::update_settings_with(|existing| match build(existing) {
+        Ok(merged) => {
+            unify_codex_enabled = merged.unify_codex_session_history;
+            merged
+        }
+        Err(e) => {
+            // Keep the current settings untouched.
+            unify_codex_enabled = existing.unify_codex_session_history;
+            build_error = Some(e);
+            existing.clone()
+        }
     })
     .map_err(|e| e.to_string())?;
+    if let Some(e) = build_error {
+        return Err(e);
+    }
     let unify_codex_changed = unify_codex_enabled != existing.unify_codex_session_history;
+
+    // 托盘图标显隐随设置即时生效（CMD-15）
+    let saved = crate::settings::get_settings();
+    if saved.show_in_tray != existing.show_in_tray {
+        crate::main_window::apply_tray_visibility(app, &saved);
+    }
 
     // 统一会话开关变更时立即重写当前官方 Codex 供应商的 live 配置，
     // 不必等下一次切换才生效。
@@ -100,9 +184,7 @@ pub async fn save_settings(
         // 迁走而新会话仍写 openai 桶；关闭=会话还原而 live 仍写 custom）。
         // 报错让前端 saved=false 短路还原；回滚是整次保存的事务语义
         // （本开关的保存只携带开关相关字段）。
-        if let Err(err) =
-            crate::services::provider::reapply_current_codex_official_live(state.inner())
-        {
+        if let Err(err) = crate::services::provider::reapply_current_codex_official_live(state) {
             log::warn!("统一 Codex 会话历史开关变更后重写 live 配置失败，回滚设置: {err}");
             // 回滚同样走合并：恢复用户可编辑字段，但保留期间由后端写入的
             // 当前供应商指针与迁移标记。
@@ -247,7 +329,7 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
             move |chunk_len, content_len| {
                 downloaded = downloaded.saturating_add(chunk_len as u64);
                 let _ = progress_handle.emit(
-                    "update-download-progress",
+                    crate::events::UPDATE_DOWNLOAD_PROGRESS,
                     UpdateDownloadProgress {
                         downloaded,
                         total: content_len,
@@ -316,20 +398,65 @@ pub async fn check_app_update_available(app: AppHandle) -> Result<Option<String>
 }
 
 /// 获取 app_config_dir 覆盖配置 (从 Store)
+///
+/// Read-only: it no longer refreshes the process-wide override cache. The data
+/// directory is resolved once at startup; re-resolving it here flipped backups
+/// and skills to another directory mid-session while the open database stayed
+/// in the old one, and an unmounted override silently reverted to the default
+/// (CMD-43).
 #[tauri::command]
 #[specta::specta]
 pub async fn get_app_config_dir_override(app: AppHandle) -> Result<Option<String>, String> {
-    Ok(crate::app_store::refresh_app_config_dir_override(&app)
-        .map(|p| p.to_string_lossy().to_string()))
+    Ok(crate::app_store::read_stored_app_config_dir(&app))
+}
+
+/// Validate a data-directory override before it is stored (CMD-38): after `~`
+/// expansion it must be absolute, be (or become) a directory, and be writable.
+/// Returns the resolved path.
+fn validate_app_config_dir(raw: &str) -> Result<std::path::PathBuf, String> {
+    let path = crate::app_store::resolve_path(raw.trim());
+    if !path.is_absolute() {
+        return Err(format!(
+            "数据目录必须是绝对路径: {raw} / The data directory must be an absolute path"
+        ));
+    }
+    if path.exists() && !path.is_dir() {
+        return Err(format!(
+            "数据目录不是文件夹: {} / Not a directory",
+            path.display()
+        ));
+    }
+    std::fs::create_dir_all(&path).map_err(|e| {
+        format!(
+            "无法创建数据目录 {}: {e} / Cannot create the data directory",
+            path.display()
+        )
+    })?;
+    let probe = path.join(format!(".cc-switch-write-test-{}", std::process::id()));
+    std::fs::write(&probe, b"ok").map_err(|e| {
+        format!(
+            "数据目录不可写 {}: {e} / The data directory is not writable",
+            path.display()
+        )
+    })?;
+    let _ = std::fs::remove_file(&probe);
+    Ok(path)
 }
 
 /// 设置 app_config_dir 覆盖配置 (到 Store)
+///
+/// The new directory takes effect after a restart (the frontend offers it);
+/// the running process keeps using the directory its database was opened in.
 #[tauri::command]
 #[specta::specta]
 pub async fn set_app_config_dir_override(
     app: AppHandle,
     path: Option<String>,
 ) -> Result<bool, String> {
+    let path = path.filter(|p| !p.trim().is_empty());
+    if let Some(raw) = path.as_deref() {
+        validate_app_config_dir(raw)?;
+    }
     crate::app_store::set_app_config_dir_to_store(&app, path.as_deref())?;
     Ok(true)
 }
@@ -348,7 +475,74 @@ pub async fn set_auto_launch(enabled: bool) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::merge_settings_for_save;
+    use super::{apply_settings_patch, merge_settings_for_save, validate_app_config_dir};
+
+    #[test]
+    fn app_config_dir_override_rejects_relative_and_file_paths() {
+        assert!(validate_app_config_dir("relative/dir").is_err());
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("not-a-dir");
+        std::fs::write(&file, "x").unwrap();
+        assert!(validate_app_config_dir(file.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn app_config_dir_override_creates_missing_writable_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("nested").join("data");
+        let resolved = validate_app_config_dir(target.to_str().unwrap()).expect("valid");
+        assert_eq!(resolved, target);
+        assert!(target.is_dir());
+        // The write probe is cleaned up.
+        assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn settings_patch_changes_only_the_given_fields() {
+        let existing = AppSettings {
+            language: Some("ja".to_string()),
+            show_in_tray: true,
+            ..AppSettings::default()
+        };
+        let patched =
+            apply_settings_patch(&existing, &serde_json::json!({ "showInTray": false })).unwrap();
+        assert!(!patched.show_in_tray);
+        assert_eq!(patched.language.as_deref(), Some("ja"));
+
+        // Optional fields that are unset can still be patched.
+        let patched = apply_settings_patch(
+            &AppSettings::default(),
+            &serde_json::json!({ "language": "en" }),
+        )
+        .unwrap();
+        assert_eq!(patched.language.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn settings_patch_rejects_unknown_fields_and_non_objects() {
+        let existing = AppSettings::default();
+        assert!(apply_settings_patch(&existing, &serde_json::json!({ "noSuchField": 1 })).is_err());
+        assert!(apply_settings_patch(&existing, &serde_json::json!([1])).is_err());
+        assert!(
+            apply_settings_patch(&existing, &serde_json::json!({ "showInTray": "yes" })).is_err()
+        );
+    }
+
+    #[test]
+    fn settings_patch_cannot_move_current_provider_pointers() {
+        let existing = AppSettings {
+            current_provider_claude: Some("kept".to_string()),
+            ..AppSettings::default()
+        };
+        let incoming = apply_settings_patch(
+            &existing,
+            &serde_json::json!({ "currentProviderClaude": "evil" }),
+        )
+        .unwrap();
+        let merged = merge_settings_for_save(incoming, &existing);
+        assert_eq!(merged.current_provider_claude.as_deref(), Some("kept"));
+    }
     use crate::settings::{
         AppSettings, CodexOfficialHistoryUnifyMigration, CodexProviderTemplateMigration,
         CodexThirdPartyHistoryProviderBucketMigration, LocalMigrations, S3SyncSettings,

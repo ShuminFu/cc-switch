@@ -29,8 +29,7 @@ use super::{CliError, Output};
 use crate::database::Database;
 use crate::store::AppState;
 
-/// Apps whose takeover is restored on start (mirrors `PROXY_STARTUP_APP_TYPES`).
-const TAKEOVER_APPS: [&str; 4] = ["claude", "codex", "gemini", "grokbuild"];
+// Takeover is restored for `app_registry::takeover_app_types()`, like the GUI startup.
 
 /// Why the foreground loop ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,7 +129,7 @@ pub fn run_foreground(
 struct Started {
     address: String,
     port: u16,
-    takeover: Vec<&'static str>,
+    takeover: Vec<String>,
 }
 
 async fn start(state: &AppState, no_takeover: bool) -> Result<Started, CliError> {
@@ -149,7 +148,8 @@ async fn start(state: &AppState, no_takeover: bool) -> Result<Started, CliError>
 
     let mut takeover = Vec::new();
     if !no_takeover {
-        for app in TAKEOVER_APPS {
+        for app_type in crate::app_registry::takeover_app_types() {
+            let app = app_type.as_str();
             let enabled = state
                 .db
                 .get_proxy_config_for_app(app)
@@ -159,7 +159,7 @@ async fn start(state: &AppState, no_takeover: bool) -> Result<Started, CliError>
                 continue;
             }
             match proxy.set_takeover_for_app(app, true).await {
-                Ok(()) => takeover.push(app),
+                Ok(()) => takeover.push(app.to_string()),
                 Err(e) => {
                     log::error!("restoring takeover for {app} failed: {e}");
                     let _ = proxy.set_takeover_for_app(app, false).await;

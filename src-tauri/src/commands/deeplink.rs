@@ -374,6 +374,7 @@ fn import_bundle(
 
 /// Drop a pending link the user dismissed.
 #[tauri::command]
+#[specta::specta]
 pub fn discard_pending_deeplink(nonce: String) -> bool {
     take_pending(Some(&nonce)).is_ok()
 }
@@ -382,6 +383,7 @@ pub fn discard_pending_deeplink(nonce: String) -> bool {
 /// MCP server or prompt ("share as link"). Secrets are only included when
 /// `includeSecrets` is true.
 #[tauri::command]
+#[specta::specta]
 pub fn build_deeplink_share_link(
     state: State<AppState>,
     resource: String,

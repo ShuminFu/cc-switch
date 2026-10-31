@@ -1,7 +1,14 @@
 import { invoke, call, callJson } from "./invoke";
 import { commands } from "@/lib/bindings";
-import type { CodexUnifyHistoryRestoreResult } from "@/lib/bindings";
-export type { CodexUnifyHistoryRestoreResult } from "@/lib/bindings";
+import type {
+  CodexUnifyHistoryRestoreResult,
+  JsonValue,
+  StartupWarning,
+} from "@/lib/bindings";
+export type {
+  CodexUnifyHistoryRestoreResult,
+  StartupWarning,
+} from "@/lib/bindings";
 import type {
   Settings,
   WebDavSyncSettings,
@@ -57,6 +64,19 @@ export const settingsApi = {
 
   async save(settings: Settings): Promise<boolean> {
     return await invoke("save_settings", { settings });
+  },
+
+  /**
+   * Update only the given fields (camelCase keys, as `get` returns them).
+   * Unlike `save`, a stale settings copy cannot roll back other fields.
+   */
+  async patch(patch: Partial<Settings>): Promise<boolean> {
+    return await call(commands.patchSettings(patch as unknown as JsonValue));
+  },
+
+  /** Non-fatal startup problems to explain (corrupt settings, missing data dir, proxy restore). */
+  async getStartupWarnings(): Promise<StartupWarning[]> {
+    return await call(commands.getStartupWarnings());
   },
 
   /** 是否存在统一 Codex 会话历史的迁移备份（关闭弹窗据此显示"恢复备份"勾选） */
