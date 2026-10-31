@@ -13,7 +13,7 @@ Break up ProviderForm.tsx (2578 lines) and App.tsx, centralise query keys and in
 - [x] App-literal comparisons in src/ are 40 or fewer (ESLint error) — the rule `cc-switch/no-app-literal-comparison` is `error` in `eslint.config.js` and `pnpm lint` passes with 0 warnings; 27 hits remain suppressed in `eslint-suppressions.json`, and `tests/lint/eslintConfig.test.ts` pins `APP_LITERAL_BUDGET = 27` (equal to the baseline, at most 40). CCS-251 took it from 142 to 60 and CCS-252 from 60 to 27.
 - [x] Per-app/per-preset settingsConfig goldens unchanged — `CI=true npx vitest run tests/components/providerFormGoldens`: 8 files, 467 tests pass. The only snapshot edit since CCS-189 (`c080308`, CCS-199) changed two blocked-submit error strings to i18n keys, not any `settingsConfig` payload.
 - [x] Initial JS bundle at least 30% smaller than the v3.17 baseline — re-measured with `vite build` into a scratch dir: the only script in `index.html` is 964.33 kB (gzip 315.33 kB), vs 4,229.39 kB for v3.17.0 (CCS-198): −77.2 %.
-- [x] Zero inline defaultValue fallbacks; validation messages localized in all 4 locales — `tests/i18n` (incl. `noInlineFallbacks`, parity, typed keys) and `tests/lib/validationMessagesI18n.test.ts` pass (12 files / 95 tests together with `tests/lint`). The remaining `defaultValue` hits in `src/` are preset template defaults and Radix `Tabs`/`Accordion` props, not `t()` fallbacks. CCS-193 is Partial only because of Chinese matchers for backend/usage-script error text (`src/utils/errorUtils.ts`, `src/lib/query/queries.ts:161,163`). Those are not frontend validation messages.
+- [x] Zero inline defaultValue fallbacks; validation messages localized in all 4 locales — `tests/i18n` (incl. `noInlineFallbacks`, parity, typed keys) and `tests/lib/validationMessagesI18n.test.ts` pass (12 files / 95 tests together with `tests/lint`). The remaining `defaultValue` hits in `src/` are preset template defaults and Radix `Tabs`/`Accordion` props, not `t()` fallbacks. CCS-193 is Done: the last Chinese matchers for backend/usage-script error text were removed in CCS-253.
 - [ ] tauri-driver smoke green on the Linux AppImage and blocking release — **not met (needs CI)**: the wiring is in place. `ci.yml:284` runs the smoke in `tauri-build-smoke`, `release.yml:355` runs it on the AppImage before the upload, and `tests/ci/e2eSmoke.test.ts` passes (3 tests). Locally it passed on the debug binary and the AppImage (CCS-201). No green GitHub Actions run has been observed, and it is not yet a required check.
 
 ## Child tickets
@@ -29,7 +29,7 @@ Audited 2026-10-30 against branch `claude/funny-carson-9c7j3e` (HEAD `c0c770a`).
 | CCS-190 | f-providerform-shell | Done |
 | CCS-191 | f-providerform-core-apps | Done |
 | CCS-192 | f-providerform-additive-apps | Done |
-| CCS-193 | f-i18n-validation-messages | Partial |
+| CCS-193 | f-i18n-validation-messages | Done |
 | CCS-194 | f-query-keys | Done |
 | CCS-195 | f-mutation-appid-variables | Done |
 | CCS-196 | f-mutation-live-ids | Done |
@@ -64,7 +64,7 @@ Audited 2026-10-30 against branch `claude/funny-carson-9c7j3e` (HEAD `c0c770a`).
 1. **`App.tsx` is 373 lines; the limit is 300.** CCS-198, 207, 208 and 211 added code after the CCS-197 split. Most of the growth is the CCS-208 command palette wiring (about 60 lines). To fix it, move the palette and the switching-state wiring out of `App.tsx` into `src/components/app-shell/` hooks or components. This needs a follow-up refactor ticket.
 2. **App-literal comparisons: 142 suppressed; the target is 40 or fewer.** The rule is an ESLint `error` and the budget is ratcheted, but about 100 more literal comparisons still need to become registry capability lookups (`src/entities/app/registry.ts`). After each batch, run `pnpm lint:prune` and lower `APP_LITERAL_BUDGET`. No child ticket owns this reduction yet.
 3. **tauri-driver smoke in CI (CCS-201).** This needs a green GitHub Actions run of `tauri-build-smoke` and of the Linux release legs (`ubuntu-22.04`, `ubuntu-22.04-arm`). It can't be verified from this environment. After that, a maintainer has to add the job as a required check in GitHub branch protection.
-4. **CCS-193 (outside the epic criteria).** The Chinese matchers for backend and usage-script error text stay until the backend returns structured error codes (`IpcError`).
+4. **CCS-193 (outside the epic criteria).** Resolved by CCS-253: the remaining Chinese usage-script matchers were dead and have been removed; CCS-193 is Done.
 
 ### Remaining after triage
 

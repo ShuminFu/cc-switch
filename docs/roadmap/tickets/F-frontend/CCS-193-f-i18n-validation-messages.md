@@ -1,6 +1,6 @@
 # CCS-193: [i18n] Localize zod and editor validation messages
 
-**Status:** Partial · **Kind:** bug · **Labels:** `bug`, `phase:F`, `p3-low`, `area:i18n`
+**Status:** Done · **Kind:** bug · **Labels:** `bug`, `phase:F`, `p3-low`, `area:i18n`
 
 > **Ticket key:** `f-i18n-validation-messages` · **Phase:** F · **Priority:** p3-low · **Effort:** M · **Depends on:** `f-providerform-shell`, `p0-ci-i18n-parity`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -16,9 +16,9 @@ Verified finding frontend-hardcoded-strings, partially real. Provider Zod messag
 - Add the keys to all 4 locales and delete mcp.ts.
 
 ## Acceptance criteria / verification
-- [ ] Vitest with en: createProviderSchema(t).safeParse({name:'x',settingsConfig:'{bad'}) contains no CJK (/[一-鿿]/)
-- [ ] `grep -rnP '[\x{4e00}-\x{9fff}]' src/lib src/utils src/components/providers/forms/hooks --include=*.ts` matches only comments
-- [ ] `pnpm typecheck` and `pnpm test:unit`
+- [x] Vitest with en: createProviderSchema(t).safeParse({name:'x',settingsConfig:'{bad'}) contains no CJK (/[一-鿿]/)
+- [x] `grep -rnP '[\x{4e00}-\x{9fff}]' src/lib src/utils src/components/providers/forms/hooks --include=*.ts` matches only comments
+- [x] `pnpm typecheck` and `pnpm test:unit`
 
 ## Dependencies
 f-providerform-shell, p0-ci-i18n-parity
@@ -61,3 +61,10 @@ f-providerform-shell, p0-ci-i18n-parity
 
 - Blocked: nothing; every remaining item is codable.
 - Follow-up [CCS-253](../F-frontend/CCS-253-f-i18n-usage-cjk-matchers.md): Remove the dead Chinese usage-script matchers from queries.ts and close CCS-193.
+
+### Review (CCS-253, blocker cleared)
+
+- The backend error codes landed (CCS-114/115) and the Chinese matchers in `translateMcpBackendError` are gone. CCS-253 (`d8bfde7`) removed the last non-comment CJK in the scanned areas: the dead zh usage-script matchers in `isTransientUsageError` (`src/lib/query/queries.ts`). Usage-script transport failures reach the frontend as rejections keyed by i18nKey (`usage_script.request_failed` / `usage_script.read_response_failed`), not as `success:false` text.
+- Re-verified criterion 1: `pnpm vitest run tests/lib/validationMessagesI18n.test.ts` passes (7 tests, now including a source guard that fails on any CJK outside comments in `src/lib`, `src/utils` and `src/components/providers/forms/hooks`).
+- Re-verified criterion 3 (grep): `LC_ALL=C.UTF-8 grep -rnP '[\x{4e00}-\x{9fff}]' src/lib src/utils src/components/providers/forms/hooks --include=*.ts` matches only comments.
+- `pnpm typecheck` pass; `pnpm test:unit` 179 files / 1787 tests pass. Status set to Done.
