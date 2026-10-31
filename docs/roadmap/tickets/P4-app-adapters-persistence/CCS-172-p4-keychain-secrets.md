@@ -122,4 +122,9 @@ and Linux.
 - Blocked: Manual check on macOS (Keychain Access entries and prompts, downgrade path). Needs a Mac and a human tester.
 - Blocked: Manual check on Windows (Credential Manager, owner-only ACL on the fallback, PowerShell downgrade). Needs a Windows machine and a human tester.
 - Blocked: KWallet path and real interactive unlock prompts on a Linux desktop. Needs an interactive desktop session; CCS-240 covers the Secret Service API.
-- Follow-up [CCS-240](../P4-app-adapters-persistence/CCS-240-p4-secrets-linux-secret-service-check.md): Exercise KeyringSecretStore against a headless gnome-keyring and the no-D-Bus fallback.
+- Done in c655b24: follow-up [CCS-240](../P4-app-adapters-persistence/CCS-240-p4-secrets-linux-secret-service-check.md): Exercise KeyringSecretStore against a headless gnome-keyring and the no-D-Bus fallback.
+  `scripts/check-linux-secret-service.sh` passes on Linux (gnome-keyring 46.1 under
+  `dbus-run-session`): the Secret Service round trip, `SecretPolicy` externalize/hydrate/forget,
+  the `plaintext` downgrade with `release()`, cleanup via `secret-tool search`, and the no-D-Bus
+  fallback to a 0600 `secrets.json`. This covers checklist steps 2-5 for Linux/GNOME Keyring at the
+  API level; the macOS, Windows and KWallet items above remain.

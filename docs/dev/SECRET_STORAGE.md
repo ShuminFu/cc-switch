@@ -113,3 +113,23 @@ Run this on each of macOS, Windows and Linux (desktop, plus headless Linux for t
 4. Headless Linux (no D-Bus session): secrets land in `~/.cc-switch/secrets.json` (mode 0600).
 5. Run the downgrade path above. The plaintext values reappear in the JSON files and the
    keychain entries are removed.
+
+### Linux Secret Service (automated)
+
+`scripts/check-linux-secret-service.sh` covers steps 2-5 at the API level for the
+freedesktop Secret Service (GNOME Keyring). It needs `dbus`, `gnome-keyring` and
+`libsecret-tools` (`secret-tool`). It starts a private D-Bus session with an unlocked
+gnome-keyring in a temporary data directory (the login keyring is not touched) and runs
+the ignored `secret_store::keyring_live` tests under the service `cc-switch-test-<pid>`:
+
+- probe, set/get/delete round trip;
+- `SecretPolicy` externalize/hydrate of the WebDAV password and a Copilot token, `forget()`;
+- `plaintext` mode: the value is written back inline and `release()` deletes the entry;
+- an entry deleted outside the app (Seahorse, `secret-tool clear`) still reads from the
+  process cache until restart; a fresh process sees it gone.
+
+It then checks that `secret-tool search --all service cc-switch-test-<pid>` finds nothing,
+and runs `probe_fails_without_dbus` with no session bus (`DBUS_SESSION_BUS_ADDRESS` unset,
+`XDG_RUNTIME_DIR` pointed at an empty directory): the probe fails and the secret lands in a
+0600 `secrets.json`. Last run: passed on Ubuntu 24.04 with gnome-keyring 46.1 (CCS-240).
+KWallet and interactive unlock prompts are not covered.

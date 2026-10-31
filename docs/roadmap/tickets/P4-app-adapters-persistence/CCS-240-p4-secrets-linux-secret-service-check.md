@@ -1,6 +1,6 @@
 # CCS-240: [secrets] Exercise KeyringSecretStore against a headless gnome-keyring and the no-D-Bus fallback
 
-**Status:** Open · **Kind:** chore · **Labels:** `chore`, `phase:P4`, `p3-low`, `area:secrets`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P4`, `p3-low`, `area:secrets`
 
 > **Ticket key:** `p4-secrets-linux-secret-service-check` · **Phase:** P4 · **Priority:** p3-low · **Effort:** M
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -19,8 +19,56 @@ Every test uses the file store because `keychain_allowed()` returns false under 
 - Record the result in CCS-172 and in the docs/dev/SECRET_STORAGE.md checklist as the Linux/GNOME Keyring check.
 
 ## Acceptance criteria / verification
-- [ ] `scripts/check-linux-secret-service.sh` exits 0 and all ignored tests pass.
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml --lib secret_store` (non-ignored) and clippy -D warnings still pass.
+- [x] `scripts/check-linux-secret-service.sh` exits 0 and all ignored tests pass.
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml --lib secret_store` (non-ignored) and clippy -D warnings still pass.
 
 ## Dependencies
 None.
+
+## Implementation notes
+
+**Status: Done.** Commit c655b24 (code and script); this ticket file, CCS-172 and
+`docs/dev/SECRET_STORAGE.md` are updated in the follow-up docs commit.
+
+- `src-tauri/src/secret_store.rs`
+  - Backend selection moved from `policy_for_dir()` into `select_policy(dir, mode, keychain)`;
+    the probe-and-log part of `keychain()` is now `probe_keychain(service)`. Behaviour is the
+    same; the split lets tests drive the real fallback without the `cfg(test)` guard in
+    `keychain_allowed()`.
+  - New non-ignored test `tests::select_policy_falls_back_to_file_when_keychain_is_unavailable`
+    (Auto/Plaintext fall back to the file store, a present keychain is chosen, `file` mode never
+    probes).
+  - New `keyring_live` module (`cfg(all(test, target_os = "linux"))`, all `#[ignore]`), using
+    `KeyringSecretStore::new` with service `CC_SWITCH_KEYRING_TEST_SERVICE` or
+    `cc-switch-test-<pid>`:
+    `probe_and_round_trip`, `policy_externalizes_hydrates_and_forgets` (`WEBDAV_PASSWORD_KEY`,
+    `copilot_token_key("acct")`, `forget()`), `plaintext_mode_writes_back_and_releases`,
+    `cache_masks_an_out_of_band_delete` (a cached instance keeps returning the old value after
+    another instance deletes the entry; a fresh instance sees `None`; deleting again succeeds),
+    and `probe_fails_without_dbus` (probe is Err, `select_policy` with the real probe yields the
+    file store, `secrets.json` is 0600 after externalize).
+- `scripts/check-linux-secret-service.sh`: builds the test binary, then under `dbus-run-session`
+  unlocks a gnome-keyring whose files live in a temp `XDG_DATA_HOME`, runs the ignored tests
+  (`--test-threads=1`, skipping the no-D-Bus test), and fails if
+  `secret-tool search --all service cc-switch-test-<pid>` finds entries. It then runs
+  `probe_fails_without_dbus` with `DBUS_SESSION_BUS_ADDRESS` unset and `XDG_RUNTIME_DIR` set to an
+  empty directory. zbus falls back to `$XDG_RUNTIME_DIR/bus` (or `/run/user/<uid>/bus`), so unsetting
+  the address alone is not enough on a desktop. `secret-tool search` does not take globs, so the
+  script picks the service name and passes it to the tests.
+- `docs/dev/SECRET_STORAGE.md`: added a "Linux Secret Service (automated)" section to the
+  checklist. CCS-172: recorded the Linux/GNOME Keyring result.
+
+Not done: the optional run of the built app binary under `dbus-run-session` + `xvfb-run` with a
+seeded HOME. The API-level tests cover the same store and policy paths. KWallet and interactive
+unlock prompts are still not covered (see CCS-172).
+
+### Verification
+
+- `apt-get install gnome-keyring libsecret-tools` (gnome-keyring 46.1-2ubuntu0.2, Ubuntu 24.04).
+- `scripts/check-linux-secret-service.sh`: exit 0. Secret Service run: 4 passed; "no entries left
+  under service cc-switch-test-23953". No D-Bus run: `probe_fails_without_dbus` 1 passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib secret_store`: 20 passed, 0 failed,
+  5 ignored.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 2861 passed, 0 failed, 10 ignored.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` and the same with `--tests`:
+  clean. `cargo fmt`: no changes. `bash -n` on the script: OK. shellcheck is not installed.
