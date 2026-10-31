@@ -44,6 +44,22 @@ pub fn builder() -> Builder<tauri::Wry> {
             super::set_budget_enforcement,
             super::get_claude_code_config_path,
             super::get_config_dir,
+            super::get_app_config_dirs,
+            super::get_mcp_sync_skips,
+            super::get_import_candidates,
+            super::preview_live_write,
+            super::validate_provider_settings,
+            super::get_codex_history_backup_usage,
+            super::purge_codex_history_backups,
+            super::get_claude_desktop_proxy_dependency,
+            super::get_claude_desktop_status,
+            super::get_hermes_memory,
+            super::set_hermes_memory,
+            super::get_hermes_memory_limits,
+            super::set_hermes_memory_enabled,
+            super::get_claude_mcp_status,
+            super::upsert_prompt,
+            super::open_backups_folder,
             super::open_config_folder,
             super::pick_directory,
             super::get_app_config_path,
@@ -189,6 +205,11 @@ pub fn builder() -> Builder<tauri::Wry> {
             super::write_workspace_file,
             super::open_workspace_directory,
         ])
+        // The provider model is still passed through untyped commands; export
+        // it so the frontend can import `Provider` / `ProviderMeta` instead of
+        // hand-mirroring them (CFG-11).
+        .typ::<crate::provider::Provider>()
+        .typ::<crate::provider::UsageResult>()
 }
 
 pub fn exporter() -> Typescript {

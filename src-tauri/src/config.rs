@@ -37,7 +37,7 @@ pub fn get_home_dir() -> PathBuf {
 }
 
 /// Where a tool's config directory was resolved from (CFG-12).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "var")]
 pub enum ConfigDirSource {
     /// The directory configured in cc-switch settings.
@@ -166,6 +166,47 @@ pub fn resolve_tool_dir(
         return (dir, ConfigDirSource::Env(var));
     }
     (default(), ConfigDirSource::Default)
+}
+
+/// Every tool's resolved config directory and where it came from (CFG-12).
+pub fn resolve_app_config_dir(app: &crate::app_config::AppType) -> (PathBuf, ConfigDirSource) {
+    use crate::app_config::AppType;
+    let with_override = |override_dir: Option<PathBuf>, dir: PathBuf| {
+        let source = if override_dir.is_some() {
+            ConfigDirSource::Override
+        } else {
+            ConfigDirSource::Default
+        };
+        (dir, source)
+    };
+    match app {
+        AppType::Claude => resolve_claude_config_dir(),
+        AppType::ClaudeDesktop => (
+            crate::claude_desktop_config::get_config_library_path().unwrap_or_default(),
+            ConfigDirSource::Default,
+        ),
+        AppType::Codex => crate::codex_config::resolve_codex_config_dir(),
+        AppType::Gemini => crate::gemini_config::resolve_gemini_dir(),
+        AppType::OpenCode => crate::opencode_config::resolve_opencode_dir(),
+        AppType::GrokBuild => with_override(
+            crate::settings::get_grok_override_dir(),
+            crate::grok_config::get_grok_config_dir(),
+        ),
+        AppType::OpenClaw => with_override(
+            crate::settings::get_openclaw_override_dir(),
+            crate::openclaw_config::get_openclaw_dir(),
+        ),
+        AppType::Hermes => {
+            let dir = crate::hermes_config::get_hermes_dir();
+            if crate::settings::get_hermes_override_dir().is_some() {
+                (dir, ConfigDirSource::Override)
+            } else if tool_env_dir("HERMES_HOME").is_some_and(|env| env == dir) {
+                (dir, ConfigDirSource::Env("HERMES_HOME"))
+            } else {
+                (dir, ConfigDirSource::Default)
+            }
+        }
+    }
 }
 
 /// Claude Code config directory and where it came from.
@@ -439,7 +480,18 @@ fn write_json_file_with_mode<T: Serialize>(
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
 
-    let json = if path.exists() {
+    let json = render_json_file(path, data)?;
+    if mode == NewFileMode::Secret {
+        crate::adapters::live_file::ensure_no_vault_placeholder(path, &json)?;
+    }
+    atomic_write_with_mode(path, json.as_bytes(), mode)
+}
+
+/// The exact text [`write_json_file`] would write to `path` for `data`:
+/// an existing file keeps its style and the caller's key order, a new file
+/// gets sorted keys. Used by write previews (CFG-22).
+pub fn render_json_file<T: Serialize>(path: &Path, data: &T) -> Result<String, AppError> {
+    Ok(if path.exists() {
         // 已有文件：保留调用方给出的键顺序（通常就是从该文件读入的顺序）与文件风格
         let style = crate::adapters::live_file::JsonStyle::of_file(path);
         crate::adapters::live_file::to_json_string(data, &style)?
@@ -451,12 +503,7 @@ fn write_json_file_with_mode<T: Serialize>(
             &sort_json_keys(&value),
             &crate::adapters::live_file::JsonStyle::default(),
         )?
-    };
-
-    if mode == NewFileMode::Secret {
-        crate::adapters::live_file::ensure_no_vault_placeholder(path, &json)?;
-    }
-    atomic_write_with_mode(path, json.as_bytes(), mode)
+    })
 }
 
 /// 原子写入文本文件（用于 TOML/纯文本）

@@ -109,7 +109,7 @@ export const providersApi = {
   },
 
   async getClaudeDesktopStatus(): Promise<ClaudeDesktopStatus> {
-    return await invoke("get_claude_desktop_status");
+    return await call(commands.getClaudeDesktopStatus());
   },
 
   async getClaudeDesktopDefaultRoutes(): Promise<ClaudeDesktopDefaultRoute[]> {

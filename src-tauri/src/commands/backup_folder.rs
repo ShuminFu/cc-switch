@@ -11,6 +11,7 @@ fn backups_dir() -> std::path::PathBuf {
 
 /// Open the directory that holds the database backups in the file manager.
 #[tauri::command]
+#[specta::specta]
 pub async fn open_backups_folder(handle: AppHandle) -> Result<bool, String> {
     let dir = backups_dir();
     if !dir.exists() {

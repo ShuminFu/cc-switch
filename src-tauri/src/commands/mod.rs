@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+mod adapters;
 mod auth;
 mod backup_folder;
 mod balance;
@@ -45,6 +46,7 @@ mod usage_export;
 mod webdav_sync;
 mod workspace;
 
+pub use adapters::*;
 pub use auth::*;
 pub use backup_folder::*;
 pub use balance::*;

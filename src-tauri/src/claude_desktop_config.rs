@@ -91,7 +91,7 @@ struct FileSnapshot {
     content: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeDesktopStatus {
     pub supported: bool,
@@ -926,6 +926,35 @@ pub fn proxy_gateway_base_url_from_db(db: &Database) -> Result<String, AppError>
     ))
 }
 
+/// Whether `profile`'s inference gateway is the local proxy route at
+/// `proxy_base_url` (same origin and `/claude-desktop` prefix).
+fn profile_points_at_proxy(profile: &Value, proxy_base_url: &str) -> bool {
+    profile
+        .get("inferenceGatewayBaseUrl")
+        .and_then(Value::as_str)
+        .is_some_and(|url| {
+            url.trim_end_matches('/')
+                .starts_with(proxy_base_url.trim_end_matches('/'))
+        })
+}
+
+/// Whether Claude Desktop's live 3P profile currently sends requests to the
+/// local proxy, so stopping the proxy would break it (PROXY-30). Reads the
+/// profile file and the proxy config; blocking.
+pub fn live_profile_uses_proxy(db: &Database) -> bool {
+    let Ok(paths) = current_platform_paths() else {
+        return false;
+    };
+    if !paths.profile_path.exists() {
+        return false;
+    }
+    let Ok(proxy_base_url) = proxy_gateway_base_url_from_db(db) else {
+        return false;
+    };
+    let profile = read_json_or_empty(&paths.profile_path).unwrap_or_else(|_| json!({}));
+    profile_points_at_proxy(&profile, &proxy_base_url)
+}
+
 fn apply_provider_to_paths(
     db: &Database,
     provider: &Provider,
@@ -1415,6 +1444,24 @@ fn unsupported_platform_error() -> AppError {
         "未找到 Claude Desktop 配置目录（$XDG_CONFIG_HOME/Claude）。Linux 上需先安装并运行一次 Claude Desktop。",
         "No Claude Desktop config directory was found ($XDG_CONFIG_HOME/Claude). On Linux, install and run Claude Desktop once first.",
     )
+}
+
+#[cfg(test)]
+mod proxy_dependency_tests {
+    use super::*;
+
+    #[test]
+    fn profile_points_at_proxy_matches_origin_and_prefix() {
+        let base = "http://127.0.0.1:15721/claude-desktop";
+        let on = json!({ "inferenceGatewayBaseUrl": "http://127.0.0.1:15721/claude-desktop/" });
+        let other_port =
+            json!({ "inferenceGatewayBaseUrl": "http://127.0.0.1:9999/claude-desktop" });
+        let direct = json!({ "inferenceGatewayBaseUrl": "https://api.example.com" });
+        assert!(profile_points_at_proxy(&on, base));
+        assert!(!profile_points_at_proxy(&other_port, base));
+        assert!(!profile_points_at_proxy(&direct, base));
+        assert!(!profile_points_at_proxy(&json!({}), base));
+    }
 }
 
 #[cfg(test)]

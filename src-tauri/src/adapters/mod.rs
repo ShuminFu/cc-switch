@@ -27,6 +27,8 @@
 
 pub mod json5_doc;
 pub mod live_file;
+pub mod plan;
+pub mod validate;
 
 mod claude;
 mod claude_desktop;
@@ -84,7 +86,7 @@ pub struct AdapterCapabilities {
 }
 
 /// One provider found in an app's live config that can be imported (CFG-23).
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportCandidate {
     /// Stable id derived from the live config (e.g. the Codex
@@ -161,6 +163,14 @@ pub trait AppAdapter: Send + Sync {
     /// Write `provider` (with common config already applied) to the live files.
     fn write_live(&self, provider: &Provider) -> Result<(), AppError>;
 
+    /// The files `write_live(provider)` would write, with their exact new
+    /// content, without touching disk (CFG-22). `None` when the adapter
+    /// cannot preview yet. Adapters that implement it write the planned
+    /// bytes in `write_live`, so the preview equals the write.
+    fn plan_live(&self, _provider: &Provider) -> Result<Option<Vec<plan::PlannedWrite>>, AppError> {
+        Ok(None)
+    }
+
     /// Turn a live snapshot back into what is stored for `provider`: strip
     /// projections cc-switch injected (MCP servers, context defaults, …) and
     /// re-attach DB-only fields. The default keeps the snapshot as-is.
@@ -235,7 +245,7 @@ pub fn mcp_adapters() -> impl Iterator<Item = &'static dyn AppAdapter> {
 }
 
 /// An app whose MCP sync was skipped because its config directory is missing.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct McpSyncSkip {
     pub app: String,

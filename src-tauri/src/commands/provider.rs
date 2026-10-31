@@ -173,6 +173,7 @@ pub async fn import_default_config(handle: AppHandle, app: String) -> Result<boo
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_claude_desktop_status(
     state: State<'_, AppState>,
 ) -> Result<crate::claude_desktop_config::ClaudeDesktopStatus, String> {

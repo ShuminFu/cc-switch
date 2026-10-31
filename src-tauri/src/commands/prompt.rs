@@ -18,6 +18,7 @@ pub async fn get_prompts(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn upsert_prompt(
     app: String,
     id: String,

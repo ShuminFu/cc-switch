@@ -64,7 +64,7 @@ fn openclaw_write_lock() -> &'static Mutex<()> {
 // ============================================================================
 
 /// OpenClaw 健康检查警告
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenClawHealthWarning {
     pub code: String,

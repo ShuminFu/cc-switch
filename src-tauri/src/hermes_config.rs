@@ -113,7 +113,7 @@ fn hermes_write_lock() -> &'static Mutex<()> {
 // ============================================================================
 
 /// Hermes 写入结果
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HermesWriteOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1363,7 +1363,7 @@ pub(crate) fn json_to_yaml(json: &serde_json::Value) -> Result<serde_yaml::Value
 /// Which of Hermes' two memory files to operate on. Tauri deserializes this
 /// directly from the `"memory"` / `"user"` strings the frontend sends, so an
 /// unknown value is rejected at the IPC boundary instead of deep in the stack.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum MemoryKind {
     Memory,
@@ -1405,7 +1405,7 @@ pub fn write_memory(kind: MemoryKind, content: &str) -> Result<(), AppError> {
 /// Character budget + enable flags for the two memory blobs, as configured
 /// in Hermes' `config.yaml`. Defaults mirror `~/.hermes`'s own defaults so
 /// callers get a usable budget bar even before the user edits config.yaml.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HermesMemoryLimits {
     pub memory: usize,
