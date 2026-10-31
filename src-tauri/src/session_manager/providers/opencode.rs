@@ -316,6 +316,17 @@ pub fn load_messages_sqlite(source: &str) -> Result<Vec<SessionMessage>, String>
     Ok(messages)
 }
 
+/// Message ids are OpenCode-generated (`msg_<base62>`); accept only a single
+/// plain path component of `[A-Za-z0-9_-]` so a crafted message file cannot
+/// redirect part-directory deletion (`..`, `/`, `\\`, absolute paths).
+fn is_safe_message_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 pub fn delete_session(storage: &Path, path: &Path, session_id: &str) -> Result<bool, String> {
     if path.file_name().and_then(|name| name.to_str()) != Some(session_id) {
         return Err(format!(
@@ -338,12 +349,25 @@ pub fn delete_session(storage: &Path, path: &Path, session_id: &str) -> Result<b
             Err(_) => continue,
         };
         if let Some(message_id) = value.get("id").and_then(Value::as_str) {
-            message_ids.push(message_id.to_string());
+            if is_safe_message_id(message_id) {
+                message_ids.push(message_id.to_string());
+            } else {
+                // SEC-32: the id comes from file contents; never let it steer
+                // remove_dir_all outside `<storage>/part`.
+                log::warn!(
+                    "[OpenCode] ignoring unsafe message id {message_id:?} in {}",
+                    message_path.display()
+                );
+            }
         }
     }
 
+    let part_root = storage.join("part");
     for message_id in &message_ids {
-        let part_dir = storage.join("part").join(message_id);
+        let part_dir = part_root.join(message_id);
+        if part_dir.parent() != Some(part_root.as_path()) {
+            continue;
+        }
         remove_dir_all_if_exists(&part_dir).map_err(|e| {
             format!(
                 "Failed to delete OpenCode part directory {}: {e}",
@@ -682,6 +706,56 @@ mod tests {
             ",
         )
         .expect("create sqlite schema");
+    }
+
+    #[test]
+    fn delete_session_ignores_traversal_message_ids() {
+        let temp = tempdir().expect("tempdir");
+        let storage = temp.path().join("storage");
+        let session_id = "ses_evil";
+        let message_dir = storage.join("message").join(session_id);
+        std::fs::create_dir_all(&message_dir).unwrap();
+        std::fs::create_dir_all(storage.join("part")).unwrap();
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep.txt"), "x").unwrap();
+        let abs_target = temp.path().join("abs_target");
+        std::fs::create_dir_all(&abs_target).unwrap();
+
+        for (i, id) in [
+            "../../outside".to_string(),
+            "../outside".to_string(),
+            abs_target.to_string_lossy().to_string(),
+            "a/b".to_string(),
+            "a\\b".to_string(),
+            "..".to_string(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            std::fs::write(
+                message_dir.join(format!("msg_{i}.json")),
+                serde_json::json!({ "id": id }).to_string(),
+            )
+            .unwrap();
+        }
+
+        delete_session(&storage, &message_dir, session_id).expect("delete session");
+
+        assert!(!message_dir.exists());
+        assert!(outside.join("keep.txt").exists());
+        assert!(abs_target.exists());
+        assert!(storage.join("part").exists());
+    }
+
+    #[test]
+    fn message_id_validation() {
+        assert!(is_safe_message_id("msg_01HXYZabc"));
+        assert!(!is_safe_message_id(""));
+        assert!(!is_safe_message_id(".."));
+        assert!(!is_safe_message_id("../x"));
+        assert!(!is_safe_message_id("/home/user"));
+        assert!(!is_safe_message_id("a\\b"));
     }
 
     #[test]
