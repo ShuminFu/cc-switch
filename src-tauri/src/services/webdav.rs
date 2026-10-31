@@ -230,23 +230,6 @@ pub enum PutOutcome {
     PreconditionFailed,
 }
 
-/// PUT bytes to a remote WebDAV URL.
-pub async fn put_bytes(
-    url: &str,
-    auth: &WebDavAuth,
-    bytes: Vec<u8>,
-    content_type: &str,
-) -> Result<(), AppError> {
-    match put_bytes_if_match(url, auth, bytes, content_type, None).await? {
-        PutOutcome::Stored => Ok(()),
-        PutOutcome::PreconditionFailed => Err(webdav_status_error(
-            "PUT",
-            StatusCode::PRECONDITION_FAILED,
-            url,
-        )),
-    }
-}
-
 /// PUT bytes, sending `If-Match: <etag>` when `if_match` is set so the write
 /// only succeeds if the remote resource is still the one that was checked.
 pub async fn put_bytes_if_match(

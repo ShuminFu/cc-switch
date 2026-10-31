@@ -446,6 +446,46 @@ fn profile_apply_reports_dangling_references_and_continues() {
 }
 
 #[test]
+fn applying_profile_without_takeover_leaves_current_live_file_untouched() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+    fs::create_dir_all(home.join(".claude")).expect("create ~/.claude");
+
+    let state = create_test_state().expect("create test state");
+    ProviderService::add(
+        &state,
+        AppType::Claude,
+        claude_provider("p1", "tok-1"),
+        false,
+    )
+    .expect("add provider");
+    ProviderService::switch(&state, AppType::Claude, "p1").expect("switch to p1");
+
+    let settings = cc_switch_lib::get_claude_settings_path();
+    let before_bytes = fs::read(&settings).expect("read live settings");
+    let before_mtime = fs::metadata(&settings)
+        .and_then(|m| m.modified())
+        .expect("mtime");
+
+    let profile = ProfileService::create(&state, "Same Provider", ProfileScope::Claude)
+        .expect("create profile");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    ProfileService::apply(&state, &profile.id, ProfileScope::Claude).expect("apply profile");
+
+    assert_eq!(
+        fs::read(&settings).expect("read live settings"),
+        before_bytes
+    );
+    assert_eq!(
+        fs::metadata(&settings)
+            .and_then(|m| m.modified())
+            .expect("mtime"),
+        before_mtime,
+        "no rewrite when takeover is off and the provider is already current"
+    );
+}
+
+#[test]
 fn clear_current_profile_only_clears_scoped_marker() {
     let _env = TestEnv::new();
     let _home = ensure_test_home();

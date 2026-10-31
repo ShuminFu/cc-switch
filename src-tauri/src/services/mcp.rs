@@ -1,5 +1,4 @@
 use indexmap::IndexMap;
-use std::collections::HashMap;
 
 use crate::app_config::{AppType, McpServer};
 use crate::error::AppError;
@@ -16,32 +15,65 @@ impl McpService {
     }
 
     /// 添加或更新 MCP 服务器
+    ///
+    /// SVC-12: the live projection runs *before* the DB save. If any app's
+    /// live write fails, the apps already touched are reverted to the previous
+    /// server state and the DB is left unchanged, so the UI never shows a
+    /// half-applied edit.
     pub fn upsert_server(state: &AppState, server: McpServer) -> Result<(), AppError> {
         // 先做 schema 校验：无效定义不得写入数据库或任何 live 配置
         mcp::validate_server_spec(&server.server)?;
 
         // 读取旧状态：用于处理“编辑时取消勾选某个应用”的场景（需要从对应 live 配置中移除）
-        let prev_apps = state
-            .db
-            .get_all_mcp_servers()?
-            .get(&server.id)
-            .map(|s| s.apps.clone())
-            .unwrap_or_default();
+        let prev = state.db.get_all_mcp_servers()?.shift_remove(&server.id);
 
-        state.db.save_mcp_server(&server)?;
-
-        // 处理禁用：若旧版本启用但新版本取消，则需要从该应用的 live 配置移除
+        let mut touched: Vec<AppType> = Vec::new();
         for adapter in crate::adapters::mcp_adapters() {
             let app = adapter.app();
-            if prev_apps.is_enabled_for(&app) && !server.apps.is_enabled_for(&app) {
-                Self::remove_server_from_app(state, &server.id, &app)?;
+            let wanted = server.apps.is_enabled_for(&app);
+            let had = prev.as_ref().is_some_and(|p| p.apps.is_enabled_for(&app));
+            let result = if wanted {
+                Self::sync_server_to_app_no_config(&server, &app)
+            } else if had {
+                Self::remove_server_from_app(state, &server.id, &app)
+            } else {
+                continue;
+            };
+            if let Err(err) = result {
+                Self::revert_live(&server.id, prev.as_ref(), &touched);
+                return Err(err);
             }
+            touched.push(app);
         }
 
-        // 同步到各个启用的应用
-        Self::sync_server_to_apps(state, &server)?;
+        if let Err(err) = state.db.save_mcp_server(&server) {
+            Self::revert_live(&server.id, prev.as_ref(), &touched);
+            return Err(err);
+        }
 
         Ok(())
+    }
+
+    /// Put `apps`' live MCP entry for `id` back to what `prev` describes
+    /// (best effort; failures are logged, the original error is what the
+    /// caller reports).
+    fn revert_live(id: &str, prev: Option<&McpServer>, apps: &[AppType]) {
+        for app in apps {
+            let result = match prev {
+                Some(prev) if prev.apps.is_enabled_for(app) => {
+                    Self::sync_server_to_app_no_config(prev, app)
+                }
+                _ => crate::adapters::adapter_for(app)
+                    .mcp()
+                    .map_or(Ok(()), |projector| projector.remove_server(id)),
+            };
+            if let Err(err) = result {
+                log::warn!(
+                    "Failed to revert MCP server {id} in {} live config: {err}",
+                    app.as_str()
+                );
+            }
+        }
     }
 
     /// 删除 MCP 服务器
@@ -60,6 +92,9 @@ impl McpService {
     }
 
     /// 切换指定应用的启用状态
+    ///
+    /// The live file is changed first; the DB flag is saved only when that
+    /// succeeded, and a failed DB save reverts the live change (SVC-12).
     pub fn toggle_app(
         state: &AppState,
         server_id: &str,
@@ -69,24 +104,19 @@ impl McpService {
         let mut servers = state.db.get_all_mcp_servers()?;
 
         if let Some(server) = servers.get_mut(server_id) {
+            let prev = server.clone();
             server.apps.set_enabled_for(&app, enabled);
-            state.db.save_mcp_server(server)?;
 
-            // 同步到对应应用
             if enabled {
                 Self::sync_server_to_app(state, server, &app)?;
             } else {
                 Self::remove_server_from_app(state, server_id, &app)?;
             }
-        }
 
-        Ok(())
-    }
-
-    /// 将 MCP 服务器同步到所有启用的应用
-    fn sync_server_to_apps(_state: &AppState, server: &McpServer) -> Result<(), AppError> {
-        for app in server.apps.enabled_apps() {
-            Self::sync_server_to_app_no_config(server, &app)?;
+            if let Err(err) = state.db.save_mcp_server(server) {
+                Self::revert_live(server_id, Some(&prev), std::slice::from_ref(&app));
+                return Err(err);
+            }
         }
 
         Ok(())
@@ -192,54 +222,6 @@ impl McpService {
 
         // 一次投影整个期望状态：单文件应用每次同步最多重写一次 live 文件
         projector.project(&enabled, &disabled)
-    }
-
-    // ========================================================================
-    // 兼容层：支持旧的 v3.6.x 命令（已废弃，将在 v4.0 移除）
-    // ========================================================================
-
-    /// [已废弃] 获取指定应用的 MCP 服务器（兼容旧 API）
-    #[deprecated(since = "3.7.0", note = "Use get_all_servers instead")]
-    pub fn get_servers(
-        state: &AppState,
-        app: AppType,
-    ) -> Result<HashMap<String, serde_json::Value>, AppError> {
-        let all_servers = Self::get_all_servers(state)?;
-        let mut result = HashMap::new();
-
-        for (id, server) in all_servers {
-            if server.apps.is_enabled_for(&app) {
-                result.insert(id, server.server);
-            }
-        }
-
-        Ok(result)
-    }
-
-    /// [已废弃] 设置 MCP 服务器在指定应用的启用状态（兼容旧 API）
-    #[deprecated(since = "3.7.0", note = "Use toggle_app instead")]
-    pub fn set_enabled(
-        state: &AppState,
-        app: AppType,
-        id: &str,
-        enabled: bool,
-    ) -> Result<bool, AppError> {
-        Self::toggle_app(state, id, app, enabled)?;
-        Ok(true)
-    }
-
-    /// [已废弃] 同步启用的 MCP 到指定应用（兼容旧 API）
-    #[deprecated(since = "3.7.0", note = "Use sync_all_enabled instead")]
-    pub fn sync_enabled(state: &AppState, app: AppType) -> Result<(), AppError> {
-        let servers = Self::get_all_servers(state)?;
-
-        for server in servers.values() {
-            if server.apps.is_enabled_for(&app) {
-                Self::sync_server_to_app(state, server, &app)?;
-            }
-        }
-
-        Ok(())
     }
 
     /// 从指定应用的 live 配置导入 MCP 服务器，返回新增的服务器数量。

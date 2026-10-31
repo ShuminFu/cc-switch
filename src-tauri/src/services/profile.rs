@@ -573,7 +573,11 @@ impl ProfileService {
             // 1. 切换项目前无条件关闭当前应用的代理接管。
             // 接管态下 live 文件属于代理；用户希望切换工作目录时总是退出当前
             // 代理环境，再按快照写入真实供应商配置。叠加模式应用没有接管。
-            if ProfileScope::has_takeover(app) {
+            // Skip it when takeover is not engaged: restoring would rewrite the
+            // live file for nothing (SVC-16).
+            if ProfileScope::has_takeover(app)
+                && state.proxy_service.takeover_engaged_for_app_sync(app)
+            {
                 if let Err(e) = state.proxy_service.disable_takeover_for_app_sync(app) {
                     warnings.push(format!(
                         "[{app_str}] auto-disable proxy takeover before profile switch failed: {e}"

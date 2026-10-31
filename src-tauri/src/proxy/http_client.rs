@@ -259,7 +259,37 @@ pub fn is_proxy_enabled() -> bool {
 
 /// 构建 HTTP 客户端
 fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
-    build_client_with(proxy_url, reqwest::redirect::Policy::default())
+    build_client_with(proxy_url, same_origin_redirect_policy())
+}
+
+/// Follow redirects only within the same origin (scheme, host, port).
+///
+/// reqwest strips `Authorization`/`Cookie` on a cross-host redirect but keeps
+/// every other header, so vendor credentials such as `x-api-key`,
+/// `x-goog-api-key` or a signed S3 request would be sent to whatever host a
+/// redirect names. A cross-origin redirect is returned to the caller as-is
+/// instead.
+fn same_origin_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= 10 {
+            return attempt.error("too many redirects");
+        }
+        let same_origin = attempt
+            .previous()
+            .last()
+            .is_some_and(|prev| is_same_origin(prev, attempt.url()));
+        if same_origin {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    })
+}
+
+fn is_same_origin(a: &reqwest::Url, b: &reqwest::Url) -> bool {
+    a.scheme() == b.scheme()
+        && a.host_str() == b.host_str()
+        && a.port_or_known_default() == b.port_or_known_default()
 }
 
 /// 构建不跟随重定向的 HTTP 客户端
@@ -502,6 +532,27 @@ pub(crate) fn truncate_error_text(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redirects_are_followed_only_within_the_same_origin() {
+        let base = reqwest::Url::parse("https://api.example.com/v1/models").unwrap();
+        assert!(is_same_origin(
+            &base,
+            &reqwest::Url::parse("https://api.example.com:443/v2/models").unwrap()
+        ));
+        assert!(!is_same_origin(
+            &base,
+            &reqwest::Url::parse("https://evil.example.net/v1/models").unwrap()
+        ));
+        assert!(!is_same_origin(
+            &base,
+            &reqwest::Url::parse("http://api.example.com/v1/models").unwrap()
+        ));
+        assert!(!is_same_origin(
+            &base,
+            &reqwest::Url::parse("https://api.example.com:8443/v1").unwrap()
+        ));
+    }
     use std::sync::{Mutex, OnceLock};
 
     /// SEC-26: every log statement in the global-proxy code paths that mentions

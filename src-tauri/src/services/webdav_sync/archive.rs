@@ -140,24 +140,59 @@ pub(crate) fn restore_skills_zip(raw: &[u8]) -> Result<(), AppError> {
             format!("Failed to resolve Skills SSOT directory: {e}"),
         )
     })?;
+    swap_in_skills_dir(&extracted, &ssot, |_| Ok(()))
+}
+
+/// Replace `ssot` with a copy of `extracted` so that the window in which the
+/// SSOT directory is missing is a single rename (SVC-53):
+///
+/// 1. copy into `<ssot>.new` next to the SSOT (slow, SSOT untouched);
+/// 2. rename `ssot` → `<ssot>.bak`;
+/// 3. rename `<ssot>.new` → `ssot`;
+/// 4. delete the `.bak`.
+///
+/// A crash between 2 and 3 leaves `.bak` without `ssot`, which
+/// [`SkillService::get_ssot_dir`] repairs on the next start. `between_renames`
+/// is a test hook called after step 2.
+pub(crate) fn swap_in_skills_dir(
+    extracted: &Path,
+    ssot: &Path,
+    between_renames: impl FnOnce(&Path) -> Result<(), AppError>,
+) -> Result<(), AppError> {
+    let staging = ssot.with_extension("new");
     let bak = ssot.with_extension("bak");
 
-    if ssot.exists() {
-        if bak.exists() {
-            let _ = fs::remove_dir_all(&bak);
-        }
-        fs::rename(&ssot, &bak).map_err(|e| AppError::io(&ssot, e))?;
+    if staging.exists() {
+        fs::remove_dir_all(&staging).map_err(|e| AppError::io(&staging, e))?;
     }
-
-    if let Err(e) = copy_dir_recursive(&extracted, &ssot) {
-        if bak.exists() {
-            let _ = fs::remove_dir_all(&ssot);
-            let _ = fs::rename(&bak, &ssot);
-        }
+    if let Err(e) = copy_dir_recursive(extracted, &staging) {
+        let _ = fs::remove_dir_all(&staging);
         return Err(e);
     }
 
-    let _ = fs::remove_dir_all(&bak);
+    let had_ssot = ssot.exists();
+    if had_ssot {
+        if bak.exists() {
+            fs::remove_dir_all(&bak).map_err(|e| AppError::io(&bak, e))?;
+        }
+        fs::rename(ssot, &bak).map_err(|e| AppError::io(ssot, e))?;
+    }
+
+    let swapped = between_renames(ssot)
+        .and_then(|()| fs::rename(&staging, ssot).map_err(|e| AppError::io(&staging, e)));
+    if let Err(e) = swapped {
+        if had_ssot && !ssot.exists() {
+            let _ = fs::rename(&bak, ssot);
+        }
+        let _ = fs::remove_dir_all(&staging);
+        return Err(e);
+    }
+
+    if had_ssot {
+        if let Err(e) = fs::remove_dir_all(&bak) {
+            log::warn!("Failed to remove {}: {e}", bak.display());
+        }
+    }
     Ok(())
 }
 
@@ -368,11 +403,84 @@ fn copy_entry_with_total_limit<R: Read, W: Write>(
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_entry_with_total_limit, mark_visited_dir};
+    use super::{copy_entry_with_total_limit, mark_visited_dir, swap_in_skills_dir};
+    use crate::services::sync_protocol::localized;
     use std::collections::HashSet;
+    use std::fs;
     use std::io::Cursor;
     use std::path::Path;
     use tempfile::tempdir;
+
+    fn write(path: &Path, text: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn swap_leaves_no_bak_or_staging_on_success() {
+        let dir = tempdir().unwrap();
+        let ssot = dir.path().join("skills");
+        let extracted = dir.path().join("extracted");
+        write(&ssot.join("old/SKILL.md"), "old");
+        write(&extracted.join("new/SKILL.md"), "new");
+
+        swap_in_skills_dir(&extracted, &ssot, |_| Ok(())).unwrap();
+
+        assert!(ssot.join("new/SKILL.md").exists());
+        assert!(!ssot.join("old").exists());
+        assert!(!ssot.with_extension("bak").exists());
+        assert!(!ssot.with_extension("new").exists());
+    }
+
+    #[test]
+    fn crash_between_renames_is_recovered_on_next_start() {
+        let dir = tempdir().unwrap();
+        let ssot = dir.path().join("skills");
+        let extracted = dir.path().join("extracted");
+        write(&ssot.join("old/SKILL.md"), "old");
+        write(&extracted.join("new/SKILL.md"), "new");
+
+        // Observe the on-disk layout inside the window between the renames,
+        // then reproduce it as a crash would have left it.
+        let mut observed_missing = false;
+        let _ = swap_in_skills_dir(&extracted, &ssot, |ssot| {
+            observed_missing = !ssot.exists() && ssot.with_extension("bak").exists();
+            Err(localized("test.injected", "注入失败", "injected failure"))
+        });
+        assert!(observed_missing, "only one rename separates the two states");
+
+        fs::rename(&ssot, ssot.with_extension("bak")).unwrap();
+        fs::create_dir_all(&ssot).unwrap(); // get_ssot_dir() creates it empty
+        write(&ssot.with_extension("new").join("new/SKILL.md"), "new");
+
+        crate::services::skill::recover_interrupted_ssot_swap(&ssot);
+
+        assert_eq!(
+            fs::read_to_string(ssot.join("old/SKILL.md")).unwrap(),
+            "old"
+        );
+        assert!(!ssot.with_extension("bak").exists());
+        assert!(!ssot.with_extension("new").exists());
+    }
+
+    #[test]
+    fn injected_failure_rolls_back_to_original() {
+        let dir = tempdir().unwrap();
+        let ssot = dir.path().join("skills");
+        let extracted = dir.path().join("extracted");
+        write(&ssot.join("old/SKILL.md"), "old");
+        write(&extracted.join("new/SKILL.md"), "new");
+
+        let err = swap_in_skills_dir(&extracted, &ssot, |_| {
+            Err(localized("test.injected", "注入失败", "injected failure"))
+        });
+        assert!(err.is_err());
+        assert_eq!(
+            fs::read_to_string(ssot.join("old/SKILL.md")).unwrap(),
+            "old"
+        );
+        assert!(!ssot.with_extension("new").exists());
+    }
 
     #[test]
     fn mark_visited_dir_tracks_canonical_duplicates() {

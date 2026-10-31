@@ -26,6 +26,52 @@ pub struct BackupInfo {
     /// versions; restore then falls back to appending a quoted `export`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub removed_lines: Vec<RemovedLine>,
+    /// Conflicts that were *not* removed because cc-switch cannot change their
+    /// source (on Unix: variables inherited by the process from launchd,
+    /// systemd, `~/.zshenv`, the parent shell, ...). They are excluded from
+    /// `conflicts` so restoring the backup never tries to recreate them
+    /// (SVC-48).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<SkippedEnv>,
+}
+
+/// A conflict `delete_env_vars` left in place, with the reason.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkippedEnv {
+    pub var_name: String,
+    pub source_type: String,
+    pub source_path: String,
+    /// Stable machine-readable reason code.
+    pub reason: String,
+}
+
+/// Reason code: the variable comes from the process environment, which
+/// cc-switch cannot edit on Unix.
+pub const SKIP_REASON_PROCESS_ENV: &str = "process_environment_unsupported";
+
+/// Split conflicts into those delete can act on and those it cannot.
+fn partition_supported(conflicts: Vec<EnvConflict>) -> (Vec<EnvConflict>, Vec<SkippedEnv>) {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let (supported, unsupported): (Vec<_>, Vec<_>) = conflicts
+            .into_iter()
+            .partition(|c| c.source_type != "system");
+        let skipped = unsupported
+            .into_iter()
+            .map(|c| SkippedEnv {
+                var_name: c.var_name,
+                source_type: c.source_type,
+                source_path: c.source_path,
+                reason: SKIP_REASON_PROCESS_ENV.to_string(),
+            })
+            .collect();
+        (supported, skipped)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        (conflicts, Vec::new())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -40,6 +86,7 @@ pub struct RemovedLine {
 
 /// Delete environment variables with automatic backup
 pub fn delete_env_vars(conflicts: Vec<EnvConflict>) -> Result<BackupInfo, String> {
+    let (conflicts, skipped) = partition_supported(conflicts);
     // Step 1: Work out every rc-file edit up front (and validate it), so a stale
     // or invalid conflict fails before anything is touched.
     #[cfg(not(target_os = "windows"))]
@@ -50,7 +97,7 @@ pub fn delete_env_vars(conflicts: Vec<EnvConflict>) -> Result<BackupInfo, String
     let removed_lines: Vec<RemovedLine> = Vec::new();
 
     // Step 2: Create backup
-    let backup_info = create_backup(&conflicts, removed_lines)?;
+    let backup_info = create_backup(&conflicts, removed_lines, skipped)?;
 
     // Step 3: Delete variables
     #[cfg(not(target_os = "windows"))]
@@ -75,6 +122,7 @@ pub fn delete_env_vars(conflicts: Vec<EnvConflict>) -> Result<BackupInfo, String
 fn create_backup(
     conflicts: &[EnvConflict],
     removed_lines: Vec<RemovedLine>,
+    skipped: Vec<SkippedEnv>,
 ) -> Result<BackupInfo, String> {
     // Get backup directory
     let backup_dir = get_backup_dir()?;
@@ -90,6 +138,7 @@ fn create_backup(
         timestamp: timestamp.clone(),
         conflicts: conflicts.to_vec(),
         removed_lines,
+        skipped,
     };
 
     // Write backup file
@@ -503,6 +552,7 @@ mod tests {
                 timestamp: String::new(),
                 conflicts: conflicts.to_vec(),
                 removed_lines,
+                skipped: Vec::new(),
             };
             // Round-trip through JSON like a real backup file.
             let backup: BackupInfo =
@@ -575,6 +625,7 @@ alias ll='ls -l'\n",
                     line_number: 1,
                     raw_line: "export X=1\n".to_string(),
                 }],
+                skipped: Vec::new(),
             };
             assert!(plan_restore(&backup, &["/elsewhere/.zshrc".to_string()]).is_err());
         }
@@ -630,6 +681,56 @@ alias ll='ls -l'\n",
             );
             assert!(parse_source_path("/home/u/.zshrc").is_err());
             assert!(parse_source_path("/home/u/.zshrc:0").is_err());
+        }
+
+        #[test]
+        fn process_env_conflicts_are_reported_as_skipped_not_backed_up() {
+            let f = fixture(b"export ANTHROPIC_API_KEY=k\n");
+            let mut conflicts = scan(&f);
+            conflicts.push(EnvConflict {
+                var_name: "ANTHROPIC_BASE_URL".to_string(),
+                var_value: "http://x".to_string(),
+                source_type: "system".to_string(),
+                source_path: "Process Environment".to_string(),
+                original_line: None,
+            });
+            let (supported, skipped) = partition_supported(conflicts);
+            assert_eq!(supported.len(), 1);
+            assert_eq!(supported[0].source_type, "file");
+            assert_eq!(skipped.len(), 1);
+            assert_eq!(skipped[0].var_name, "ANTHROPIC_BASE_URL");
+            assert_eq!(skipped[0].reason, SKIP_REASON_PROCESS_ENV);
+        }
+
+        #[test]
+        fn backup_mixing_file_and_system_entries_restores_the_file_entry() {
+            let original = "export ANTHROPIC_API_KEY=k\nPATH=/bin\n";
+            let f = fixture(original.as_bytes());
+            let mut conflicts = scan(&f);
+            let allowed = vec![f.path.clone()];
+            let edits = plan_file_deletions(&conflicts, &allowed).unwrap();
+            for edit in &edits {
+                write_rc_file(Path::new(&edit.file_path), &edit.new_content).unwrap();
+            }
+            // An older backup that still lists the process-env entry.
+            conflicts.push(EnvConflict {
+                var_name: "ANTHROPIC_BASE_URL".to_string(),
+                var_value: "http://x".to_string(),
+                source_type: "system".to_string(),
+                source_path: "Process Environment".to_string(),
+                original_line: None,
+            });
+            let backup = BackupInfo {
+                backup_path: String::new(),
+                timestamp: String::new(),
+                conflicts,
+                removed_lines: edits.iter().flat_map(|e| e.removed.clone()).collect(),
+                skipped: Vec::new(),
+            };
+            for (path, content) in plan_restore(&backup, &allowed).unwrap() {
+                write_rc_file(Path::new(&path), &content).unwrap();
+            }
+            assert_eq!(fs::read_to_string(&f.path).unwrap(), original);
         }
 
         #[test]

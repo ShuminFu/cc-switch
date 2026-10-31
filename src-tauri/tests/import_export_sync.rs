@@ -2,8 +2,8 @@ use serde_json::json;
 use std::fs;
 
 use cc_switch_lib::{
-    get_claude_settings_path, read_json_file, AppError, AppType, ConfigService, MultiAppConfig,
-    Provider, ProviderMeta,
+    get_claude_settings_path, read_json_file, AppError, AppState, AppType, ConfigService,
+    MultiAppConfig, Provider, ProviderMeta, ProviderService,
 };
 
 #[path = "support.rs"]
@@ -13,6 +13,26 @@ use support::{
     enable_codex_official_auth_preservation, ensure_test_home, reset_test_fs, unwritable_path,
     TestEnv,
 };
+
+/// Seed an in-memory state from `config` and project `app`'s current provider
+/// to its live file through the production path (SVC-31: these tests used to
+/// exercise the deleted legacy `ConfigService::sync_current_providers_to_live`).
+fn sync_via_provider_service(
+    config: &MultiAppConfig,
+    app: AppType,
+) -> (AppState, Result<(), AppError>) {
+    let state = create_test_state_with_config(config).expect("create test state");
+    let result = ProviderService::sync_current_provider_for_app(&state, app);
+    (state, result)
+}
+
+fn stored_provider(state: &AppState, app: AppType, id: &str) -> Provider {
+    state
+        .db
+        .get_provider_by_id(id, app.as_str())
+        .expect("read provider")
+        .expect("provider exists")
+}
 
 #[test]
 fn sync_claude_provider_writes_live_settings() {
@@ -43,7 +63,8 @@ fn sync_claude_provider_writes_live_settings() {
     manager.providers.insert("prov-1".to_string(), provider);
     manager.current = "prov-1".to_string();
 
-    ConfigService::sync_current_providers_to_live(&mut config).expect("sync live settings");
+    let (state, result) = sync_via_provider_service(&config, AppType::Claude);
+    result.expect("sync live settings");
 
     let settings_path = get_claude_settings_path();
     assert!(
@@ -56,10 +77,7 @@ fn sync_claude_provider_writes_live_settings() {
     assert_eq!(live_value, provider_config);
 
     // 确认 SSOT 中的供应商也同步了最新内容
-    let updated = config
-        .get_manager(&AppType::Claude)
-        .and_then(|m| m.providers.get("prov-1"))
-        .expect("provider in config");
+    let updated = stored_provider(&state, AppType::Claude, "prov-1");
     assert_eq!(updated.settings_config, provider_config);
 
     // 额外确认写入位置位于测试 HOME 下
@@ -99,7 +117,8 @@ fn sync_codex_provider_writes_config_without_touching_auth() {
     manager.providers.insert("codex-1".to_string(), provider);
     manager.current = "codex-1".to_string();
 
-    ConfigService::sync_current_providers_to_live(&mut config).expect("sync codex live");
+    let (state, result) = sync_via_provider_service(&config, AppType::Codex);
+    result.expect("sync codex live");
 
     let auth_path = cc_switch_lib::get_codex_auth_path();
     let config_path = cc_switch_lib::get_codex_config_path();
@@ -125,8 +144,7 @@ fn sync_codex_provider_writes_config_without_touching_auth() {
         "config.toml should contain provider-scoped bearer token"
     );
 
-    let manager = config.get_manager(&AppType::Codex).expect("codex manager");
-    let synced = manager.providers.get("codex-1").expect("codex provider");
+    let synced = stored_provider(&state, AppType::Codex, "codex-1");
     let synced_cfg = synced
         .settings_config
         .get("config")
@@ -180,31 +198,33 @@ experimental_bearer_token = "stored-bearer-key"
         .insert("thirdparty-1".to_string(), provider);
     manager.current = "thirdparty-1".to_string();
 
-    ConfigService::sync_current_providers_to_live(&mut config).expect("sync codex live");
+    let (state, result) = sync_via_provider_service(&config, AppType::Codex);
+    result.expect("sync codex live");
 
-    let manager = config.get_manager(&AppType::Codex).expect("codex manager");
-    let synced = manager
-        .providers
-        .get("thirdparty-1")
-        .expect("provider survives sync");
-
-    assert_eq!(
-        synced
+    // SVC-31: the production sync path (ProviderService) projects the stored
+    // provider to live without rewriting the stored row; what matters is that
+    // the config-only token is neither lost from the SSOT nor from live.
+    let synced = stored_provider(&state, AppType::Codex, "thirdparty-1");
+    let stored_has_token = synced
+        .settings_config
+        .pointer("/auth/OPENAI_API_KEY")
+        .and_then(|v| v.as_str())
+        == Some("stored-bearer-key")
+        || synced
             .settings_config
-            .pointer("/auth/OPENAI_API_KEY")
-            .and_then(|v| v.as_str()),
-        Some("stored-bearer-key"),
-        "config-only bearer token must be backfilled into stored auth.OPENAI_API_KEY"
+            .get("config")
+            .and_then(|v| v.as_str())
+            .is_some_and(|c| c.contains("stored-bearer-key"));
+    assert!(
+        stored_has_token,
+        "the token must survive in the stored provider"
     );
 
-    let synced_cfg = synced
-        .settings_config
-        .get("config")
-        .and_then(|v| v.as_str())
-        .expect("config string");
+    let live_toml =
+        fs::read_to_string(cc_switch_lib::get_codex_config_path()).expect("read config.toml");
     assert!(
-        !synced_cfg.contains("experimental_bearer_token"),
-        "live-only bearer token should not be persisted in stored provider config"
+        live_toml.contains("stored-bearer-key"),
+        "the live config must carry the provider token: {live_toml}"
     );
 }
 
@@ -254,7 +274,8 @@ requires_openai_auth = true
     manager.providers.insert("codex-1".to_string(), provider);
     manager.current = "codex-1".to_string();
 
-    ConfigService::sync_current_providers_to_live(&mut config).expect("sync codex live");
+    let (state, result) = sync_via_provider_service(&config, AppType::Codex);
+    result.expect("sync codex live");
 
     let toml_text =
         fs::read_to_string(cc_switch_lib::get_codex_config_path()).expect("read config.toml");
@@ -282,10 +303,10 @@ requires_openai_auth = true
         Some("https://aihubmix.example/v1")
     );
 
-    let synced_cfg = config
-        .get_manager(&AppType::Codex)
-        .and_then(|manager| manager.providers.get("codex-1"))
-        .and_then(|provider| provider.settings_config.get("config"))
+    let synced = stored_provider(&state, AppType::Codex, "codex-1");
+    let synced_cfg = synced
+        .settings_config
+        .get("config")
         .and_then(|v| v.as_str())
         .expect("synced config string");
     assert!(
@@ -542,8 +563,8 @@ fn sync_codex_provider_missing_auth_returns_error() {
     manager.providers.insert(provider.id.clone(), provider);
     manager.current = "codex-missing-auth".to_string();
 
-    let err = ConfigService::sync_current_providers_to_live(&mut config)
-        .expect_err("sync should fail when auth missing");
+    let (_state, result) = sync_via_provider_service(&config, AppType::Codex);
+    let err = result.expect_err("sync should fail when auth missing");
     match err {
         cc_switch_lib::AppError::Config(msg) => {
             assert!(msg.contains("auth"), "error message should mention auth");
@@ -1022,8 +1043,8 @@ fn sync_gemini_packycode_sets_security_selected_type() {
         );
     }
 
-    ConfigService::sync_current_providers_to_live(&mut config)
-        .expect("syncing gemini live should succeed");
+    let (_state, result) = sync_via_provider_service(&config, AppType::Gemini);
+    result.expect("syncing gemini live should succeed");
 
     // security field is written to ~/.gemini/settings.json, not ~/.cc-switch/settings.json
     let gemini_settings = home.join(".gemini").join("settings.json");
@@ -1072,8 +1093,8 @@ fn sync_gemini_google_official_sets_oauth_security() {
             .insert("google-official".to_string(), provider);
     }
 
-    ConfigService::sync_current_providers_to_live(&mut config)
-        .expect("syncing google official gemini should succeed");
+    let (_state, result) = sync_via_provider_service(&config, AppType::Gemini);
+    result.expect("syncing google official gemini should succeed");
 
     // security field is written to ~/.gemini/settings.json, not ~/.cc-switch/settings.json
     let gemini_settings = home.join(".gemini").join("settings.json");

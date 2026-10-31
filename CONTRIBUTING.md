@@ -71,7 +71,7 @@ cargo test --locked                      # Run tests
 ## Code Style
 
 - **Frontend**: Prettier for formatting, ESLint for linting, strict TypeScript (`pnpm typecheck`)
-- **Backend**: `cargo fmt` for formatting, `cargo clippy` for linting
+- **Backend**: `cargo fmt` for formatting, `cargo clippy` for linting. Before changing provider switching, proxy takeover, sync or a new app adapter, read [`src-tauri/src/services/README.md`](src-tauri/src/services/README.md) (live-file ownership, backfill and sync invariants)
 - **Tauri commands**: command functions are `snake_case` in Rust (e.g. `get_stream_check_config`) and are invoked with that same name from the frontend. Argument keys on the JS side are camelCase (Tauri converts them; some commands set `#[tauri::command(rename_all = "camelCase")]` explicitly).
 
 Run all checks before submitting (these are the same steps `.github/workflows/ci.yml` runs; see [docs/dev/testing.md](docs/dev/testing.md)):
@@ -220,7 +220,7 @@ cargo test --locked                      # 运行测试
 ## 代码规范
 
 - **前端**：使用 Prettier 格式化、ESLint 检查、严格 TypeScript（`pnpm typecheck`）
-- **后端**：使用 `cargo fmt` 格式化、`cargo clippy` 检查
+- **后端**：使用 `cargo fmt` 格式化、`cargo clippy` 检查。修改供应商切换、代理接管、同步或新增应用适配器前，请先阅读 [`src-tauri/src/services/README.md`](src-tauri/src/services/README.md)（live 文件所有权、回填与同步不变量）
 - **Tauri 命令**：Rust 中的命令函数使用 `snake_case`（如 `get_stream_check_config`），前端以相同名称调用；JS 侧的参数键使用 camelCase（Tauri 会自动转换，部分命令显式声明了 `#[tauri::command(rename_all = "camelCase")]`）。
 
 提交前运行所有检查（与 `.github/workflows/ci.yml` 执行的步骤相同，详见 [docs/dev/testing.md](docs/dev/testing.md)，英文）：

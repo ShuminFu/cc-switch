@@ -239,6 +239,10 @@ pub struct UnmanagedSkill {
     pub found_in: Vec<String>,
     /// 发现路径（首个匹配的完整路径）
     pub path: String,
+    /// The directory shares its name with a managed skill that is not enabled
+    /// for that app and is not a cc-switch copy (SVC-45).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub conflict: bool,
 }
 
 /// MCP 服务器定义（v3.7.0 统一结构）

@@ -501,6 +501,64 @@ fn upsert_mcp_server_rejects_invalid_spec_before_any_write() {
 }
 
 #[test]
+fn upsert_mcp_server_failing_codex_write_leaves_claude_and_db_unchanged() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+    fs::create_dir_all(home.join(".claude")).expect("create ~/.claude dir");
+    let claude_json = get_claude_mcp_path();
+    fs::write(&claude_json, "{\n  \"mcpServers\": {}\n}\n").expect("seed ~/.claude.json");
+    let claude_before = fs::read_to_string(&claude_json).expect("read ~/.claude.json");
+
+    // A broken Codex config.toml makes the Codex projection fail.
+    let codex_config = cc_switch_lib::get_codex_config_path();
+    fs::create_dir_all(codex_config.parent().unwrap()).expect("create ~/.codex");
+    fs::write(&codex_config, "model = [unterminated").expect("seed broken config.toml");
+
+    let state = support::create_test_state().expect("create test state");
+    let result = McpService::upsert_server(
+        &state,
+        McpServer {
+            id: "echo".to_string(),
+            name: "echo".to_string(),
+            server: json!({ "type": "stdio", "command": "echo" }),
+            apps: McpApps {
+                claude: true,
+                codex: true,
+                ..McpApps::default()
+            },
+            description: None,
+            homepage: None,
+            docs: None,
+            tags: Vec::new(),
+        },
+    );
+    assert!(result.is_err(), "broken Codex config must fail the upsert");
+
+    assert!(
+        !state
+            .db
+            .get_all_mcp_servers()
+            .expect("list servers")
+            .contains_key("echo"),
+        "DB must not keep a half-applied server"
+    );
+    let claude_after: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&claude_json).expect("read ~/.claude.json"))
+            .expect("parse ~/.claude.json");
+    let claude_before: serde_json::Value =
+        serde_json::from_str(&claude_before).expect("parse seed");
+    assert_eq!(
+        claude_after, claude_before,
+        "Claude live config must be reverted when a later app fails"
+    );
+    assert_eq!(
+        fs::read_to_string(&codex_config).expect("read config.toml"),
+        "model = [unterminated",
+        "the broken Codex file is left untouched"
+    );
+}
+
+#[test]
 fn upsert_mcp_server_disabling_app_removes_from_claude_live_config() {
     let _env = TestEnv::new();
     let home = ensure_test_home();

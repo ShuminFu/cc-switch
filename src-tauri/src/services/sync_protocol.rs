@@ -406,6 +406,30 @@ pub(crate) fn apply_snapshot(
 
 // ─── Utilities ───────────────────────────────────────────────
 
+/// Reject a remote root / profile that would escape the sync prefix or produce
+/// an ambiguous object key (SVC-15): `.`/`..` segments, backslashes and
+/// control characters. Empty segments (`a//b`, leading/trailing `/`) are
+/// ignored like the WebDAV path splitter does.
+pub(crate) fn validate_remote_layout(remote_root: &str, profile: &str) -> Result<(), AppError> {
+    for (field, value) in [("remote_root", remote_root), ("profile", profile)] {
+        let bad = value.chars().any(|c| c.is_control() || c == '\\')
+            || value
+                .split('/')
+                .any(|segment| matches!(segment.trim(), "." | ".."));
+        let profile_has_slash = field == "profile" && value.trim_matches('/').contains('/');
+        if bad || profile_has_slash {
+            return Err(localized(
+                "sync.remote_path.invalid",
+                format!("同步路径 {field} 无效: {value}（不能包含 \".\"/\"..\" 段或控制字符）"),
+                format!(
+                    "Invalid sync {field} \"{value}\": it must not contain \".\"/\"..\" segments or control characters."
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -603,6 +627,12 @@ fn stored_local_fingerprint(status: &WebDavSyncStatus) -> Option<&str> {
         .last_local_manifest_hash
         .as_deref()
         .filter(|v| v.starts_with(LOCAL_FINGERPRINT_PREFIX))
+}
+
+/// Whether `fingerprint` (of a freshly built local snapshot) equals the one
+/// stored at the last successful sync, i.e. there is nothing new to upload.
+pub(crate) fn local_unchanged_since_sync(status: &WebDavSyncStatus, fingerprint: &str) -> bool {
+    stored_local_fingerprint(status) == Some(fingerprint)
 }
 
 /// Decide whether a download may overwrite local data.
@@ -950,6 +980,29 @@ mod tests {
             sha256: sha256.to_string(),
             size,
         }
+    }
+
+    #[test]
+    fn unchanged_snapshot_is_detected_from_the_stored_fingerprint() {
+        let fingerprint = local_content_fingerprint(b"-- header\nINSERT 1;", b"zip");
+        let mut status = WebDavSyncStatus::default();
+        assert!(!local_unchanged_since_sync(&status, &fingerprint));
+        status.last_local_manifest_hash = Some(fingerprint.clone());
+        assert!(local_unchanged_since_sync(&status, &fingerprint));
+        let changed = local_content_fingerprint(b"-- header\nINSERT 2;", b"zip");
+        assert!(!local_unchanged_since_sync(&status, &changed));
+    }
+
+    #[test]
+    fn remote_layout_rejects_traversal_and_control_chars() {
+        assert!(validate_remote_layout("cc-switch-sync", "default").is_ok());
+        assert!(validate_remote_layout("/team/cc-switch/", "work").is_ok());
+        assert!(validate_remote_layout("cc-switch-sync", "../x").is_err());
+        assert!(validate_remote_layout("cc-switch-sync", "..").is_err());
+        assert!(validate_remote_layout("a/./b", "default").is_err());
+        assert!(validate_remote_layout("root\u{7f}", "default").is_err());
+        assert!(validate_remote_layout("root", "a\\b").is_err());
+        assert!(validate_remote_layout("root", "a/b").is_err());
     }
 
     #[test]
