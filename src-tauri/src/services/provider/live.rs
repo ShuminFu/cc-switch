@@ -873,9 +873,16 @@ pub(crate) fn write_live_snapshot(app_type: &AppType, provider: &Provider) -> Re
 ///
 /// Writes all providers from the database to the live configuration file.
 /// Used for OpenCode and other additive mode applications.
+/// Write every managed provider of an additive app to its live file.
+///
+/// Best effort per provider, but a failure is no longer reported as success
+/// (SVC-37): once every provider has been tried, the ids that failed are
+/// returned in one `provider.live_sync_partial` error so callers (config
+/// import, cloud restore) can surface it as a warning.
 fn sync_all_providers_to_live(state: &AppState, app_type: &AppType) -> Result<(), AppError> {
     let providers = state.db.get_all_providers(app_type.as_str())?;
     let mut synced_count = 0usize;
+    let mut failures: Vec<String> = Vec::new();
 
     for provider in providers.values() {
         if provider
@@ -893,21 +900,61 @@ fn sync_all_providers_to_live(state: &AppState, app_type: &AppType) -> Result<()
                 app_type,
                 provider.id
             );
+            failures.push(format!("{}: {e}", provider.id));
             continue;
         }
         synced_count += 1;
     }
 
     log::info!("Synced {synced_count} {app_type:?} providers to live config");
-    Ok(())
+    if failures.is_empty() {
+        return Ok(());
+    }
+    let app = app_type.as_str();
+    let detail = failures.join("; ");
+    Err(AppError::localized(
+        "provider.live_sync_partial",
+        format!(
+            "{app} 有 {} 个供应商未能写入 live 配置: {detail}",
+            failures.len()
+        ),
+        format!(
+            "{} {app} provider(s) could not be written to the live config: {detail}",
+            failures.len()
+        ),
+    ))
+}
+
+/// Combine several independent step errors into one (first error kept as-is
+/// when it is the only one).
+fn aggregate_errors(mut errors: Vec<AppError>) -> Result<(), AppError> {
+    match errors.len() {
+        0 => Ok(()),
+        1 => Err(errors.remove(0)),
+        _ => {
+            let detail = errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ");
+            Err(AppError::localized(
+                "provider.live_sync_partial",
+                format!("部分应用同步 live 配置失败: {detail}"),
+                format!("Some apps could not be synced to their live config: {detail}"),
+            ))
+        }
+    }
 }
 
 pub(crate) fn sync_current_provider_for_app_to_live(
     state: &AppState,
     app_type: &AppType,
 ) -> Result<(), AppError> {
+    // Additive apps report per-provider failures only after the MCP
+    // re-projection below has run (SVC-37).
+    let mut additive_result = Ok(());
     if app_type.is_additive_mode() {
-        sync_all_providers_to_live(state, app_type)?;
+        additive_result = sync_all_providers_to_live(state, app_type);
     } else {
         let current_id = match crate::settings::get_effective_current_provider(&state.db, app_type)?
         {
@@ -926,7 +973,7 @@ pub(crate) fn sync_current_provider_for_app_to_live(
     // 上抛（不降级）：这里没有已变更的 DB 状态需要保护，调用方重试即可。
     McpService::sync_enabled_for_app(state, app_type)?;
 
-    Ok(())
+    additive_result
 }
 
 fn sync_current_provider_for_app_respecting_takeover(
@@ -979,16 +1026,24 @@ fn sync_current_provider_for_app_respecting_takeover(
 ///
 /// For additive mode apps (OpenCode), all providers are synced instead of just the current one.
 pub fn sync_current_to_live(state: &AppState) -> Result<(), AppError> {
+    // One app's failure must not leave the other apps unsynced (SVC-37):
+    // every app is attempted and the errors are reported together at the end.
+    let mut errors: Vec<AppError> = Vec::new();
+
     // Sync providers based on mode
     for app_type in AppType::all() {
-        if app_type.is_additive_mode() {
+        let result = if app_type.is_additive_mode() {
             // Additive mode: sync ALL providers
-            sync_all_providers_to_live(state, &app_type)?;
+            sync_all_providers_to_live(state, &app_type)
         } else {
             // Switch mode: sync only current provider. During proxy takeover,
             // update the restore backup instead of rewriting the taken-over
             // live file.
-            sync_current_provider_for_app_respecting_takeover(state, &app_type)?;
+            sync_current_provider_for_app_respecting_takeover(state, &app_type)
+        };
+        if let Err(err) = result {
+            log::warn!("Failed to sync {} live config: {err}", app_type.as_str());
+            errors.push(err);
         }
     }
 
@@ -1005,7 +1060,10 @@ pub fn sync_current_to_live(state: &AppState) -> Result<(), AppError> {
         }
     }
 
-    mcp_result
+    if let Err(err) = mcp_result {
+        errors.push(err);
+    }
+    aggregate_errors(errors)
 }
 
 /// Read current live settings for an app type

@@ -94,8 +94,13 @@ impl OmoService {
 
     fn read_jsonc_object(path: &Path) -> Result<Map<String, Value>, AppError> {
         let content = std::fs::read_to_string(path).map_err(|e| AppError::io(path, e))?;
-        let cleaned = Self::strip_jsonc_comments(&content);
-        let parsed: Value = serde_json::from_str(&cleaned)
+        Self::parse_jsonc_object(&content)
+    }
+
+    /// Parse JSONC with the same json5 dialect used for `opencode.json`
+    /// (comments and trailing commas allowed, SVC-47).
+    fn parse_jsonc_object(content: &str) -> Result<Map<String, Value>, AppError> {
+        let parsed: Value = json5::from_str(content.trim_start_matches('\u{feff}'))
             .map_err(|e| AppError::Config(format!("Failed to parse oh-my-opencode config: {e}")))?;
         parsed
             .as_object()
@@ -292,7 +297,15 @@ impl OmoService {
         state
             .db
             .set_omo_provider_current("opencode", &provider.id, v.category)?;
-        Self::write_config_to_file(state, v)?;
+        if actual_path == Self::config_path(v) {
+            // The file already holds exactly what was imported: keep the
+            // user's comments and key order instead of rewriting it (SVC-47).
+            // Only make sure the plugin is registered in opencode.json.
+            crate::opencode_config::add_plugin(v.plugin_name)?;
+        } else {
+            // Imported from a legacy/alternate file name: write the canonical file.
+            Self::write_config_to_file(state, v)?;
+        }
         Ok(provider)
     }
 
@@ -341,62 +354,6 @@ impl OmoService {
             last_modified,
         }
     }
-
-    fn strip_jsonc_comments(input: &str) -> String {
-        let mut result = String::with_capacity(input.len());
-        let mut chars = input.chars().peekable();
-        let mut in_string = false;
-        let mut escape = false;
-
-        while let Some(&c) = chars.peek() {
-            if in_string {
-                result.push(c);
-                chars.next();
-                if escape {
-                    escape = false;
-                } else if c == '\\' {
-                    escape = true;
-                } else if c == '"' {
-                    in_string = false;
-                }
-            } else if c == '"' {
-                in_string = true;
-                result.push(c);
-                chars.next();
-            } else if c == '/' {
-                chars.next();
-                match chars.peek() {
-                    Some('/') => {
-                        chars.next();
-                        while let Some(&nc) = chars.peek() {
-                            if nc == '\n' {
-                                break;
-                            }
-                            chars.next();
-                        }
-                    }
-                    Some('*') => {
-                        chars.next();
-                        while let Some(nc) = chars.next() {
-                            if nc == '*' {
-                                if let Some(&'/') = chars.peek() {
-                                    chars.next();
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    _ => {
-                        result.push('/');
-                    }
-                }
-            } else {
-                result.push(c);
-                chars.next();
-            }
-        }
-        result
-    }
 }
 
 #[cfg(test)]
@@ -404,18 +361,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_strip_jsonc_comments() {
+    fn jsonc_comments_and_trailing_commas_parse() {
         let input = r#"{
   // This is a comment
   "key": "value", // inline comment
   /* multi
      line */
-  "key2": "val//ue"
+  "key2": "val//ue",
 }"#;
-        let result = OmoService::strip_jsonc_comments(input);
-        let parsed: Value = serde_json::from_str(&result).unwrap();
+        let parsed = OmoService::parse_jsonc_object(input).unwrap();
         assert_eq!(parsed["key"], "value");
         assert_eq!(parsed["key2"], "val//ue");
+
+        let parsed = OmoService::parse_jsonc_object("{ // c\n  \"agents\": {}, }").unwrap();
+        assert!(parsed["agents"].is_object());
     }
 
     #[test]
