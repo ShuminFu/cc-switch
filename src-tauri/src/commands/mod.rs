@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 mod auth;
+mod backup_folder;
 mod balance;
 #[cfg(test)]
 mod bindings;
@@ -44,6 +45,7 @@ mod webdav_sync;
 mod workspace;
 
 pub use auth::*;
+pub use backup_folder::*;
 pub use balance::*;
 pub(crate) use blocking::{run_blocking, run_blocking_with_state};
 pub use budget::*;

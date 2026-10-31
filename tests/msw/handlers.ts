@@ -484,6 +484,7 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/get_budget_enforcement`, () => success(false)),
   http.post(`${TAURI_ENDPOINT}/set_budget_enforcement`, () => success(null)),
   http.post(`${TAURI_ENDPOINT}/save_usage_export`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/open_backups_folder`, () => success(true)),
   http.post(`${TAURI_ENDPOINT}/check_provider_limits`, async ({ request }) => {
     const { providerId } = await withJson<{ providerId: string }>(request);
     return success({

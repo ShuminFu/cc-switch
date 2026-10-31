@@ -53,6 +53,20 @@ describe("BackupListSection", () => {
     expect(screen.getByText(/512 B/)).toBeInTheDocument();
   });
 
+  it("shows the backup count and opens the backup folder (FE-UI-37)", async () => {
+    const api = mockInvoke({
+      list_db_backups: backups,
+      open_backups_folder: true,
+    });
+    renderWithQuery(<BackupListSection onSettingsChange={vi.fn()} />);
+
+    expect(await screen.findByTestId("backup-count")).toHaveTextContent("(2)");
+    fireEvent.click(screen.getByRole("button", { name: /Show in folder/ }));
+    await waitFor(() =>
+      expect(api.callsTo("open_backups_folder")).toHaveLength(1),
+    );
+  });
+
   it("shows the empty state", async () => {
     mockInvoke({ list_db_backups: [] });
     renderWithQuery(<BackupListSection onSettingsChange={vi.fn()} />);
