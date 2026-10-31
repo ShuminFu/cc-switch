@@ -47,6 +47,7 @@ import { getUsageRangePresetLabel, resolveUsageRange } from "@/lib/usageRange";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UsageExportButton } from "./UsageExportButton";
+import { BudgetHeroStrip } from "./BudgetHeroStrip";
 import {
   getDashboardViewState,
   saveDashboardViewState,
@@ -370,6 +371,8 @@ export function UsageDashboard({
         model={model}
         refreshIntervalMs={refreshIntervalMs}
       />
+
+      <BudgetHeroStrip appType={appType === "all" ? undefined : appType} />
 
       <UsageTrendChart
         range={range}

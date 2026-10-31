@@ -77,6 +77,10 @@ vi.mock("@/components/usage/UsageExportButton", () => ({
   ),
 }));
 
+vi.mock("@/components/usage/BudgetHeroStrip", () => ({
+  BudgetHeroStrip: () => <div data-testid="budget-hero-strip" />,
+}));
+
 vi.mock("@/components/usage/BudgetLimitsPanel", () => ({
   BudgetLimitsPanel: () => <div data-testid="budget-limits-panel" />,
 }));
