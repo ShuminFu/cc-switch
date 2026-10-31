@@ -89,3 +89,63 @@ describe("DirectorySettings inputs", () => {
     expect(latestSettings?.claudeConfigDir).toBeUndefined();
   });
 });
+
+describe("DirectorySettings resolved sources (get_app_config_dirs)", () => {
+  it("shows the directory in use and whether it is an override, env var or default", () => {
+    const noop = vi.fn(async () => {});
+    render(
+      <DirectorySettings
+        resolvedDirs={{
+          appConfig: "",
+          claude: "",
+          codex: "",
+          gemini: "",
+          grokbuild: "",
+          opencode: "",
+          openclaw: "",
+          hermes: "",
+        }}
+        onAppConfigChange={vi.fn()}
+        onBrowseAppConfig={noop}
+        onResetAppConfig={noop}
+        directories={{}}
+        onDirectoryChange={vi.fn()}
+        onBrowseDirectory={noop}
+        onResetDirectory={noop}
+        configDirInfo={[
+          {
+            app: "claude",
+            path: "/custom/claude",
+            exists: true,
+            source: { kind: "override" },
+          },
+          {
+            app: "codex",
+            path: "/env/codex",
+            exists: false,
+            source: { kind: "env", var: "CODEX_HOME" },
+          },
+          {
+            app: "gemini",
+            path: "/home/mock/.gemini",
+            exists: true,
+            source: { kind: "default" },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId("config-dir-source-claude")).toHaveTextContent(
+      "In use: /custom/claude (cc-switch setting)",
+    );
+    const codex = screen.getByTestId("config-dir-source-codex");
+    expect(codex).toHaveTextContent(
+      "In use: /env/codex (CODEX_HOME environment variable)",
+    );
+    expect(codex).toHaveTextContent("Directory does not exist yet");
+    expect(screen.getByTestId("config-dir-source-gemini")).toHaveTextContent(
+      "In use: /home/mock/.gemini (Default)",
+    );
+    expect(screen.queryByTestId("config-dir-source-hermes")).toBeNull();
+  });
+});

@@ -59,6 +59,7 @@ import { useSettings } from "@/hooks/useSettings";
 import { directoryValuesByApp } from "@/hooks/settingsDirectoryFields";
 import { useImportExport } from "@/hooks/useImportExport";
 import { useQueryClient } from "@tanstack/react-query";
+import { useAppConfigDirs } from "@/lib/query/adapters";
 import { useTranslation } from "react-i18next";
 import type { SettingsFormState } from "@/hooks/useSettings";
 import { RequestLogRetentionPanel } from "@/components/log-retention/RequestLogRetentionPanel";
@@ -122,6 +123,13 @@ export function SettingsPage({
 
   const { data: installedSkills } = useInstalledSkills();
   const queryClient = useQueryClient();
+  const { data: configDirInfo, refetch: refetchConfigDirs } =
+    useAppConfigDirs();
+  // Saved overrides change which directory is in use: re-resolve them.
+  const resolvedDirsKey = JSON.stringify(resolvedDirs);
+  useEffect(() => {
+    void refetchConfigDirs();
+  }, [resolvedDirsKey, refetchConfigDirs]);
 
   // FE-UI-55: one-click rollback to the safety backup taken by the import.
   const revertImport = useCallback(
@@ -438,6 +446,7 @@ export function SettingsPage({
                             onDirectoryChange={updateDirectory}
                             onBrowseDirectory={browseDirectory}
                             onResetDirectory={resetDirectory}
+                            configDirInfo={configDirInfo}
                           />
                         </AccordionContent>
                       </AccordionItem>
