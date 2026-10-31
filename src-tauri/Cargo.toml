@@ -55,7 +55,7 @@ tauri-plugin-notification = "2"
 specta = { version = "=2.0.0-rc.22", features = ["derive", "function", "serde_json", "indexmap"] }
 specta-typescript = "=0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["typescript"] }
-dirs = "5.0"
+dirs = "6.0"
 toml = "0.8"
 toml_edit = "0.22"
 # TLS: rustls + ring only (no native-tls/OpenSSL, no aws-lc-rs). lib.rs installs
