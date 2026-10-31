@@ -38,6 +38,8 @@ mod pricing_seed;
 mod read_pool;
 mod request_cache;
 mod schema;
+pub(crate) mod setting_keys;
+pub(crate) mod sync_diff;
 mod sync_rows;
 mod usage_writer;
 
@@ -186,7 +188,10 @@ pub struct Database {
 
 fn register_db_change_hook(conn: &Connection, config_generation: Arc<AtomicU64>) {
     conn.update_hook(Some(
-        move |action: Action, _database: &str, table: &str, _row_id: i64| match action {
+        move |action: Action, database: &str, table: &str, _row_id: i64| match action {
+            // DB-43: writes to attached scratch schemas (the sync export
+            // snapshot) are not changes to the app's data.
+            _ if database != "main" => {}
             Action::SQLITE_INSERT | Action::SQLITE_UPDATE | Action::SQLITE_DELETE => {
                 if !request_cache::is_volatile_table(table) {
                     config_generation.fetch_add(1, Ordering::AcqRel);
@@ -309,6 +314,16 @@ impl Database {
         Ok(db)
     }
 
+    /// A scratch in-memory database whose writes are not app data changes:
+    /// no auto-sync signal and no proxy-cache invalidation (SVC-27 preview).
+    pub(crate) fn memory_detached() -> Result<Self, AppError> {
+        let conn = Connection::open_in_memory().map_err(|e| AppError::Database(e.to_string()))?;
+        configure_connection(&conn, false)?;
+        let db = Self::from_connection_with_hook(conn, false);
+        db.create_tables()?;
+        Ok(db)
+    }
+
     /// 打开（或创建）指定路径的文件数据库，行为与 [`Database::init`] 的连接设置一致，
     /// 并启用只读连接池。主要用于测试与工具。
     #[allow(dead_code)]
@@ -327,8 +342,14 @@ impl Database {
     }
 
     fn from_connection(conn: Connection) -> Self {
+        Self::from_connection_with_hook(conn, true)
+    }
+
+    fn from_connection_with_hook(conn: Connection, change_hook: bool) -> Self {
         let request_cache = request_cache::RequestCache::new();
-        register_db_change_hook(&conn, request_cache.generation_handle());
+        if change_hook {
+            register_db_change_hook(&conn, request_cache.generation_handle());
+        }
         let conn = Arc::new(Mutex::new(conn));
         Self {
             usage_writer: usage_writer::UsageWriter::new(Arc::clone(&conn)),
@@ -365,6 +386,33 @@ impl Database {
             Some(pool) => pool.get().map(ReadConn::pooled),
             None => Ok(ReadConn::main(lock_conn!(self.conn))),
         }
+    }
+
+    /// Config-change counter bumped by the update hook (tests only).
+    #[cfg(test)]
+    pub(crate) fn config_generation_for_test(&self) -> u64 {
+        self.request_cache
+            .generation_handle()
+            .load(Ordering::Acquire)
+    }
+
+    /// Run `f` inside one write transaction on the main connection (SVC-11).
+    ///
+    /// The transaction commits only when `f` returns `Ok`; an error (or a
+    /// panic) rolls back every statement `f` executed, so multi-row saves are
+    /// all-or-nothing and fire a single auto-sync signal batch.
+    pub(crate) fn with_transaction<T>(
+        &self,
+        f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, AppError>,
+    ) -> Result<T, AppError> {
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::Database(format!("开启事务失败: {e}")))?;
+        let value = f(&tx)?;
+        tx.commit()
+            .map_err(|e| AppError::Database(format!("提交事务失败: {e}")))?;
+        Ok(value)
     }
 
     /// 把一个写任务交给使用量写线程（非阻塞；队列满时返回错误并丢弃）。
@@ -573,6 +621,36 @@ mod read_path_tests {
     use super::*;
     use std::sync::mpsc;
     use tempfile::TempDir;
+
+    #[test]
+    fn with_transaction_commits_on_ok_and_rolls_back_on_error() {
+        let db = Database::memory().expect("memory db");
+        db.with_transaction(|tx| {
+            tx.execute(
+                "INSERT INTO settings (key, value) VALUES ('tx-ok', '1')",
+                [],
+            )?;
+            Ok(())
+        })
+        .expect("committed");
+        let err = db
+            .with_transaction(|tx| {
+                tx.execute("INSERT INTO settings (key, value) VALUES ('tx-a', '1')", [])?;
+                tx.execute("INSERT INTO settings (key, value) VALUES ('tx-b', '1')", [])?;
+                Err::<(), _>(AppError::Message("injected".into()))
+            })
+            .expect_err("closure error propagates");
+        assert!(err.to_string().contains("injected"));
+        let conn = db.conn.lock().unwrap();
+        let keys: Vec<String> = conn
+            .prepare("SELECT key FROM settings WHERE key LIKE 'tx-%' ORDER BY key")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(keys, vec!["tx-ok".to_string()]);
+    }
 
     #[test]
     fn memory_db_read_conn_falls_back_to_main_connection() {

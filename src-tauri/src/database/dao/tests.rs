@@ -514,3 +514,118 @@ fn mid_chain_migration_failure_rolls_back_every_step() {
         .unwrap();
     assert_eq!(port, 9999);
 }
+
+// ------------------------------------------------- multi-row saves (SVC-11)
+
+/// Abort any UPDATE of the row `id` in `table`, to fail the k-th write.
+fn inject_update_failure(db: &Database, table: &str, id: &str) {
+    let conn = db.conn.lock().unwrap();
+    conn.execute_batch(&format!(
+        "CREATE TEMP TRIGGER inject_failure BEFORE UPDATE ON main.{table}
+         WHEN OLD.id = '{id}'
+         BEGIN SELECT RAISE(ABORT, 'injected failure'); END;"
+    ))
+    .unwrap();
+}
+
+fn drop_injected_failure(db: &Database) {
+    db.conn
+        .lock()
+        .unwrap()
+        .execute_batch("DROP TRIGGER temp.inject_failure;")
+        .unwrap();
+}
+
+#[test]
+fn sort_index_update_is_all_or_nothing() {
+    let db = db();
+    for (id, idx) in [("a", Some(0)), ("b", Some(1)), ("c", Some(2))] {
+        db.save_provider("claude", &provider(id, idx)).unwrap();
+    }
+    // The third write fails: the first two must be rolled back.
+    inject_update_failure(&db, "providers", "c");
+    let updates = vec![
+        ("a".to_string(), 2),
+        ("b".to_string(), 0),
+        ("c".to_string(), 1),
+    ];
+    let err = db
+        .update_provider_sort_indexes("claude", &updates)
+        .expect_err("injected failure propagates");
+    assert!(err.to_string().contains("injected failure"), "{err}");
+    let providers = db.get_all_providers("claude").unwrap();
+    let order: Vec<(String, Option<usize>)> = providers
+        .values()
+        .map(|p| (p.id.clone(), p.sort_index))
+        .collect();
+    assert_eq!(
+        order,
+        vec![
+            ("a".to_string(), Some(0)),
+            ("b".to_string(), Some(1)),
+            ("c".to_string(), Some(2)),
+        ]
+    );
+
+    drop_injected_failure(&db);
+    assert_eq!(
+        db.update_provider_sort_indexes("claude", &updates).unwrap(),
+        3
+    );
+    let providers = db.get_all_providers("claude").unwrap();
+    assert_eq!(providers["a"].sort_index, Some(2));
+    assert_eq!(providers["b"].sort_index, Some(0));
+    // Unchanged rows and unknown ids are not written.
+    assert_eq!(
+        db.update_provider_sort_indexes("claude", &updates).unwrap(),
+        0
+    );
+    assert_eq!(
+        db.update_provider_sort_indexes("claude", &[("ghost".to_string(), 1)])
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn set_enabled_prompt_is_exclusive_and_atomic() {
+    let db = db();
+    for (i, id) in ["p1", "p2", "p3"].iter().enumerate() {
+        let mut p = prompt(id, i as i64);
+        p.enabled = *id == "p1";
+        db.save_prompt("claude", &p).unwrap();
+    }
+    db.save_prompt(
+        "codex",
+        &Prompt {
+            enabled: true,
+            ..prompt("p1", 9)
+        },
+    )
+    .unwrap();
+
+    // Disabling p1 fails: p2 must not end up enabled next to it.
+    inject_update_failure(&db, "prompts", "p1");
+    db.set_enabled_prompt("claude", "p2")
+        .expect_err("injected failure propagates");
+    let enabled: Vec<String> = db
+        .get_prompts("claude")
+        .unwrap()
+        .values()
+        .filter(|p| p.enabled)
+        .map(|p| p.id.clone())
+        .collect();
+    assert_eq!(enabled, vec!["p1".to_string()]);
+
+    drop_injected_failure(&db);
+    assert_eq!(db.set_enabled_prompt("claude", "p2").unwrap(), 2);
+    let prompts = db.get_prompts("claude").unwrap();
+    let enabled: Vec<&str> = prompts
+        .values()
+        .filter(|p| p.enabled)
+        .map(|p| p.id.as_str())
+        .collect();
+    assert_eq!(enabled, vec!["p2"]);
+    // Other apps are untouched.
+    assert!(db.get_prompts("codex").unwrap()["p1"].enabled);
+}

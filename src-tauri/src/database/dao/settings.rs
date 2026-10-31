@@ -47,6 +47,10 @@ impl Database {
 
     /// 设置值
     pub fn set_setting(&self, key: &str, value: &str) -> Result<(), AppError> {
+        // DB-28: every key belongs in the registry (scope decides sync).
+        if crate::database::setting_keys::lookup(key).is_none() {
+            log::warn!("settings key '{key}' is not registered in setting_keys.rs");
+        }
         let conn = lock_conn!(self.conn);
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",

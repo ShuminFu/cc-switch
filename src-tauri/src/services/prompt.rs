@@ -192,22 +192,9 @@ impl PromptService {
 
         Self::write_live(state, &app, &target.content)?; // 原子写入
 
-        // Disable the others first, then enable the target: a failure part
-        // way leaves at most one enabled prompt, never two. Only rows whose
-        // flag changes are saved.
-        let result = (|| {
-            for prompt in prompts.values().filter(|p| p.enabled && p.id != id) {
-                let mut disabled = prompt.clone();
-                disabled.enabled = false;
-                state.db.save_prompt(app.as_str(), &disabled)?;
-            }
-            if !target.enabled {
-                let mut enabled = target.clone();
-                enabled.enabled = true;
-                state.db.save_prompt(app.as_str(), &enabled)?;
-            }
-            Ok::<(), AppError>(())
-        })();
+        // SVC-11: one atomic statement flips the flags; only rows whose flag
+        // changes are written, and a failure leaves every row untouched.
+        let result = state.db.set_enabled_prompt(app.as_str(), id);
         if let Err(err) = result {
             if let Some(previous) = previous_live {
                 if let Err(e) = Self::write_live(state, &app, &previous) {
