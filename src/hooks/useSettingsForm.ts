@@ -8,7 +8,7 @@ import {
 } from "./settingsDirectoryFields";
 import {
   SETTINGS_FORM_DEFAULTS,
-  isSupportedLanguage,
+  languagePreference,
   normalizeLanguage,
   normalizeSettingsForm,
   type Language,
@@ -49,13 +49,7 @@ export function useSettingsForm(): UseSettingsFormResult {
   const lastServerDataRef = useRef<Settings | null>(null);
 
   const readPersistedLanguage = useCallback((): Language => {
-    if (typeof window !== "undefined") {
-      const stored = window.localStorage.getItem("language");
-      if (isSupportedLanguage(stored)) {
-        return normalizeLanguage(stored);
-      }
-    }
-    return normalizeLanguage(i18n.language);
+    return languagePreference.get() ?? normalizeLanguage(i18n.language);
   }, [i18n]);
 
   const syncLanguage = useCallback(

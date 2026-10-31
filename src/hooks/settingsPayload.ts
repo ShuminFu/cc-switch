@@ -1,4 +1,6 @@
 import type { Settings } from "@/types";
+import { z } from "zod";
+import { createStoredValue } from "@/lib/storage";
 import { sanitizeDirectoryFields } from "./settingsDirectoryFields";
 
 export type Language = "zh" | "zh-TW" | "en" | "ja";
@@ -31,6 +33,19 @@ export const isSupportedLanguage = (lang?: string | null): boolean => {
     normalized === "en" || normalized === "ja" || normalized.startsWith("zh")
   );
 };
+
+/**
+ * The persisted UI language (`language` in localStorage). Accepts the same
+ * aliases as `isSupportedLanguage` and normalises them (FE-ARCH-22).
+ */
+export const languagePreference = createStoredValue<Language | undefined>(
+  "language",
+  z
+    .string()
+    .refine((value) => isSupportedLanguage(value))
+    .transform((value) => normalizeLanguage(value)),
+  undefined,
+);
 
 /**
  * Form defaults for boolean settings the backend may omit. One entry per
