@@ -31,7 +31,7 @@ interface AddProviderDialogProps {
       ensureClaudeDesktopOfficialSeed?: boolean;
       ensureCodexOfficialSeed?: boolean;
     },
-  ) => Promise<void> | void;
+  ) => Promise<unknown> | void;
 }
 
 export function AddProviderDialog({

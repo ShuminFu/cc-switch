@@ -133,7 +133,6 @@ export const useAddProviderMutation = (appId: AppId) => {
         id,
         createdAt: Date.now(),
       };
-      delete (newProvider as any).providerKey;
 
       await providersApi.add(newProvider, appId, addToLive);
       return newProvider;
