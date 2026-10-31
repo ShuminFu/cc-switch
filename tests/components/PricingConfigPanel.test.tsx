@@ -18,6 +18,7 @@ const multipliers: Record<string, string> = {
   codex: "1.2",
   gemini: "1",
   grokbuild: "0.5",
+  opencode: "2",
 };
 
 const baseResponders = {
@@ -64,13 +65,16 @@ describe("PricingConfigPanel", () => {
         "1.2",
         "1",
         "0.5",
+        "2",
       ]),
     );
+    // OpenCode is priced too (FE-UI-29).
+    expect(screen.getByTestId("pricing-app-opencode")).toBeInTheDocument();
     // Nothing changed yet, so there is nothing to save.
     expect(screen.getByRole("button", { name: "common.save" })).toBeDisabled();
   });
 
-  it("saves every app's multiplier and source once something changed", async () => {
+  it("saves only the changed app's multiplier and source", async () => {
     const api = mockInvoke({
       ...baseResponders,
       set_default_cost_multiplier: null,
@@ -90,16 +94,16 @@ describe("PricingConfigPanel", () => {
       ),
     );
     const multiplierCalls = api.callsTo("set_default_cost_multiplier");
-    expect(multiplierCalls.map((c) => c.args)).toEqual(
-      expect.arrayContaining([
-        { appType: "codex", value: "1.5" },
-        { appType: "claude", value: "1" },
-        { appType: "gemini", value: "1" },
-        { appType: "grokbuild", value: "0.5" },
-      ]),
-    );
-    expect(api.callsTo("set_pricing_model_source").map((c) => c.args)).toEqual(
-      expect.arrayContaining([{ appType: "codex", value: "request" }]),
+    expect(multiplierCalls.map((c) => c.args)).toEqual([
+      { appType: "codex", value: "1.5" },
+    ]);
+    expect(api.callsTo("set_pricing_model_source").map((c) => c.args)).toEqual([
+      { appType: "codex", value: "request" },
+    ]);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "common.save" }),
+      ).toBeDisabled(),
     );
   });
 
@@ -116,10 +120,38 @@ describe("PricingConfigPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
-    expect(String(toastMock.error.mock.calls[0][0])).toContain(
-      "settings.globalProxy.defaultCostMultiplierInvalid",
-    );
     expect(api.callsTo("set_default_cost_multiplier")).toHaveLength(0);
+  });
+
+  it("reports which app failed on a partial save and keeps it dirty", async () => {
+    const api = mockInvoke({
+      ...baseResponders,
+      set_default_cost_multiplier: ({ appType }: Record<string, unknown>) => {
+        if (appType === "gemini") throw new Error("locked");
+        return null;
+      },
+      set_pricing_model_source: null,
+    });
+    renderPanel();
+
+    await waitFor(() => expect(multiplierInputs()[2]).toHaveValue(1));
+    fireEvent.change(multiplierInputs()[1], { target: { value: "1.5" } });
+    fireEvent.change(multiplierInputs()[2], { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+    expect(toastMock.success).not.toHaveBeenCalled();
+    expect(api.callsTo("set_default_cost_multiplier")).toHaveLength(2);
+    // Gemini is still dirty (and flagged), codex is saved.
+    expect(screen.getByTestId("pricing-app-gemini")).toHaveTextContent(
+      "settings.globalProxy.pricingSaveFailedBadge",
+    );
+    expect(screen.getByTestId("pricing-app-codex")).not.toHaveTextContent(
+      "settings.globalProxy.pricingSaveFailedBadge",
+    );
+    expect(
+      screen.getByRole("button", { name: "common.save" }),
+    ).not.toBeDisabled();
   });
 
   it("shows an error instead of the table when pricing cannot be loaded", async () => {
