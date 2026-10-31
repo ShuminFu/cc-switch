@@ -66,6 +66,15 @@ pub(crate) const SYNC_PRESERVE_TABLES: &[&str] = &[
 /// state of the live files on disk, which a restore does not touch.
 const RESTORE_PRESERVE_TABLES: &[&str] = &["proxy_live_backup"];
 
+/// Local usage/statistics tables a backup restore keeps by default (DB-42):
+/// restoring yesterday's backup to undo a provider edit must not silently
+/// discard the request logs and cost history recorded since.
+const RESTORE_PRESERVE_USAGE_TABLES: &[&str] = &[
+    "proxy_request_logs",
+    "stream_check_logs",
+    "usage_daily_rollups",
+];
+
 /// Legacy tables that may appear in SQL exports from older schema versions and
 /// are migrated away by `apply_schema_migrations`.
 const LEGACY_IMPORT_TABLES: &[&str] = &["failover_queue", "circuit_breaker_config"];
@@ -552,20 +561,23 @@ impl Database {
         // 导入前备份现有数据库（校验通过后再备份，失败的导入不会占用备份轮换名额）
         let backup_path = self.backup_database_file_of_kind(BackupKind::Safety, None)?;
 
-        if !preserve_tables.is_empty() {
-            let local_snapshot = self.snapshot_to_memory()?;
-            Self::restore_tables(&local_snapshot, &temp_conn, preserve_tables)?;
-            Self::restore_device_local_state(&local_snapshot, &temp_conn)?;
-            Self::adapt_imported_secrets(Some(&local_snapshot), &temp_conn)?;
-        } else if Self::imported_secrets_need_adapting(&temp_conn)? {
-            // DB-02: the local snapshot is only needed when secrets must be adapted.
-            let local_snapshot = self.snapshot_to_memory()?;
-            Self::adapt_imported_secrets(Some(&local_snapshot), &temp_conn)?;
-        }
-
-        // 使用 Backup 将临时库原子写回主库
+        // DB-35: copy the preserved local-only tables from the LIVE connection
+        // and overwrite the main database inside one critical section, so rows
+        // the proxy logger / session sync write while the remote SQL was being
+        // executed above are not lost to a stale snapshot.
         {
             let mut main_conn = lock_conn!(self.conn);
+            if !preserve_tables.is_empty() {
+                Self::restore_tables(&main_conn, &temp_conn, preserve_tables)?;
+                Self::restore_device_local_state(&main_conn, &temp_conn)?;
+                Self::adapt_imported_secrets(Some(&main_conn), &temp_conn)?;
+            } else if Self::imported_secrets_need_adapting(&temp_conn)? {
+                // DB-02: local rows are only needed when secrets must be adapted.
+                Self::adapt_imported_secrets(Some(&main_conn), &temp_conn)?;
+            }
+            Self::enforce_foreign_keys(&temp_conn)?;
+
+            // 使用 Backup 将临时库原子写回主库
             let backup = Backup::new(&temp_conn, &mut main_conn)
                 .map_err(|e| AppError::Database(e.to_string()))?;
             backup
@@ -612,24 +624,36 @@ impl Database {
         ))
     }
 
+    /// Replace `tables` in `target_conn` with the rows of `source_conn`.
+    ///
+    /// DB-11: all tables are copied inside ONE transaction on the target with a
+    /// prepared INSERT per table, so a large log table costs one commit instead
+    /// of one fsync'd autocommit per row.
     fn restore_tables(
         source_conn: &Connection,
         target_conn: &Connection,
         tables: &[&str],
     ) -> Result<(), AppError> {
+        let tx = target_conn
+            .unchecked_transaction()
+            .map_err(|e| AppError::Database(format!("开启恢复事务失败: {e}")))?;
         for table in tables {
-            if !Self::table_exists(source_conn, table)? || !Self::table_exists(target_conn, table)?
-            {
+            if !Self::table_exists(source_conn, table)? || !Self::table_exists(&tx, table)? {
                 continue;
             }
 
-            let columns = Self::get_table_columns(source_conn, table)?;
+            // Only columns both sides have: an older/newer remote schema must not
+            // make the copy fail.
+            let target_columns = Self::get_table_columns(&tx, table)?;
+            let columns: Vec<String> = Self::get_table_columns(source_conn, table)?
+                .into_iter()
+                .filter(|c| target_columns.contains(c))
+                .collect();
             if columns.is_empty() {
                 continue;
             }
 
-            target_conn
-                .execute(&format!("DELETE FROM \"{table}\""), [])
+            tx.execute(&format!("DELETE FROM \"{table}\""), [])
                 .map_err(|e| AppError::Database(format!("清空表 {table} 失败: {e}")))?;
 
             let placeholders = (1..=columns.len())
@@ -642,29 +666,78 @@ impl Database {
                 .collect::<Vec<_>>()
                 .join(", ");
             let insert_sql = format!("INSERT INTO \"{table}\" ({cols}) VALUES ({placeholders})");
+            let mut insert = tx
+                .prepare(&insert_sql)
+                .map_err(|e| AppError::Database(format!("准备恢复表 {table} 失败: {e}")))?;
 
             let mut stmt = source_conn
-                .prepare(&format!("SELECT * FROM \"{table}\""))
+                .prepare(&format!("SELECT {cols} FROM \"{table}\""))
                 .map_err(|e| AppError::Database(format!("读取表 {table} 失败: {e}")))?;
             let mut rows = stmt
                 .query([])
                 .map_err(|e| AppError::Database(format!("查询表 {table} 数据失败: {e}")))?;
 
+            let mut values = Vec::with_capacity(columns.len());
             while let Some(row) = rows.next().map_err(|e| AppError::Database(e.to_string()))? {
-                let mut values = Vec::with_capacity(columns.len());
+                values.clear();
                 for idx in 0..columns.len() {
                     values.push(
                         row.get::<_, rusqlite::types::Value>(idx)
                             .map_err(|e| AppError::Database(e.to_string()))?,
                     );
                 }
-
-                target_conn
-                    .execute(&insert_sql, rusqlite::params_from_iter(values.iter()))
+                insert
+                    .execute(rusqlite::params_from_iter(values.iter()))
                     .map_err(|e| AppError::Database(format!("恢复表 {table} 数据失败: {e}")))?;
             }
         }
+        tx.commit()
+            .map_err(|e| AppError::Database(format!("提交恢复事务失败: {e}")))?;
+        Ok(())
+    }
 
+    /// DB-01: imported dumps run with `foreign_keys=OFF`, so they can carry
+    /// orphan child rows. Before an imported/restored database replaces the
+    /// live one, remove the rows `PRAGMA foreign_key_check` reports (they are
+    /// unreachable through their parent anyway) and refuse the import if a
+    /// violation cannot be removed by rowid.
+    fn enforce_foreign_keys(conn: &Connection) -> Result<(), AppError> {
+        let violations: Vec<(String, Option<i64>)> = {
+            let mut stmt = conn
+                .prepare("PRAGMA foreign_key_check")
+                .map_err(|e| AppError::Database(format!("外键检查失败: {e}")))?;
+            let rows = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(|e| AppError::Database(format!("外键检查失败: {e}")))?;
+            rows.collect::<Result<_, _>>()
+                .map_err(|e| AppError::Database(format!("外键检查失败: {e}")))?
+        };
+        if violations.is_empty() {
+            return Ok(());
+        }
+        for (table, rowid) in &violations {
+            let (Some(rowid), true) = (rowid, is_known_import_table(table)) else {
+                return Err(AppError::localized(
+                    "backup.sql.foreign_key_violation",
+                    format!("导入的数据存在无法修复的外键冲突（表 {table}）"),
+                    format!(
+                        "The imported data has a foreign key violation that cannot be repaired (table {table})."
+                    ),
+                ));
+            };
+            conn.execute(
+                &format!(
+                    "DELETE FROM \"{}\" WHERE rowid = ?1",
+                    table.replace('"', "\"\"")
+                ),
+                [rowid],
+            )
+            .map_err(|e| AppError::Database(format!("删除孤立行失败 ({table}): {e}")))?;
+        }
+        log::warn!(
+            "Removed {} orphan row(s) that violated foreign keys from the imported database",
+            violations.len()
+        );
         Ok(())
     }
 
@@ -945,12 +1018,26 @@ impl Database {
             backup
                 .step(-1)
                 .map_err(|e| AppError::Database(e.to_string()))?;
+            drop(backup);
+            drop(conn);
+            // The page copy carries the live DB's WAL flag; a backup is a single
+            // self-contained file, so store it in rollback-journal mode (no
+            // -wal/-shm side files when it is later opened or copied).
+            Self::set_backup_journal_mode_delete(&dest_conn);
         }
 
         let mut keep_paths = vec![backup_path.clone()];
         keep_paths.extend(keep.map(Path::to_path_buf));
         Self::cleanup_db_backups(&backup_dir, retain.max(1), kind, &keep_paths)?;
         Ok(Some(backup_path))
+    }
+
+    fn set_backup_journal_mode_delete(conn: &Connection) {
+        if let Err(e) = conn.query_row("PRAGMA journal_mode = DELETE", [], |row| {
+            row.get::<_, String>(0)
+        }) {
+            log::warn!("设置备份文件 journal_mode=DELETE 失败: {e}");
+        }
     }
 
     /// 清理旧的数据库备份：仅在同一类型的备份中保留最新的 N 个。
@@ -1185,21 +1272,44 @@ impl Database {
         Ok(entries)
     }
 
-    /// Restore database from a backup file. Returns the safety backup ID.
+    /// Restore database from a backup file, keeping this device's usage logs and
+    /// statistics recorded since the backup (DB-42). Returns the safety backup ID.
     pub fn restore_from_backup(&self, filename: &str) -> Result<String, AppError> {
-        self.restore_from_backup_in(
+        self.restore_from_backup_with_options(filename, true)
+    }
+
+    /// [`Self::restore_from_backup`]; `preserve_usage = false` restores the
+    /// backup's own usage logs/rollups/stream checks instead of the current ones.
+    pub fn restore_from_backup_with_options(
+        &self,
+        filename: &str,
+        preserve_usage: bool,
+    ) -> Result<String, AppError> {
+        self.restore_from_backup_in_with(
             &get_app_config_dir(),
             crate::settings::effective_backup_retain_count(),
             filename,
+            preserve_usage,
         )
     }
 
     /// [`Self::restore_from_backup`] with an explicit config dir and retain count.
+    #[allow(dead_code)]
     pub(crate) fn restore_from_backup_in(
         &self,
         config_dir: &Path,
         retain: usize,
         filename: &str,
+    ) -> Result<String, AppError> {
+        self.restore_from_backup_in_with(config_dir, retain, filename, true)
+    }
+
+    pub(crate) fn restore_from_backup_in_with(
+        &self,
+        config_dir: &Path,
+        retain: usize,
+        filename: &str,
+        preserve_usage: bool,
     ) -> Result<String, AppError> {
         // Security: validate filename to prevent path traversal
         if filename.contains("..")
@@ -1230,17 +1340,7 @@ impl Database {
         })?;
         let staging_conn = Self::stage_backup_for_restore(&backup_path, staging_file.path())?;
 
-        // Step 2: Keep this device's proxy/takeover state; the live files on disk
-        // are not part of the backup.
-        {
-            let local_snapshot = self.snapshot_to_memory()?;
-            Self::restore_tables(&local_snapshot, &staging_conn, RESTORE_PRESERVE_TABLES)?;
-            Self::restore_device_local_state(&local_snapshot, &staging_conn)?;
-            // DB-02: check placeholders against this keychain and warn.
-            Self::adapt_imported_secrets(Some(&local_snapshot), &staging_conn)?;
-        }
-
-        // Step 3: Safety backup of the current database. Rotation never prunes
+        // Step 2: Safety backup of the current database. Rotation never prunes
         // the backup being restored.
         let safety_backup = self.backup_database_file_in(
             config_dir,
@@ -1252,9 +1352,22 @@ impl Database {
             .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
             .unwrap_or_default();
 
-        // Step 4: Replace the main database with the verified staging copy
+        // Step 3: Under one lock, carry this device's live-config backups,
+        // proxy/takeover state and (by default) usage history into the staging
+        // copy from the LIVE database, then replace the main database with it
+        // (DB-35/DB-42: nothing written meanwhile is lost to a stale snapshot).
         {
             let mut main_conn = lock_conn!(self.conn);
+            let mut preserved: Vec<&str> = RESTORE_PRESERVE_TABLES.to_vec();
+            if preserve_usage {
+                preserved.extend_from_slice(RESTORE_PRESERVE_USAGE_TABLES);
+            }
+            Self::restore_tables(&main_conn, &staging_conn, &preserved)?;
+            Self::restore_device_local_state(&main_conn, &staging_conn)?;
+            // DB-02: check placeholders against this keychain and warn.
+            Self::adapt_imported_secrets(Some(&main_conn), &staging_conn)?;
+            Self::enforce_foreign_keys(&staging_conn)?;
+
             let backup = Backup::new(&staging_conn, &mut main_conn)
                 .map_err(|e| AppError::Database(e.to_string()))?;
             backup
@@ -1744,6 +1857,103 @@ mod tests {
                 1
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn sql_import_rejects_insert_into_unknown_table() -> Result<(), AppError> {
+        let sql = exported_sql_with("INSERT INTO \"not_an_app_table\" VALUES (1);")?;
+        let target = Database::memory()?;
+        seed_provider(&target, "live-provider");
+        target
+            .import_sql_string(&sql)
+            .expect_err("INSERT into an unknown table must be rejected");
+        assert_eq!(
+            query_i64(
+                &target,
+                "SELECT COUNT(*) FROM providers WHERE id = 'live-provider'"
+            ),
+            1,
+            "live data is untouched"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sql_import_drops_orphan_rows_that_violate_foreign_keys() -> Result<(), AppError> {
+        let sql = exported_sql_with(
+            "INSERT INTO \"provider_endpoints\" (provider_id, app_type, url, added_at) \
+             VALUES ('ghost', 'claude', 'https://orphan.example', 0);",
+        )?;
+        let target = Database::memory()?;
+        target.import_sql_string(&sql)?;
+        assert_eq!(
+            query_i64(
+                &target,
+                "SELECT COUNT(*) FROM provider_endpoints WHERE provider_id = 'ghost'"
+            ),
+            0
+        );
+        assert_eq!(
+            query_i64(&target, "SELECT COUNT(*) FROM providers WHERE id = 'p1'"),
+            1
+        );
+        Ok(())
+    }
+
+    /// DB-35: rows written by other writers while a sync import runs are kept.
+    #[test]
+    fn sync_import_keeps_rows_written_concurrently() -> Result<(), AppError> {
+        let remote_db = Database::memory()?;
+        seed_provider(&remote_db, "remote-provider");
+        let remote_sql = remote_db.export_sql_string_for_sync()?;
+
+        let local_db = Database::memory()?;
+        seed_provider(&local_db, "local-provider");
+        std::thread::scope(|scope| -> Result<(), AppError> {
+            let writer = scope.spawn(|| {
+                for i in 0..1000 {
+                    let conn = local_db.conn.lock().unwrap();
+                    conn.execute(
+                        "INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model,
+                            input_tokens, output_tokens, total_cost_usd, latency_ms, status_code, created_at)
+                         VALUES (?1, 'local-provider', 'claude', 'm', 1, 1, '0', 1, 200, ?2)",
+                        rusqlite::params![format!("concurrent-{i}"), 1000 + i],
+                    )
+                    .unwrap();
+                    if i == 500 {
+                        conn.execute(
+                            "INSERT INTO proxy_live_backup (app_type, original_config, backed_up_at)
+                             VALUES ('codex', 'live', '2026-01-01')",
+                            [],
+                        )
+                        .unwrap();
+                    }
+                }
+            });
+            local_db.import_sql_string_for_sync(&remote_sql)?;
+            writer.join().expect("writer thread");
+            Ok(())
+        })?;
+
+        assert_eq!(
+            query_i64(
+                &local_db,
+                "SELECT COUNT(*) FROM proxy_request_logs WHERE request_id LIKE 'concurrent-%'"
+            ),
+            1000
+        );
+        assert_eq!(
+            query_i64(&local_db, "SELECT COUNT(*) FROM proxy_live_backup"),
+            1
+        );
+        assert_eq!(
+            query_i64(
+                &local_db,
+                "SELECT COUNT(*) FROM providers WHERE id = 'remote-provider'"
+            ),
+            1
+        );
         Ok(())
     }
 

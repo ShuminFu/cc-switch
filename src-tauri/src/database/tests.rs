@@ -1197,6 +1197,80 @@ mod backup_restore {
         assert_eq!(live_backup, "live-original");
     }
 
+    fn insert_usage_rows(db: &Database, request_id: &str) {
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model,
+                input_tokens, output_tokens, total_cost_usd, latency_ms, status_code, created_at)
+             VALUES (?1, 'p-backup', 'claude', 'm', 1, 1, '0.01', 1, 200, 1000)",
+            [request_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO usage_daily_rollups (date, app_type, provider_id, model, request_count,
+                success_count, input_tokens, output_tokens, cache_read_tokens,
+                cache_creation_tokens, total_cost_usd, avg_latency_ms)
+             VALUES ('2026-03-01', 'claude', 'p-backup', 'm', 1, 1, 1, 1, 0, 0, '0.01', 1)",
+            [],
+        )
+        .unwrap();
+    }
+
+    fn count(db: &Database, sql: &str) -> i64 {
+        let conn = db.conn.lock().unwrap();
+        conn.query_row(sql, [], |row| row.get(0)).unwrap()
+    }
+
+    #[test]
+    fn restore_keeps_usage_recorded_after_the_backup_by_default() {
+        let home = TestHome::new(10);
+        let db = &home.db;
+        insert_provider(db, "p-backup");
+        let backup = home.backup(BackupKind::Manual);
+        insert_usage_rows(db, "req-after-backup");
+
+        home.restore(&file_name(&backup)).expect("restore");
+        assert_eq!(
+            count(
+                db,
+                "SELECT COUNT(*) FROM proxy_request_logs WHERE request_id = 'req-after-backup'"
+            ),
+            1,
+            "logs recorded after the backup survive the restore (DB-42)"
+        );
+        assert_eq!(count(db, "SELECT COUNT(*) FROM usage_daily_rollups"), 1);
+    }
+
+    #[test]
+    fn restore_without_usage_preservation_takes_the_backups_usage() {
+        let home = TestHome::new(10);
+        let db = &home.db;
+        insert_provider(db, "p-backup");
+        let backup = home.backup(BackupKind::Manual);
+        insert_usage_rows(db, "req-after-backup");
+
+        db.restore_from_backup_in_with(home.dir.path(), home.retain, &file_name(&backup), false)
+            .expect("restore");
+        assert_eq!(count(db, "SELECT COUNT(*) FROM proxy_request_logs"), 0);
+        assert_eq!(count(db, "SELECT COUNT(*) FROM usage_daily_rollups"), 0);
+    }
+
+    #[test]
+    fn backup_files_are_written_in_rollback_journal_mode() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let live = Database::open_file(&dir.path().join("cc-switch.db")).expect("open file db");
+        insert_provider(&live, "p1");
+        let path = live
+            .backup_database_file_in(dir.path(), 5, BackupKind::Manual, None)
+            .expect("backup")
+            .expect("backup path");
+        let conn = rusqlite::Connection::open(&path).expect("open backup");
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode.to_ascii_lowercase(), "delete");
+    }
+
     #[test]
     fn rotation_never_deletes_manual_named_or_other_kinds() {
         let home = TestHome::new(3);
