@@ -715,6 +715,59 @@ mod tests {
         panic!("mtime did not advance");
     }
 
+    /// SVC-13: a large first import is one transaction per file (one commit)
+    /// with prepared statements, so it stays fast and does not fsync per row.
+    #[test]
+    fn test_large_file_import_commits_once() -> Result<(), AppError> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        const LINES: usize = 10_000;
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("big-session.jsonl");
+        let mut body = String::with_capacity(LINES * 320);
+        for i in 0..LINES {
+            body.push_str(&assistant_line(
+                &format!("msg_bulk_{i}"),
+                10,
+                Some("end_turn"),
+            ));
+            body.push('\n');
+        }
+        fs::write(&file, body).unwrap();
+
+        let commits = Arc::new(AtomicUsize::new(0));
+        {
+            let counter = Arc::clone(&commits);
+            let conn = db.conn.lock().unwrap();
+            conn.commit_hook(Some(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                false
+            }));
+        }
+
+        let started = std::time::Instant::now();
+        let (imported, _) = sync_single_file(&db, &file)?;
+        let elapsed = started.elapsed();
+        db.conn.lock().unwrap().commit_hook(None::<fn() -> bool>);
+
+        assert_eq!(imported as usize, LINES);
+        assert_eq!(
+            commits.load(Ordering::SeqCst),
+            1,
+            "rows and cursor commit together, once per file"
+        );
+        // ~1 s in release; generous bound for unoptimized CI builds.
+        assert!(elapsed < std::time::Duration::from_secs(20), "{elapsed:?}");
+
+        // Re-syncing the unchanged file writes nothing.
+        commits.store(0, Ordering::SeqCst);
+        let (again, _) = sync_single_file(&db, &file)?;
+        assert_eq!(again, 0);
+        Ok(())
+    }
+
     #[test]
     fn test_parse_usage_from_jsonl_line() {
         let line = r#"{"type":"assistant","message":{"id":"msg_test123","model":"claude-opus-4-6","usage":{"input_tokens":3,"output_tokens":150,"cache_read_input_tokens":5000,"cache_creation_input_tokens":10000},"stop_reason":"end_turn"},"timestamp":"2026-04-05T12:00:00Z","sessionId":"session-abc"}"#;

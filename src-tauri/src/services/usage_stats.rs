@@ -1559,11 +1559,15 @@ impl Database {
         // DB-40: IPC pagination is untrusted; clamp the page size and reject an
         // offset that would overflow instead of panicking / wrapping.
         let page_size = page_size.clamp(1, MAX_REQUEST_LOG_PAGE_SIZE);
-        let offset = page
-            .checked_mul(page_size)
-            .ok_or_else(|| AppError::InvalidInput(format!("请求日志页码超出范围: page={page}")))?;
+        // SVC-14: a page past the addressable range is simply empty (the total
+        // is still reported so the UI can clamp its pager).
+        let offset = page.checked_mul(page_size);
 
         let conn = self.read_conn()?;
+        // SVC-14: COUNT and the page SELECT read one snapshot, so a log
+        // written between them cannot make the page disagree with `total`.
+        // The transaction is read-only and is dropped (rolled back) at the end.
+        let snapshot = conn.unchecked_transaction()?;
 
         let mut conditions = vec![effective_usage_log_filter("l")];
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -1619,9 +1623,18 @@ impl Database {
              {where_clause}"
         );
         let count_params: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let total: u32 = conn.query_row(&count_sql, count_params.as_slice(), |row| {
+        let total: u32 = snapshot.query_row(&count_sql, count_params.as_slice(), |row| {
             row.get::<_, i64>(0).map(|v| v as u32)
         })?;
+
+        let Some(offset) = offset else {
+            return Ok(PaginatedLogs {
+                data: Vec::new(),
+                total,
+                page,
+                page_size,
+            });
+        };
 
         // 获取数据
         params.push(Box::new(page_size as i64));
@@ -1643,7 +1656,7 @@ impl Database {
              LIMIT ? OFFSET ?"
         );
 
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = snapshot.prepare(&sql)?;
         let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
         let rows = stmt.query_map(params_refs.as_slice(), row_to_request_log_detail)?;
 
@@ -1652,9 +1665,11 @@ impl Database {
 
         for row in rows {
             let mut log = row?;
-            Self::price_log_in_memory(&conn, &mut log, &mut pricing_cache)?;
+            Self::price_log_in_memory(&snapshot, &mut log, &mut pricing_cache)?;
             logs.push(log);
         }
+        drop(stmt);
+        drop(snapshot);
 
         Ok(PaginatedLogs {
             data: logs,
@@ -1675,10 +1690,10 @@ impl Database {
         let detail_sql = format!(
             "SELECT l.request_id, l.provider_id, {detail_pname} as provider_name, l.app_type, l.model,
                     l.request_model, l.cost_multiplier,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-                    input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
-                    is_streaming, latency_ms, first_token_ms, duration_ms,
-                    status_code, error_message, created_at, l.data_source, l.pricing_model,
+                    l.input_tokens, l.output_tokens, l.cache_read_tokens, l.cache_creation_tokens,
+                    l.input_cost_usd, l.output_cost_usd, l.cache_read_cost_usd, l.cache_creation_cost_usd, l.total_cost_usd,
+                    l.is_streaming, l.latency_ms, l.first_token_ms, l.duration_ms,
+                    l.status_code, l.error_message, l.created_at, l.data_source, l.pricing_model,
                     l.input_token_semantics
              FROM proxy_request_logs l
              LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type
@@ -2971,10 +2986,10 @@ mod tests {
             }
         }
 
-        let err = db
-            .get_request_logs(&LogFilters::default(), u32::MAX, 2)
-            .expect_err("overflowing offset is rejected");
-        assert!(matches!(err, AppError::InvalidInput(_)), "{err}");
+        // SVC-14: an overflowing page is an empty page that still reports the total.
+        let past_end = db.get_request_logs(&LogFilters::default(), u32::MAX, 2)?;
+        assert!(past_end.data.is_empty());
+        assert_eq!(past_end.total, 3);
 
         let zero = db.get_request_logs(&LogFilters::default(), 0, 0)?;
         assert_eq!(zero.page_size, 1);
@@ -2994,6 +3009,20 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(persisted, 0, "listing logs performs no writes");
+        let total_changes = |c: &Connection| -> i64 {
+            c.query_row("SELECT total_changes()", [], |r| r.get(0))
+                .unwrap()
+        };
+        let changes_before = total_changes(&conn);
+        drop(conn);
+        db.get_request_logs(&LogFilters::default(), 0, 10)?;
+        db.get_request_detail("unpriced-0")?;
+        let conn = lock_conn!(db.conn);
+        assert_eq!(
+            total_changes(&conn),
+            changes_before,
+            "SVC-14: list/detail reads execute no INSERT/UPDATE/DELETE"
+        );
         Ok(())
     }
 
