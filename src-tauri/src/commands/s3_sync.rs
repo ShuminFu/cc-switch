@@ -18,20 +18,19 @@ fn persist_sync_error(settings: &mut S3SyncSettings, error: &AppError, source: &
     let _ = settings::update_s3_sync_status(settings.status.clone());
 }
 
-fn s3_not_configured_error() -> String {
+fn s3_not_configured_error() -> AppError {
     AppError::localized(
         "s3.sync.not_configured",
         "未配置 S3 同步",
         "S3 sync is not configured.",
     )
-    .to_string()
 }
 
-fn s3_sync_disabled_error() -> String {
-    AppError::localized("s3.sync.disabled", "S3 同步未启用", "S3 sync is disabled.").to_string()
+fn s3_sync_disabled_error() -> AppError {
+    AppError::localized("s3.sync.disabled", "S3 同步未启用", "S3 sync is disabled.")
 }
 
-fn require_enabled_s3_settings() -> Result<S3SyncSettings, String> {
+fn require_enabled_s3_settings() -> Result<S3SyncSettings, AppError> {
     let settings = settings::get_s3_sync_settings().ok_or_else(s3_not_configured_error)?;
     if !settings.enabled {
         return Err(s3_sync_disabled_error());
@@ -64,7 +63,7 @@ where
     s3_sync_service::run_with_sync_lock(operation).await
 }
 
-fn map_sync_result<T, F>(result: Result<T, AppError>, on_error: F) -> Result<T, String>
+fn map_sync_result<T, F>(result: Result<T, AppError>, on_error: F) -> Result<T, AppError>
 where
     F: FnOnce(&AppError),
 {
@@ -72,7 +71,7 @@ where
         Ok(value) => Ok(value),
         Err(err) => {
             on_error(&err);
-            Err(err.to_string())
+            Err(err)
         }
     }
 }
@@ -81,13 +80,11 @@ where
 pub async fn s3_test_connection(
     settings: S3SyncSettings,
     #[allow(non_snake_case)] preserveEmptyPassword: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, AppError> {
     let preserve_empty = preserveEmptyPassword.unwrap_or(true);
     let resolved =
         resolve_secret_for_request(settings, settings::get_s3_sync_settings(), preserve_empty);
-    s3_sync_service::check_connection(&resolved)
-        .await
-        .map_err(|e| e.to_string())?;
+    s3_sync_service::check_connection(&resolved).await?;
     Ok(json!({
         "success": true,
         "message": "S3 connection ok",
@@ -105,10 +102,11 @@ fn manual_force(force: Option<bool>) -> bool {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn s3_sync_upload(
     state: State<'_, AppState>,
     force: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, AppError> {
     let db = state.db.clone();
     let mut settings = require_enabled_s3_settings()?;
 
@@ -124,10 +122,11 @@ pub async fn s3_sync_upload(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn s3_sync_download(
     state: State<'_, AppState>,
     force: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, AppError> {
     let db = state.db.clone();
     let db_for_sync = db.clone();
     let mut settings = require_enabled_s3_settings()?;
@@ -161,7 +160,7 @@ pub async fn s3_sync_download(
 pub async fn s3_sync_save_settings(
     settings: S3SyncSettings,
     #[allow(non_snake_case)] passwordTouched: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, AppError> {
     let password_touched = passwordTouched.unwrap_or(false);
     let existing = settings::get_s3_sync_settings();
     let mut sync_settings =
@@ -173,17 +172,16 @@ pub async fn s3_sync_save_settings(
     }
 
     sync_settings.normalize();
-    sync_settings.validate().map_err(|e| e.to_string())?;
-    settings::set_s3_sync_settings(Some(sync_settings)).map_err(|e| e.to_string())?;
+    sync_settings.validate()?;
+    settings::set_s3_sync_settings(Some(sync_settings))?;
     Ok(json!({ "success": true }))
 }
 
 #[tauri::command]
-pub async fn s3_sync_fetch_remote_info() -> Result<Value, String> {
+#[specta::specta]
+pub async fn s3_sync_fetch_remote_info() -> Result<Value, AppError> {
     let settings = require_enabled_s3_settings()?;
-    let info = s3_sync_service::fetch_remote_info(&settings)
-        .await
-        .map_err(|e| e.to_string())?;
+    let info = s3_sync_service::fetch_remote_info(&settings).await?;
     Ok(info.unwrap_or(json!({ "empty": true })))
 }
 
@@ -346,7 +344,9 @@ mod tests {
         }))
         .expect("seed disabled s3 settings");
 
-        let err = require_enabled_s3_settings().expect_err("disabled settings should fail");
+        let err = require_enabled_s3_settings()
+            .expect_err("disabled settings should fail")
+            .to_string();
         assert!(
             err.contains("disabled") || err.contains("未启用"),
             "unexpected error: {err}"

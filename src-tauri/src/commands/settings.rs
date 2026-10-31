@@ -152,7 +152,7 @@ pub async fn save_settings(
     Ok(true)
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexUnifyHistoryRestoreResult {
     pub restored_jsonl_files: usize,
@@ -164,6 +164,7 @@ pub struct CodexUnifyHistoryRestoreResult {
 
 /// 是否存在统一会话开关的迁移备份（决定关闭弹窗里是否显示"恢复备份"勾选）。
 #[tauri::command]
+#[specta::specta]
 pub async fn has_codex_unify_history_backup() -> Result<bool, String> {
     Ok(crate::codex_history_migration::has_codex_official_history_unify_backup())
 }
@@ -171,6 +172,7 @@ pub async fn has_codex_unify_history_backup() -> Result<bool, String> {
 /// 按迁移备份账本把当时迁入共享桶的官方会话还原回 "openai" 桶。
 /// 由关闭统一会话开关的确认弹窗触发；幂等，可安全重试。
 #[tauri::command]
+#[specta::specta]
 pub async fn restore_codex_unified_history() -> Result<CodexUnifyHistoryRestoreResult, String> {
     let outcome = tauri::async_runtime::spawn_blocking(|| {
         crate::codex_history_migration::restore_codex_official_history_from_backups()
@@ -198,6 +200,7 @@ pub async fn restore_codex_unified_history() -> Result<CodexUnifyHistoryRestoreR
 
 /// 重启应用程序（当 app_config_dir 变更后使用）
 #[tauri::command]
+#[specta::specta]
 pub async fn restart_app(app: AppHandle) -> Result<bool, String> {
     crate::save_window_state_before_exit(&app);
 
@@ -221,6 +224,7 @@ pub async fn restart_app(app: AppHandle) -> Result<bool, String> {
 /// `process.relaunch()`，旧进程可能已经处在 bundle 被替换后的不稳定窗口期。
 /// 这里把退出清理、安装和重启串在同一个后端流程中，避免依赖旧前端继续执行。
 #[tauri::command]
+#[specta::specta]
 pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> {
     let updater = app
         .updater_builder()
@@ -298,6 +302,7 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
 /// 已是最新版本，但数据库仍不兼容（通常由第三方客户端或更高版本创建），应提示用户
 /// 升级无法解决，而不是让其反复尝试。
 #[tauri::command]
+#[specta::specta]
 pub async fn check_app_update_available(app: AppHandle) -> Result<Option<String>, String> {
     let updater = app
         .updater_builder()
@@ -312,6 +317,7 @@ pub async fn check_app_update_available(app: AppHandle) -> Result<Option<String>
 
 /// 获取 app_config_dir 覆盖配置 (从 Store)
 #[tauri::command]
+#[specta::specta]
 pub async fn get_app_config_dir_override(app: AppHandle) -> Result<Option<String>, String> {
     Ok(crate::app_store::refresh_app_config_dir_override(&app)
         .map(|p| p.to_string_lossy().to_string()))
@@ -319,6 +325,7 @@ pub async fn get_app_config_dir_override(app: AppHandle) -> Result<Option<String
 
 /// 设置 app_config_dir 覆盖配置 (到 Store)
 #[tauri::command]
+#[specta::specta]
 pub async fn set_app_config_dir_override(
     app: AppHandle,
     path: Option<String>,
@@ -329,6 +336,7 @@ pub async fn set_app_config_dir_override(
 
 /// 设置开机自启
 #[tauri::command]
+#[specta::specta]
 pub async fn set_auto_launch(enabled: bool) -> Result<bool, String> {
     if enabled {
         crate::auto_launch::enable_auto_launch().map_err(|e| format!("启用开机自启失败: {e}"))?;
@@ -752,6 +760,7 @@ mod tests {
 
 /// 获取开机自启状态
 #[tauri::command]
+#[specta::specta]
 pub async fn get_auto_launch_status() -> Result<bool, String> {
     crate::auto_launch::is_auto_launch_enabled().map_err(|e| format!("获取开机自启状态失败: {e}"))
 }

@@ -19,6 +19,7 @@ const HERMES_WEB_OFFLINE_ERROR: &str = "hermes_web_offline";
 /// Hermes uses additive mode — users may already have providers
 /// configured in config.yaml.
 #[tauri::command]
+#[specta::specta]
 pub async fn import_hermes_providers_from_live(handle: tauri::AppHandle) -> Result<usize, String> {
     run_blocking_with_state(handle, move |state| {
         crate::services::provider::import_hermes_providers_from_live(state)
@@ -29,6 +30,7 @@ pub async fn import_hermes_providers_from_live(handle: tauri::AppHandle) -> Resu
 
 /// Get provider names in the Hermes live config.
 #[tauri::command]
+#[specta::specta]
 pub async fn get_hermes_live_provider_ids() -> Result<Vec<String>, String> {
     run_blocking(move || {
         hermes_config::get_providers()
@@ -40,6 +42,7 @@ pub async fn get_hermes_live_provider_ids() -> Result<Vec<String>, String> {
 
 /// Get a single Hermes provider fragment from live config.
 #[tauri::command]
+#[specta::specta]
 pub async fn get_hermes_live_provider(
     #[allow(non_snake_case)] providerId: String,
 ) -> Result<Option<serde_json::Value>, String> {
@@ -108,6 +111,7 @@ pub async fn set_hermes_memory_enabled(
 /// there is no need (and no way) for CC Switch to inject it — we just open
 /// the URL and let Hermes handle auth.
 #[tauri::command]
+#[specta::specta]
 pub async fn open_hermes_web_ui(app: AppHandle, path: Option<String>) -> Result<(), String> {
     let port = std::env::var("HERMES_WEB_PORT")
         .ok()
@@ -147,6 +151,7 @@ pub async fn open_hermes_web_ui(app: AppHandle, path: Option<String>) -> Result<
 /// since Hermes startup can take several seconds and may fail outright if
 /// the `hermes-agent[web]` extras are missing.
 #[tauri::command]
+#[specta::specta]
 pub async fn launch_hermes_dashboard() -> Result<(), String> {
     tokio::task::spawn_blocking(|| {
         crate::services::cli_tools::launch_terminal_running("hermes dashboard", "hermes_dashboard")

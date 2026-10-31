@@ -9,11 +9,13 @@ use crate::database::Profile;
 use crate::services::profile::{ProfilePayload, ProfileScope, ProfileService};
 use crate::store::AppState;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileDto {
     pub id: String,
     pub name: String,
+    // ProfilePayload lives in services/profile.rs; typed as JSON in the bindings.
+    #[specta(type = serde_json::Value)]
     pub payload: ProfilePayload,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
@@ -42,7 +44,7 @@ impl From<Profile> for ProfileDto {
 }
 
 /// 每个分组当前激活的项目 id（未使用项目时为 null）
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CurrentProfileIds {
     pub claude: Option<String>,
@@ -50,7 +52,7 @@ pub struct CurrentProfileIds {
     pub codex: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfilesResponse {
     pub profiles: Vec<ProfileDto>,
@@ -117,11 +119,13 @@ fn list_profiles_inner(state: &AppState) -> Result<ProfilesResponse, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn list_profiles(handle: AppHandle) -> Result<ProfilesResponse, String> {
     run_blocking_with_state(handle, list_profiles_inner).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn create_profile(
     handle: AppHandle,
     name: String,
@@ -137,6 +141,7 @@ pub async fn create_profile(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn update_profile(
     handle: AppHandle,
     id: String,
@@ -157,6 +162,7 @@ pub async fn update_profile(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_profile(handle: AppHandle, id: String) -> Result<(), String> {
     run_blocking_with_state(handle, move |state| {
         ProfileService::delete(state, &id).map_err(|e| e.to_string())
@@ -165,6 +171,7 @@ pub async fn delete_profile(handle: AppHandle, id: String) -> Result<(), String>
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn clear_current_profile(handle: AppHandle, scope: String) -> Result<(), String> {
     let scope = ProfileScope::parse(&scope).map_err(|e| e.to_string())?;
     run_blocking_with_state(handle, move |state| {
@@ -182,6 +189,7 @@ pub async fn clear_current_profile(handle: AppHandle, scope: String) -> Result<(
 /// 线程池执行（`ProviderService` 内部通过 `block_on_async` 安全地等待代理
 /// future），不会占用 UI 线程或 tokio worker。
 #[tauri::command]
+#[specta::specta]
 pub async fn apply_profile(
     app: tauri::AppHandle,
     id: String,

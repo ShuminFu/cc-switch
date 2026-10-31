@@ -28,6 +28,7 @@ pub async fn get_session_messages(
 /// Rust from the provider/session identifiers; the webview never supplies a
 /// command string.
 #[tauri::command]
+#[specta::specta]
 pub async fn launch_session_terminal(
     providerId: String,
     sessionId: String,
@@ -58,6 +59,7 @@ pub async fn launch_session_terminal(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_session(
     providerId: String,
     sessionId: String,

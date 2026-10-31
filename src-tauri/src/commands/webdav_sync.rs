@@ -18,25 +18,23 @@ fn persist_sync_error(settings: &mut WebDavSyncSettings, error: &AppError, sourc
     let _ = settings::update_webdav_sync_status(settings.status.clone());
 }
 
-fn webdav_not_configured_error() -> String {
+fn webdav_not_configured_error() -> AppError {
     AppError::localized(
         "webdav.sync.not_configured",
         "未配置 WebDAV 同步",
         "WebDAV sync is not configured.",
     )
-    .to_string()
 }
 
-fn webdav_sync_disabled_error() -> String {
+fn webdav_sync_disabled_error() -> AppError {
     AppError::localized(
         "webdav.sync.disabled",
         "WebDAV 同步未启用",
         "WebDAV sync is disabled.",
     )
-    .to_string()
 }
 
-fn require_enabled_webdav_settings() -> Result<WebDavSyncSettings, String> {
+fn require_enabled_webdav_settings() -> Result<WebDavSyncSettings, AppError> {
     let settings = settings::get_webdav_sync_settings().ok_or_else(webdav_not_configured_error)?;
     if !settings.enabled {
         return Err(webdav_sync_disabled_error());
@@ -69,7 +67,7 @@ where
     webdav_sync_service::run_with_sync_lock(operation).await
 }
 
-fn map_sync_result<T, F>(result: Result<T, AppError>, on_error: F) -> Result<T, String>
+fn map_sync_result<T, F>(result: Result<T, AppError>, on_error: F) -> Result<T, AppError>
 where
     F: FnOnce(&AppError),
 {
@@ -77,7 +75,7 @@ where
         Ok(value) => Ok(value),
         Err(err) => {
             on_error(&err);
-            Err(err.to_string())
+            Err(err)
         }
     }
 }
@@ -86,16 +84,14 @@ where
 pub async fn webdav_test_connection(
     settings: WebDavSyncSettings,
     #[allow(non_snake_case)] preserveEmptyPassword: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, AppError> {
     let preserve_empty = preserveEmptyPassword.unwrap_or(true);
     let resolved = resolve_password_for_request(
         settings,
         settings::get_webdav_sync_settings(),
         preserve_empty,
     );
-    webdav_sync_service::check_connection(&resolved)
-        .await
-        .map_err(|e| e.to_string())?;
+    webdav_sync_service::check_connection(&resolved).await?;
     Ok(json!({
         "success": true,
         "message": "WebDAV connection ok",
@@ -113,10 +109,11 @@ fn manual_force(force: Option<bool>) -> bool {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn webdav_sync_upload(
     state: State<'_, AppState>,
     force: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, AppError> {
     let db = state.db.clone();
     let mut settings = require_enabled_webdav_settings()?;
 
@@ -132,10 +129,11 @@ pub async fn webdav_sync_upload(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn webdav_sync_download(
     state: State<'_, AppState>,
     force: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, AppError> {
     let db = state.db.clone();
     let db_for_sync = db.clone();
     let mut settings = require_enabled_webdav_settings()?;
@@ -169,7 +167,7 @@ pub async fn webdav_sync_download(
 pub async fn webdav_sync_save_settings(
     settings: WebDavSyncSettings,
     #[allow(non_snake_case)] passwordTouched: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, AppError> {
     let password_touched = passwordTouched.unwrap_or(false);
     let existing = settings::get_webdav_sync_settings();
     let mut sync_settings =
@@ -181,17 +179,16 @@ pub async fn webdav_sync_save_settings(
     }
 
     sync_settings.normalize();
-    sync_settings.validate().map_err(|e| e.to_string())?;
-    settings::set_webdav_sync_settings(Some(sync_settings)).map_err(|e| e.to_string())?;
+    sync_settings.validate()?;
+    settings::set_webdav_sync_settings(Some(sync_settings))?;
     Ok(json!({ "success": true }))
 }
 
 #[tauri::command]
-pub async fn webdav_sync_fetch_remote_info() -> Result<Value, String> {
+#[specta::specta]
+pub async fn webdav_sync_fetch_remote_info() -> Result<Value, AppError> {
     let settings = require_enabled_webdav_settings()?;
-    let info = webdav_sync_service::fetch_remote_info(&settings)
-        .await
-        .map_err(|e| e.to_string())?;
+    let info = webdav_sync_service::fetch_remote_info(&settings).await?;
     Ok(info.unwrap_or(json!({ "empty": true })))
 }
 
@@ -351,7 +348,9 @@ mod tests {
         }))
         .expect("seed disabled webdav settings");
 
-        let err = require_enabled_webdav_settings().expect_err("disabled settings should fail");
+        let err = require_enabled_webdav_settings()
+            .expect_err("disabled settings should fail")
+            .to_string();
         assert!(
             err.contains("disabled") || err.contains("未启用"),
             "unexpected error: {err}"

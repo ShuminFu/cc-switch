@@ -1,10 +1,7 @@
 import i18n from "i18next";
-/** Wire shape of a Rust `AppError` (`AppErrorPayload` in src-tauri/src/error.rs). */
-export interface AppErrorPayload {
-  code: string;
-  message: string;
-  params?: Partial<{ [key in string]: string }> | null;
-}
+import type { AppErrorPayload } from "@/lib/bindings";
+
+export type { AppErrorPayload };
 
 /**
  * Structured backend errors (CMD-12, I18N-03).

@@ -43,7 +43,7 @@ fn validate_daily_memory_filename(filename: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DailyMemoryFileInfo {
     pub filename: String,
@@ -57,6 +57,7 @@ pub struct DailyMemoryFileInfo {
 
 /// List all daily memory files under `workspace/memory/`.
 #[tauri::command]
+#[specta::specta]
 pub async fn list_daily_memory_files() -> Result<Vec<DailyMemoryFileInfo>, String> {
     let memory_dir = get_openclaw_dir().join("workspace").join("memory");
 
@@ -116,6 +117,7 @@ pub async fn list_daily_memory_files() -> Result<Vec<DailyMemoryFileInfo>, Strin
 
 /// Read a daily memory file.
 #[tauri::command]
+#[specta::specta]
 pub async fn read_daily_memory_file(filename: String) -> Result<Option<String>, String> {
     validate_daily_memory_filename(&filename)?;
 
@@ -135,6 +137,7 @@ pub async fn read_daily_memory_file(filename: String) -> Result<Option<String>, 
 
 /// Write a daily memory file (atomic write).
 #[tauri::command]
+#[specta::specta]
 pub async fn write_daily_memory_file(filename: String, content: String) -> Result<(), String> {
     validate_daily_memory_filename(&filename)?;
 
@@ -174,7 +177,7 @@ fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
 }
 
 /// Search result for daily memory full-text search.
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DailyMemorySearchResult {
     pub filename: String,
@@ -191,6 +194,7 @@ pub struct DailyMemorySearchResult {
 /// Returns results sorted by filename descending (newest first), each with a
 /// snippet showing ~120 characters of context around the first match.
 #[tauri::command]
+#[specta::specta]
 pub async fn search_daily_memory_files(
     query: String,
 ) -> Result<Vec<DailyMemorySearchResult>, String> {
@@ -286,6 +290,7 @@ pub async fn search_daily_memory_files(
 
 /// Delete a daily memory file (idempotent).
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_daily_memory_file(filename: String) -> Result<(), String> {
     validate_daily_memory_filename(&filename)?;
 
@@ -307,6 +312,7 @@ pub async fn delete_daily_memory_file(filename: String) -> Result<(), String> {
 /// Read an OpenClaw workspace file content.
 /// Returns None if the file does not exist.
 #[tauri::command]
+#[specta::specta]
 pub async fn read_workspace_file(filename: String) -> Result<Option<String>, String> {
     validate_filename(&filename)?;
 
@@ -324,6 +330,7 @@ pub async fn read_workspace_file(filename: String) -> Result<Option<String>, Str
 /// Write content to an OpenClaw workspace file (atomic write).
 /// Creates the workspace directory if it does not exist.
 #[tauri::command]
+#[specta::specta]
 pub async fn write_workspace_file(filename: String, content: String) -> Result<(), String> {
     validate_filename(&filename)?;
 
@@ -343,6 +350,7 @@ pub async fn write_workspace_file(filename: String, content: String) -> Result<(
 /// `subdir`: "workspace" opens `~/.openclaw/workspace/`,
 ///           "memory" opens `~/.openclaw/workspace/memory/`.
 #[tauri::command]
+#[specta::specta]
 pub async fn open_workspace_directory(handle: AppHandle, subdir: String) -> Result<bool, String> {
     let dir = match subdir.as_str() {
         "memory" => get_openclaw_dir().join("workspace").join("memory"),

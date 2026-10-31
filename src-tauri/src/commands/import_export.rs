@@ -19,6 +19,7 @@ use crate::store::AppState;
 
 /// 导出数据库为 SQL 备份
 #[tauri::command]
+#[specta::specta]
 pub async fn export_config_to_file(
     #[allow(non_snake_case)] filePath: String,
     state: State<'_, AppState>,
@@ -40,6 +41,7 @@ pub async fn export_config_to_file(
 
 /// 从 SQL 备份导入数据库
 #[tauri::command]
+#[specta::specta]
 pub async fn import_config_from_file(
     #[allow(non_snake_case)] filePath: String,
     state: State<'_, AppState>,
@@ -61,6 +63,7 @@ pub async fn import_config_from_file(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn sync_current_providers_live(state: State<'_, AppState>) -> Result<Value, String> {
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -126,6 +129,7 @@ pub async fn open_zip_file_dialog<R: tauri::Runtime>(
 
 /// Manually create a database backup
 #[tauri::command]
+#[specta::specta]
 pub async fn create_db_backup(state: State<'_, AppState>) -> Result<String, String> {
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -152,6 +156,7 @@ pub async fn list_db_backups() -> Result<Vec<BackupEntry>, String> {
 
 /// Restore database from a backup file
 #[tauri::command]
+#[specta::specta]
 pub async fn restore_db_backup(
     state: State<'_, AppState>,
     filename: String,
@@ -175,6 +180,7 @@ pub async fn restore_db_backup(
 
 /// Rename a database backup file
 #[tauri::command]
+#[specta::specta]
 pub async fn rename_db_backup(
     #[allow(non_snake_case)] oldFilename: String,
     #[allow(non_snake_case)] newName: String,
@@ -185,6 +191,7 @@ pub async fn rename_db_backup(
 
 /// Delete a database backup file
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_db_backup(filename: String) -> Result<(), String> {
     run_blocking(move || Database::delete_backup(&filename).map_err(|e| e.to_string())).await
 }

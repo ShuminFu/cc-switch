@@ -27,6 +27,7 @@ pub async fn get_providers(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_current_provider(handle: AppHandle, app: String) -> Result<String, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
     run_blocking_with_state(handle, move |state| {
@@ -66,6 +67,7 @@ pub async fn update_provider(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_provider(handle: AppHandle, app: String, id: String) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
     run_blocking_with_state(handle, move |state| {
@@ -77,6 +79,7 @@ pub async fn delete_provider(handle: AppHandle, app: String, id: String) -> Resu
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn remove_provider_from_live_config(
     handle: AppHandle,
     app: String,
@@ -160,6 +163,7 @@ pub fn import_default_config_test_hook(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn import_default_config(handle: AppHandle, app: String) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
     run_blocking_with_state(handle, move |state| {
@@ -184,6 +188,7 @@ pub fn get_claude_desktop_default_routes(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn import_claude_desktop_providers_from_claude(
     handle: AppHandle,
 ) -> Result<usize, String> {
@@ -242,6 +247,7 @@ fn import_claude_desktop_providers_inner(state: &AppState) -> Result<usize, Stri
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ensure_claude_desktop_official_provider(handle: AppHandle) -> Result<bool, String> {
     run_blocking_with_state(handle, |state| {
         state
@@ -256,6 +262,7 @@ pub async fn ensure_claude_desktop_official_provider(handle: AppHandle) -> Resul
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ensure_codex_official_provider(handle: AppHandle) -> Result<bool, String> {
     run_blocking_with_state(handle, |state| {
         state
@@ -481,6 +488,7 @@ pub async fn testUsageScript(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn read_live_provider_settings(app: String) -> Result<serde_json::Value, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
     run_blocking(move || ProviderService::read_live_settings(app_type).map_err(|e| e.to_string()))
@@ -512,6 +520,7 @@ pub async fn get_custom_endpoints(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn add_custom_endpoint(
     handle: AppHandle,
     app: String,
@@ -527,6 +536,7 @@ pub async fn add_custom_endpoint(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn remove_custom_endpoint(
     handle: AppHandle,
     app: String,
@@ -542,6 +552,7 @@ pub async fn remove_custom_endpoint(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn update_endpoint_last_used(
     handle: AppHandle,
     app: String,
@@ -626,6 +637,7 @@ pub async fn upsert_universal_provider(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_universal_provider(app: AppHandle, id: String) -> Result<bool, String> {
     let id_for_task = id.clone();
     let result = run_blocking_with_state(app.clone(), move |state| {
@@ -639,6 +651,7 @@ pub async fn delete_universal_provider(app: AppHandle, id: String) -> Result<boo
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn sync_universal_provider(app: AppHandle, id: String) -> Result<bool, String> {
     let id_for_task = id.clone();
     let result = run_blocking_with_state(app.clone(), move |state| {
@@ -652,6 +665,7 @@ pub async fn sync_universal_provider(app: AppHandle, id: String) -> Result<bool,
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn import_opencode_providers_from_live(handle: AppHandle) -> Result<usize, String> {
     run_blocking_with_state(handle, |state| {
         crate::services::provider::import_opencode_providers_from_live(state)
@@ -661,6 +675,7 @@ pub async fn import_opencode_providers_from_live(handle: AppHandle) -> Result<us
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_opencode_live_provider_ids() -> Result<Vec<String>, String> {
     run_blocking(|| {
         crate::opencode_config::get_providers()

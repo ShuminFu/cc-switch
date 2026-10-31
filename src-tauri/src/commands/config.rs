@@ -140,11 +140,13 @@ pub async fn get_config_status(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_claude_code_config_path() -> Result<String, String> {
     Ok(get_claude_settings_path().to_string_lossy().to_string())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_config_dir(app: String) -> Result<String, String> {
     let dir = match AppType::from_str(&app).map_err(|e| e.to_string())? {
         AppType::Claude => config::get_claude_config_dir(),
@@ -163,6 +165,7 @@ pub async fn get_config_dir(app: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, String> {
     let config_dir = match AppType::from_str(&app).map_err(|e| e.to_string())? {
         AppType::Claude => config::get_claude_config_dir(),
@@ -190,6 +193,7 @@ pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn pick_directory(
     app: AppHandle,
     #[allow(non_snake_case)] defaultPath: Option<String>,
@@ -221,12 +225,14 @@ pub async fn pick_directory(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_app_config_path() -> Result<String, String> {
     let config_path = config::get_app_config_path();
     Ok(config_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn open_app_config_folder(handle: AppHandle) -> Result<bool, String> {
     let config_dir = config::get_app_config_dir();
 
@@ -243,6 +249,7 @@ pub async fn open_app_config_folder(handle: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_claude_common_config_snippet(
     state: tauri::State<'_, crate::store::AppState>,
 ) -> Result<Option<String>, String> {
@@ -253,6 +260,7 @@ pub async fn get_claude_common_config_snippet(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_claude_common_config_snippet(
     snippet: String,
     state: tauri::State<'_, crate::store::AppState>,
@@ -277,6 +285,7 @@ pub async fn set_claude_common_config_snippet(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_common_config_snippet(
     app_type: String,
     state: tauri::State<'_, crate::store::AppState>,
@@ -291,6 +300,7 @@ pub async fn get_common_config_snippet(
 /// 放后端是为了走 toml_edit（保注释、保键序）；前端 smol-toml 的
 /// 整文档重序列化会破坏用户手写格式。
 #[tauri::command]
+#[specta::specta]
 pub async fn update_toml_common_config_snippet(
     config_toml: String,
     snippet_toml: String,
@@ -307,6 +317,7 @@ pub async fn update_toml_common_config_snippet(
 /// 保存通用配置片段。会迁移旧片段、重写当前供应商的 live 文件（接管期间
 /// 改写备份，需要等待代理的切换锁），整体放到阻塞线程池执行。
 #[tauri::command]
+#[specta::specta]
 pub async fn set_common_config_snippet(
     app_type: String,
     snippet: String,
@@ -428,6 +439,7 @@ mod tests {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn extract_common_config_snippet(
     appType: String,
     settingsConfig: Option<String>,

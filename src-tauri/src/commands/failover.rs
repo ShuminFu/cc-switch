@@ -34,6 +34,7 @@ pub async fn get_available_providers_for_failover(
 
 /// 添加供应商到故障转移队列
 #[tauri::command]
+#[specta::specta]
 pub async fn add_to_failover_queue(
     state: tauri::State<'_, AppState>,
     app_type: String,
@@ -47,6 +48,7 @@ pub async fn add_to_failover_queue(
 
 /// 从故障转移队列移除供应商
 #[tauri::command]
+#[specta::specta]
 pub async fn remove_from_failover_queue(
     state: tauri::State<'_, AppState>,
     app_type: String,
@@ -60,6 +62,7 @@ pub async fn remove_from_failover_queue(
 
 /// 获取指定应用的自动故障转移开关状态（从 proxy_config 表读取）
 #[tauri::command]
+#[specta::specta]
 pub async fn get_auto_failover_enabled(
     state: tauri::State<'_, AppState>,
     app_type: String,
@@ -76,6 +79,7 @@ pub async fn get_auto_failover_enabled(
 ///
 /// 注意：关闭故障转移时不会清除队列，队列内容会保留供下次开启时使用
 #[tauri::command]
+#[specta::specta]
 pub async fn set_auto_failover_enabled(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
