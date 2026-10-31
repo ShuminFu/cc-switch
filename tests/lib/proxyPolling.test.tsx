@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useProviderHealth } from "@/lib/query/failover";
 import {
+  fetchProxyOverview,
   useCachedProxyRunning,
   useProxyTakeoverStatus,
 } from "@/lib/query/proxy";
@@ -11,7 +12,7 @@ import { emitTauriEvent } from "../msw/tauriMocks";
 import { createTestQueryClient } from "../utils/testQueryClient";
 
 const getProviderHealthMock = vi.fn();
-const getProxyTakeoverStatusMock = vi.fn();
+const getProxyOverviewMock = vi.fn();
 
 vi.mock("@/lib/api/failover", () => ({
   failoverApi: {
@@ -21,8 +22,7 @@ vi.mock("@/lib/api/failover", () => ({
 
 vi.mock("@/lib/api/proxy", () => ({
   proxyApi: {
-    getProxyTakeoverStatus: (...args: unknown[]) =>
-      getProxyTakeoverStatusMock(...args),
+    getProxyOverview: (...args: unknown[]) => getProxyOverviewMock(...args),
   },
 }));
 
@@ -44,7 +44,9 @@ describe("proxy-related polling (PERF-13)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     getProviderHealthMock.mockReset().mockResolvedValue({ is_healthy: true });
-    getProxyTakeoverStatusMock.mockReset().mockResolvedValue({});
+    getProxyOverviewMock
+      .mockReset()
+      .mockResolvedValue({ status: { running: false }, takeover: {} });
   });
 
   afterEach(() => {
@@ -97,14 +99,38 @@ describe("proxy-related polling (PERF-13)", () => {
   it("takeover status refreshes on proxy-flags-changed instead of a 2 s poll", async () => {
     const { unmount } = setup(() => useProxyTakeoverStatus());
     await advance(0);
-    expect(getProxyTakeoverStatusMock).toHaveBeenCalledTimes(1);
+    expect(getProxyOverviewMock).toHaveBeenCalledTimes(1);
 
     await advance(10_000);
-    expect(getProxyTakeoverStatusMock).toHaveBeenCalledTimes(1);
+    expect(getProxyOverviewMock).toHaveBeenCalledTimes(1);
 
     emitTauriEvent("proxy-flags-changed", {});
     await advance(0);
-    expect(getProxyTakeoverStatusMock).toHaveBeenCalledTimes(2);
+    expect(getProxyOverviewMock).toHaveBeenCalledTimes(2);
     unmount();
+  });
+
+  it("status and takeover share one get_proxy_overview call and both caches", async () => {
+    getProxyOverviewMock.mockResolvedValue({
+      status: { running: true },
+      takeover: { claude: true },
+    });
+    const queryClient = createTestQueryClient();
+    const [a, b] = await Promise.all([
+      fetchProxyOverview(queryClient),
+      fetchProxyOverview(queryClient),
+    ]);
+    expect(a).toBe(b);
+    expect(getProxyOverviewMock).toHaveBeenCalledTimes(1);
+    expect(queryClient.getQueryData(["proxyStatus"])).toEqual({
+      running: true,
+    });
+    expect(queryClient.getQueryData(["proxyTakeoverStatus"])).toEqual({
+      claude: true,
+    });
+
+    // The in-flight slot is released once the call settles.
+    await fetchProxyOverview(queryClient);
+    expect(getProxyOverviewMock).toHaveBeenCalledTimes(2);
   });
 });

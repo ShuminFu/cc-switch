@@ -6,6 +6,11 @@ import { createTestQueryClient } from "../utils/testQueryClient";
 import { mockInvoke } from "../msw/invokeRecorder";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+const overview = (takeover: Record<string, boolean>) => ({
+  status: { running: false, active_targets: [] },
+  takeover,
+});
 const renderToggle = () =>
   render(
     <QueryClientProvider client={createTestQueryClient()}>
@@ -17,7 +22,7 @@ describe("FailoverToggle (FE-UI-56)", () => {
   it("can turn failover off when takeover is already off", async () => {
     const api = mockInvoke({
       get_auto_failover_enabled: true,
-      get_proxy_takeover_status: { claude: false },
+      get_proxy_overview: overview({ claude: false }),
       set_auto_failover_enabled: null,
     });
     renderToggle();
@@ -41,7 +46,7 @@ describe("FailoverToggle (FE-UI-56)", () => {
   it("cannot turn failover on while takeover is off", async () => {
     mockInvoke({
       get_auto_failover_enabled: false,
-      get_proxy_takeover_status: { claude: false },
+      get_proxy_overview: overview({ claude: false }),
     });
     renderToggle();
     const toggle = await screen.findByRole("switch");

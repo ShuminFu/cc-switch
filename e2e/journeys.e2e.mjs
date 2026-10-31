@@ -248,6 +248,10 @@ test("J10 failover toggle: enabling failover for a taken-over app", async () => 
               failoverConfirmed: true,
             }),
             get_proxy_takeover_status: { claude: true, codex: false },
+            get_proxy_overview: async (_args, next) => ({
+              ...(await next()),
+              takeover: { claude: true, codex: false },
+            }),
             get_auto_failover_enabled: () => failover,
             set_auto_failover_enabled: (args) => {
               failover = args.enabled;
