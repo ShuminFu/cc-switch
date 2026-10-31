@@ -588,100 +588,6 @@ impl ProxyService {
             .map_err(|e| format!("保存动态代理端口失败: {e}"))
     }
 
-    async fn start_before_takeover_if_ephemeral_port(&self) -> Result<bool, String> {
-        let config = self
-            .db
-            .get_proxy_config()
-            .await
-            .map_err(|e| format!("获取代理配置失败: {e}"))?;
-        if config.listen_port != 0 || self.is_running().await {
-            return Ok(false);
-        }
-
-        self.start().await?;
-        Ok(true)
-    }
-
-    /// 启动代理服务器（带 Live 配置接管）
-    pub async fn start_with_takeover(&self) -> Result<ProxyServerInfo, String> {
-        // 1. 备份各应用的 Live 配置
-        self.backup_live_configs().await?;
-
-        // 2. 同步 Live 配置中的 Token 到数据库（确保代理能读到最新的 Token）
-        if let Err(e) = self.sync_live_to_providers().await {
-            // 同步失败时尚未写入接管配置，但备份可能包含敏感信息，尽量清理
-            if let Err(clean_err) = self.db.delete_all_live_backups().await {
-                log::warn!("清理 Live 备份失败: {clean_err}");
-            }
-            return Err(e);
-        }
-
-        // 端口 0 需要先启动代理拿到 OS 分配的真实端口，否则接管 Live 配置会写出 :0。
-        let started_proxy_before_takeover =
-            match self.start_before_takeover_if_ephemeral_port().await {
-                Ok(started) => started,
-                Err(e) => {
-                    if let Err(clean_err) = self.db.delete_all_live_backups().await {
-                        log::warn!("清理 Live 备份失败: {clean_err}");
-                    }
-                    return Err(e);
-                }
-            };
-
-        // 3. 在写入接管配置之前先落盘接管标志：
-        //    这样即使在接管过程中断电/kill，下次启动也能检测到并自动恢复。
-        if let Err(e) = self.db.set_live_takeover_active(true).await {
-            if let Err(clean_err) = self.db.delete_all_live_backups().await {
-                log::warn!("清理 Live 备份失败: {clean_err}");
-            }
-            if started_proxy_before_takeover {
-                let _ = self.stop().await;
-            }
-            return Err(format!("设置接管状态失败: {e}"));
-        }
-
-        // 4. 接管各应用的 Live 配置（写入代理地址，清空 Token）
-        if let Err(e) = self.takeover_live_configs().await {
-            // 接管失败（可能是部分写入），尝试恢复原始配置；若恢复失败则保留标志与备份，等待下次启动自动恢复。
-            log::error!("接管 Live 配置失败，尝试恢复原始配置: {e}");
-            match self.restore_live_configs().await {
-                Ok(()) => {
-                    let _ = self.db.set_live_takeover_active(false).await;
-                    let _ = self.db.delete_all_live_backups().await;
-                }
-                Err(restore_err) => {
-                    log::error!("恢复原始配置失败，将保留备份以便下次启动恢复: {restore_err}");
-                }
-            }
-            if started_proxy_before_takeover {
-                let _ = self.stop().await;
-            }
-            return Err(e);
-        }
-
-        // 5. 启动代理服务器
-        match self.start().await {
-            Ok(info) => Ok(info),
-            Err(e) => {
-                // 启动失败，恢复原始配置
-                log::error!("代理启动失败，尝试恢复原始配置: {e}");
-                match self.restore_live_configs().await {
-                    Ok(()) => {
-                        let _ = self.db.set_live_takeover_active(false).await;
-                        let _ = self.db.delete_all_live_backups().await;
-                    }
-                    Err(restore_err) => {
-                        log::error!("恢复原始配置失败，将保留备份以便下次启动恢复: {restore_err}");
-                    }
-                }
-                if started_proxy_before_takeover {
-                    let _ = self.stop().await;
-                }
-                Err(e)
-            }
-        }
-    }
-
     /// 获取各应用的接管状态（是否改写该应用的 Live 配置指向本地代理）
     pub async fn get_takeover_status(&self) -> Result<ProxyTakeoverStatus, String> {
         // 从 proxy_config.enabled 读取（优先），兼容旧的 live_backup 备份检测
@@ -922,38 +828,72 @@ impl ProxyService {
     ///
     /// 代理服务本身保持运行；当最后一个应用也关闭接管后，下次用户手动关闭
     /// 代理或程序退出时会自然停止。
+    /// Whether `app_type` is (or may still be) taken over: the per-app flag is
+    /// on, a live backup exists, or the live file carries proxy placeholders.
+    /// Callers use it to skip a needless restore/rewrite of the live file
+    /// (SVC-16).
+    pub fn takeover_engaged_for_app_sync(&self, app_type: &AppType) -> bool {
+        let app_type_str = app_type.as_str();
+        let enabled = crate::services::provider::block_on_async(
+            self.db.get_proxy_config_for_app(app_type_str),
+        )
+        .map(|config| config.enabled)
+        .unwrap_or(true);
+        let has_backup =
+            crate::services::provider::block_on_async(self.db.get_live_backup(app_type_str))
+                .map(|backup| backup.is_some())
+                .unwrap_or(true);
+        enabled || has_backup || self.detect_takeover_in_live_config_for_app(app_type)
+    }
+
     pub fn disable_takeover_for_app_sync(&self, app_type: &AppType) -> Result<(), String> {
+        crate::services::provider::block_on_async(
+            self.disable_takeover_for_app_sync_async(app_type),
+        )
+    }
+
+    /// Async core of [`Self::disable_takeover_for_app_sync`].
+    pub(crate) async fn disable_takeover_for_app_sync_async(
+        &self,
+        app_type: &AppType,
+    ) -> Result<(), String> {
         let app_type_str = app_type.as_str();
 
         // 1) 恢复原始 Live 配置（备份 → SSOT → 清理占位符 三层兜底）
-        crate::services::provider::block_on_async(
-            self.restore_live_config_for_app_with_fallback_inner(app_type),
-        )
-        .map_err(|e| format!("恢复 {app_type_str} Live 配置失败: {e}"))?;
+        self.restore_live_config_for_app_with_fallback_inner(app_type)
+            .await
+            .map_err(|e| format!("恢复 {app_type_str} Live 配置失败: {e}"))?;
 
         // 2) 删除该 app 的备份
-        crate::services::provider::block_on_async(self.db.delete_live_backup(app_type_str))
+        self.db
+            .delete_live_backup(app_type_str)
+            .await
             .map_err(|e| format!("删除 {app_type_str} Live 备份失败: {e}"))?;
 
         // 3) 设置 proxy_config.enabled = false
-        let mut config = crate::services::provider::block_on_async(
-            self.db.get_proxy_config_for_app(app_type_str),
-        )
-        .map_err(|e| format!("获取 {app_type_str} 配置失败: {e}"))?;
+        let mut config = self
+            .db
+            .get_proxy_config_for_app(app_type_str)
+            .await
+            .map_err(|e| format!("获取 {app_type_str} 配置失败: {e}"))?;
         if config.enabled {
             config.enabled = false;
-            crate::services::provider::block_on_async(self.db.update_proxy_config_for_app(config))
+            self.db
+                .update_proxy_config_for_app(config)
+                .await
                 .map_err(|e| format!("清除 {app_type_str} enabled 状态失败: {e}"))?;
         }
 
         // 4) 清除该应用的健康状态
-        crate::services::provider::block_on_async(
-            self.db.clear_provider_health_for_app(app_type_str),
-        )
-        .map_err(|e| format!("清除 {app_type_str} 健康状态失败: {e}"))?;
+        self.db
+            .clear_provider_health_for_app(app_type_str)
+            .await
+            .map_err(|e| format!("清除 {app_type_str} 健康状态失败: {e}"))?;
 
         // 5) 清旧标志
-        let _ = crate::services::provider::block_on_async(self.db.set_live_takeover_active(false));
+        if let Err(e) = self.db.set_live_takeover_active(false).await {
+            log::warn!("清除旧接管标志失败: {e}");
+        }
 
         Ok(())
     }
@@ -1237,58 +1177,37 @@ impl ProxyService {
         Ok(())
     }
 
-    async fn sync_live_to_providers(&self) -> Result<(), String> {
-        if let Ok(live_config) = self.read_claude_live() {
-            self.sync_live_config_to_provider(&AppType::Claude, &live_config)
-                .await?;
-        }
-
-        if let Ok(live_config) = self.read_codex_live() {
-            self.sync_live_config_to_provider(&AppType::Codex, &live_config)
-                .await?;
-        }
-
-        if let Ok(live_config) = self.read_gemini_live() {
-            self.sync_live_config_to_provider(&AppType::Gemini, &live_config)
-                .await?;
-        }
-
-        if let Ok(live_config) = self.read_grok_live() {
-            self.sync_live_config_to_provider(&AppType::GrokBuild, &live_config)
-                .await?;
-        }
-
-        log::info!("Live 配置 Token 同步完成");
-        Ok(())
-    }
-
     /// 停止代理服务器
     pub async fn stop(&self) -> Result<(), String> {
-        if let Some(server) = self.server.write().await.take() {
-            server
-                .stop()
-                .await
-                .map_err(|e| format!("停止代理服务器失败: {e}"))?;
+        let mut slot = self.server.write().await;
+        let Some(server) = slot.as_ref() else {
+            return Err("代理服务器未运行".to_string());
+        };
+        // SVC-50: the handle stays in the slot until `ProxyServer::stop` has
+        // returned (it aborts the serve task itself after the drain timeout),
+        // and `proxy_enabled` is cleared whatever the outcome, so the DB never
+        // claims a proxy that the UI shows as stopped.
+        let stop_result = server
+            .stop()
+            .await
+            .map_err(|e| format!("停止代理服务器失败: {e}"));
+        slot.take();
+        drop(slot);
 
-            // 停止时设置 proxy_enabled = false
-            let mut global_config = self
-                .db
-                .get_global_proxy_config()
-                .await
-                .map_err(|e| format!("获取全局代理配置失败: {e}"))?;
-
-            if global_config.proxy_enabled {
+        match self.db.get_global_proxy_config().await {
+            Ok(mut global_config) if global_config.proxy_enabled => {
                 global_config.proxy_enabled = false;
                 if let Err(e) = self.db.update_global_proxy_config(global_config).await {
                     log::warn!("更新代理总开关失败: {e}");
                 }
             }
-
-            log::info!("代理服务器已停止");
-            Ok(())
-        } else {
-            Err("代理服务器未运行".to_string())
+            Ok(_) => {}
+            Err(e) => log::warn!("获取全局代理配置失败: {e}"),
         }
+
+        stop_result?;
+        log::info!("代理服务器已停止");
+        Ok(())
     }
 
     /// 停止代理服务器（恢复 Live 配置，用户手动关闭时使用）
@@ -1373,41 +1292,14 @@ impl ProxyService {
         Ok(())
     }
 
-    /// 备份各应用的 Live 配置
-    async fn backup_live_configs(&self) -> Result<(), String> {
-        for adapter in crate::adapters::takeover_adapters() {
-            let app_type = adapter.app();
-            let app_type_str = app_type.as_str();
-            let Ok(config) = self.read_live_config_for_app(&app_type) else {
-                continue;
-            };
-            // 跳过已被代理接管的 Live：避免把代理占位符当作"原始 Live"存进备份槽。
-            // 否则下次 start_with_takeover 在异常历史状态下（Live 已是占位符）再次
-            // 调用本函数，会用代理配置覆盖一个原本正常的备份；之后 stop 恢复时
-            // 即便走到备份路径也会把代理占位符再写回 Live，永久卡在 127.0.0.1:15721。
-            if Self::live_has_proxy_placeholder_for_app(&app_type, &config) {
-                log::warn!("{app_type_str} Live 已被代理接管，不备份（避免把代理配置固化进备份槽）；下次 stop 会从 SSOT 重建 Live");
-                continue;
-            }
-            let json_str = serde_json::to_string(&config)
-                .map_err(|e| format!("序列化 {app_type_str} 配置失败: {e}"))?;
-            self.db
-                .save_live_backup(app_type_str, &json_str)
-                .await
-                .map_err(|e| format!("备份 {app_type_str} 配置失败: {e}"))?;
-        }
-
-        log::info!("已备份所有应用的 Live 配置");
-        Ok(())
-    }
-
     /// 备份指定应用的 Live 配置（严格模式：目标配置不存在则返回错误）
     async fn backup_live_config_strict(&self, app_type: &AppType) -> Result<(), String> {
         let app_type_str = app_type.as_str();
         let config = self.read_live_config_for_app(app_type)?;
 
-        // 跳过已被代理接管的 Live：避免把代理占位符当作"原始 Live"存进备份槽
-        // （见 backup_live_configs 中的注释）。
+        // 跳过已被代理接管的 Live：避免把代理占位符当作"原始 Live"存进备份槽。
+        // 否则在异常历史状态下（Live 已是占位符）再次备份，会用代理配置覆盖一个
+        // 原本正常的备份；之后 stop 恢复时会把占位符写回 Live。
         if Self::live_has_proxy_placeholder_for_app(app_type, &config) {
             log::warn!(
                 "{app_type_str} Live 已被代理接管，不备份（避免把代理配置固化进备份槽）；下次 stop 会从 SSOT 重建 Live"
@@ -1476,70 +1368,6 @@ impl ProxyService {
         )
         .map_err(|e| format!("更新 Grok Build 接管配置失败: {e}"))?;
         config["config"] = json!(updated);
-        Ok(())
-    }
-
-    /// 接管各应用的 Live 配置（写入代理地址）
-    ///
-    /// 代理服务器的路由已经根据 API 端点自动区分应用类型：
-    /// - `/v1/messages` → Claude
-    /// - `/v1/chat/completions`, `/v1/responses` → Codex
-    /// - `/v1beta/*` → Gemini
-    ///
-    /// 因此不需要在 URL 中添加应用前缀。
-    async fn takeover_live_configs(&self) -> Result<(), String> {
-        let (proxy_url, proxy_codex_base_url) = self.build_proxy_urls().await?;
-        let proxy_grok_base_url = format!("{}/grokbuild/v1", proxy_url.trim_end_matches('/'));
-
-        // Claude: 修改 ANTHROPIC_BASE_URL，使用占位符替代真实 Token（代理会注入真实 Token）
-        if let Ok(mut live_config) = self.read_claude_live() {
-            let claude_provider = self.require_current_provider_for_app(&AppType::Claude)?;
-            let claude_provider = self.claude_provider_with_effective_settings(&claude_provider)?;
-            Self::apply_claude_takeover_fields_for_provider(
-                &mut live_config,
-                &proxy_url,
-                &claude_provider,
-            );
-            self.write_claude_live(&live_config)?;
-            log::info!("Claude Live 配置已接管，代理地址: {proxy_url}");
-        }
-
-        // Codex: project the selected provider through the local Responses endpoint.
-        if let Ok(mut live_config) = self.read_codex_live() {
-            let codex_provider = self.require_current_provider_for_app(&AppType::Codex)?;
-            Self::apply_codex_takeover_fields_for_provider(
-                &mut live_config,
-                &proxy_codex_base_url,
-                &codex_provider,
-            )?;
-
-            self.write_codex_takeover_live_for_provider(&live_config, Some(&codex_provider))?;
-            log::info!("Codex Live 配置已接管，代理地址: {proxy_codex_base_url}");
-        }
-
-        // Gemini: 修改 GOOGLE_GEMINI_BASE_URL，使用占位符替代真实 Token（代理会注入真实 Token）
-        if let Ok(mut live_config) = self.read_gemini_live() {
-            if let Some(env) = live_config.get_mut("env").and_then(|v| v.as_object_mut()) {
-                env.insert("GOOGLE_GEMINI_BASE_URL".to_string(), json!(&proxy_url));
-                // 使用占位符，避免显示缺少 key 的警告
-                env.insert("GEMINI_API_KEY".to_string(), json!(PROXY_TOKEN_PLACEHOLDER));
-            } else {
-                live_config["env"] = json!({
-                    "GOOGLE_GEMINI_BASE_URL": &proxy_url,
-                    "GEMINI_API_KEY": PROXY_TOKEN_PLACEHOLDER
-                });
-            }
-            self.write_gemini_live(&live_config)?;
-            log::info!("Gemini Live 配置已接管，代理地址: {proxy_url}");
-        }
-
-        // Grok Build: keep its own provider namespace while reusing Responses forwarding.
-        if let Ok(mut live_config) = self.read_grok_live() {
-            Self::apply_grok_takeover_fields(&mut live_config, &proxy_grok_base_url)?;
-            self.write_grok_live(&live_config)?;
-            log::info!("Grok Build Live 配置已接管，代理地址: {proxy_grok_base_url}");
-        }
-
         Ok(())
     }
 
@@ -2191,7 +2019,7 @@ impl ProxyService {
 
     /// 从供应商配置更新 Live 备份（用于代理模式下的热切换）
     ///
-    /// 与 backup_live_configs() 不同，此方法从供应商的 settings_config 生成备份，
+    /// 与 backup_live_config_strict() 不同，此方法从供应商的 settings_config 生成备份，
     /// 而不是从 Live 文件读取（因为 Live 文件已被代理接管）。
     pub async fn update_live_backup_from_provider(
         &self,
@@ -2974,19 +2802,63 @@ impl ProxyService {
             || new_config.listen_port != previous.listen_port;
 
         if require_restart {
+            // SVC-43: a port that is already taken must not cost the running
+            // server. Probe the new address first (only when the port changes;
+            // the same port is still held by the running server) and keep the
+            // old server and config on failure.
+            if new_config.listen_port != 0 && new_config.listen_port != previous.listen_port {
+                if let Err(e) =
+                    probe_listen_address(&new_config.listen_address, new_config.listen_port)
+                {
+                    drop(server_guard);
+                    self.revert_proxy_config(&previous).await;
+                    return Err(port_unavailable_error(
+                        &new_config.listen_address,
+                        new_config.listen_port,
+                        &e,
+                    ));
+                }
+            }
+
             if let Some(server) = server_guard.take() {
-                server
-                    .stop()
-                    .await
-                    .map_err(|e| format!("重启前停止代理服务器失败: {e}"))?;
+                if let Err(e) = server.stop().await {
+                    *server_guard = Some(server);
+                    drop(server_guard);
+                    self.revert_proxy_config(&previous).await;
+                    return Err(format!("重启前停止代理服务器失败: {e}"));
+                }
             }
 
             let app_handle = self.app_handle.read().await.clone();
             let new_server = ProxyServer::new(new_config.clone(), self.db.clone(), app_handle);
-            let info = new_server
-                .start()
-                .await
-                .map_err(|e| format!("重启代理服务器失败: {e}"))?;
+            let info = match new_server.start().await {
+                Ok(info) => info,
+                Err(e) => {
+                    // Bring the previous server back; if even that fails, hand
+                    // the live files back to the providers so clients do not
+                    // point at a dead port.
+                    self.revert_proxy_config(&previous).await;
+                    let app_handle = self.app_handle.read().await.clone();
+                    let old_server =
+                        ProxyServer::new(previous.clone(), self.db.clone(), app_handle);
+                    match old_server.start().await {
+                        Ok(_) => {
+                            *server_guard = Some(old_server);
+                            log::warn!("重启代理服务器失败，已恢复原端口: {e}");
+                        }
+                        Err(restart_err) => {
+                            drop(server_guard);
+                            log::error!("重启代理服务器失败且无法恢复原端口: {e}; {restart_err}");
+                            self.release_all_takeovers_after_dead_restart().await;
+                        }
+                    }
+                    return Err(port_unavailable_error(
+                        &new_config.listen_address,
+                        new_config.listen_port,
+                        &e.to_string(),
+                    ));
+                }
+            };
             if let Err(e) = self
                 .persist_ephemeral_listen_port_if_needed(&new_config, info.port)
                 .await
@@ -3047,6 +2919,38 @@ impl ProxyService {
         Ok(())
     }
 
+    /// Put the previous proxy config back after a failed restart (SVC-43).
+    async fn revert_proxy_config(&self, previous: &ProxyConfig) {
+        if let Err(e) = self.db.update_proxy_config(previous.clone()).await {
+            log::error!("恢复代理配置失败: {e}");
+        }
+    }
+
+    /// Last resort when neither the new nor the old listener can be bound:
+    /// restore every taken-over app's live file and clear its flag, so the UI,
+    /// DB and live files agree that takeover is off (SVC-43).
+    async fn release_all_takeovers_after_dead_restart(&self) {
+        for adapter in crate::adapters::takeover_adapters() {
+            let app_type = adapter.app();
+            let enabled = self
+                .db
+                .get_proxy_config_for_app(app_type.as_str())
+                .await
+                .map(|config| config.enabled)
+                .unwrap_or(false);
+            let has_backup = matches!(
+                self.db.get_live_backup(app_type.as_str()).await,
+                Ok(Some(_))
+            );
+            if !enabled && !has_backup {
+                continue;
+            }
+            if let Err(e) = self.disable_takeover_for_app_sync_async(&app_type).await {
+                log::error!("释放 {} 接管失败: {e}", app_type.as_str());
+            }
+        }
+    }
+
     /// 检查服务器是否正在运行
     pub async fn is_running(&self) -> bool {
         self.server.read().await.is_some()
@@ -3103,6 +3007,29 @@ impl ProxyService {
     }
 }
 
+/// Check that `address:port` can be bound right now (SVC-43). The probe
+/// listener is dropped immediately.
+fn probe_listen_address(address: &str, port: u16) -> Result<(), String> {
+    let host = address.trim().trim_start_matches('[').trim_end_matches(']');
+    let host = if host.is_empty() { "127.0.0.1" } else { host };
+    std::net::TcpListener::bind((host, port))
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
+/// User-facing error for a restart that could not bind the new address. The
+/// key lets the frontend localize it; the message names the port.
+fn port_unavailable_error(address: &str, port: u16, detail: &str) -> String {
+    crate::error::AppError::localized(
+        "proxy.port_unavailable",
+        format!("无法监听 {address}:{port}（端口可能已被占用），已保留原代理配置: {detail}"),
+        format!(
+            "Cannot listen on {address}:{port} (the port may be in use); the previous proxy settings were kept: {detail}"
+        ),
+    )
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3119,8 +3046,7 @@ mod tests {
     }
 
     struct TempHome {
-        #[allow(dead_code)]
-        dir: TempDir,
+        _dir: TempDir,
         original_home: Option<String>,
         original_userprofile: Option<String>,
         original_test_home: Option<String>,
@@ -3138,7 +3064,7 @@ mod tests {
             env::set_var("CC_SWITCH_TEST_HOME", dir.path());
 
             Self {
-                dir,
+                _dir: dir,
                 original_home,
                 original_userprofile,
                 original_test_home,
@@ -3599,7 +3525,7 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn start_with_takeover_ephemeral_port_writes_actual_live_url() {
+    async fn takeover_with_ephemeral_port_writes_actual_live_url() {
         let _home = TempHome::new();
         crate::settings::reload_settings().expect("reload settings");
 
@@ -3633,11 +3559,20 @@ mod tests {
             }))
             .expect("seed claude live config");
 
-        let info = service
-            .start_with_takeover()
+        service
+            .set_takeover_for_app("claude", true)
             .await
-            .expect("start proxy with takeover");
+            .expect("take over claude");
+        let info = service.get_status().await.expect("proxy status");
         assert_ne!(info.port, 0, "OS should assign a concrete port");
+        assert!(
+            service
+                .get_takeover_status()
+                .await
+                .expect("takeover status")
+                .claude,
+            "per-app takeover status reports the app (SVC-51)"
+        );
 
         let stored_config = db.get_proxy_config().await.expect("read proxy config");
         assert_eq!(
@@ -3751,6 +3686,83 @@ mod tests {
             "Gemini must still be rewritten to the new port"
         );
 
+        service
+            .stop_with_restore()
+            .await
+            .expect("stop proxy and restore live config");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn update_config_to_busy_port_keeps_running_server_and_config() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        use_ephemeral_proxy_port(&db).await;
+        let service = ProxyService::new(db.clone());
+
+        let provider = Provider::with_id(
+            "p1".to_string(),
+            "P1".to_string(),
+            json!({
+                "env": {
+                    "ANTHROPIC_API_KEY": "provider-key",
+                    "ANTHROPIC_BASE_URL": "https://api.example.com"
+                }
+            }),
+            None,
+        );
+        db.save_provider("claude", &provider)
+            .expect("save provider");
+        db.set_current_provider("claude", "p1")
+            .expect("set current");
+        crate::settings::set_current_provider(&AppType::Claude, Some("p1"))
+            .expect("set local current");
+        service
+            .write_claude_live(&provider.settings_config)
+            .expect("seed claude live");
+        service
+            .set_takeover_for_app("claude", true)
+            .await
+            .expect("take over claude");
+
+        let old_port = service.get_status().await.expect("status").port;
+        let previous = db.get_proxy_config().await.expect("read proxy config");
+
+        let blocker = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind blocker");
+        let busy_port = blocker.local_addr().unwrap().port();
+        let mut new_config = previous.clone();
+        new_config.listen_address = "127.0.0.1".to_string();
+        new_config.listen_port = busy_port;
+
+        let err = service
+            .update_config(&new_config)
+            .await
+            .expect_err("a busy port must be rejected");
+        assert!(
+            err.contains(&busy_port.to_string()),
+            "names the port: {err}"
+        );
+
+        assert!(service.is_running().await, "old server keeps running");
+        assert_eq!(service.get_status().await.expect("status").port, old_port);
+        let after = db.get_proxy_config().await.expect("read proxy config");
+        assert_eq!(after.listen_port, previous.listen_port);
+        assert_eq!(after.listen_address, previous.listen_address);
+
+        let live = service.read_claude_live().expect("read claude live");
+        let base_url = live
+            .pointer("/env/ANTHROPIC_BASE_URL")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            base_url.contains(&format!(":{old_port}")),
+            "live still points at the running proxy: {base_url}"
+        );
+
+        drop(blocker);
         service
             .stop_with_restore()
             .await
@@ -6997,9 +7009,8 @@ requires_openai_auth = true
     }
 
     /// Regression: when ALL apps have Live=proxy-placeholder (worst-case
-    /// corrupted state), the bulk `backup_live_configs` path used by
-    /// `start_with_takeover` must skip every save — instead of overwriting
-    /// good backups with the proxy config.
+    /// corrupted state), backing up each app must skip every save — instead
+    /// of overwriting good backups with the proxy config.
     #[tokio::test]
     #[serial]
     async fn bulk_backup_skips_all_when_live_is_proxy_placeholder() {
@@ -7071,11 +7082,13 @@ experimental_bearer_token = "PROXY_MANAGED"
         std::fs::write(&gemini_env_path, "GEMINI_API_KEY=PROXY_MANAGED\n")
             .expect("seed gemini env");
 
-        // Call bulk backup: must skip all three apps
-        service
-            .backup_live_configs()
-            .await
-            .expect("bulk backup should succeed (no-op when all live are placeholders)");
+        // Back up every app: must skip all three
+        for app in [AppType::Claude, AppType::Codex, AppType::Gemini] {
+            service
+                .backup_live_config_strict(&app)
+                .await
+                .expect("backup should succeed (no-op when live is a placeholder)");
+        }
 
         // All three good backups must still be intact
         for (app_type, original) in [
