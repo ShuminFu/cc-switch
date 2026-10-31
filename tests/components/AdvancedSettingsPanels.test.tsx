@@ -1,9 +1,25 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render as rtlRender,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
+import type { ReactElement } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ConnectivityCheckConfigPanel } from "@/components/usage/ConnectivityCheckConfigPanel";
+import { createTestQueryClient } from "../utils/testQueryClient";
 import { LogConfigPanel } from "@/components/settings/LogConfigPanel";
 import { RectifierConfigPanel } from "@/components/settings/RectifierConfigPanel";
 import { TerminalSettings } from "@/components/settings/TerminalSettings";
 import { mockInvoke } from "../msw/invokeRecorder";
+
+const render = (ui: ReactElement) =>
+  rtlRender(
+    <QueryClientProvider client={createTestQueryClient()}>
+      {ui}
+    </QueryClientProvider>,
+  );
 
 const toastErrorMock = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({
@@ -124,6 +140,91 @@ describe("RectifierConfigPanel", () => {
     for (const sub of rest.slice(0, 4)) {
       expect(sub).toBeDisabled();
     }
+  });
+});
+
+describe("config panels when loading fails (FE-UI-10)", () => {
+  it("shows an error and no switches when the rectifier config cannot load", async () => {
+    const api = mockInvoke({
+      get_rectifier_config: () => {
+        throw new Error("db locked");
+      },
+      get_optimizer_config: {
+        enabled: false,
+        thinkingOptimizer: true,
+        cacheInjection: true,
+      },
+      set_rectifier_config: true,
+    });
+    render(<RectifierConfigPanel />);
+
+    expect(await screen.findByTestId("config-load-error")).toBeInTheDocument();
+    expect(screen.queryAllByRole("switch")).toHaveLength(0);
+    expect(api.callsTo("set_rectifier_config")).toHaveLength(0);
+  });
+
+  it("keeps the optimizer switches disabled when only the optimizer fails", async () => {
+    mockInvoke({
+      get_rectifier_config: {
+        enabled: true,
+        requestThinkingSignature: true,
+        requestThinkingBudget: true,
+        requestMediaFallback: true,
+        requestMediaHeuristic: true,
+      },
+      get_optimizer_config: () => {
+        throw new Error("boom");
+      },
+    });
+    render(<RectifierConfigPanel />);
+
+    expect(await screen.findByTestId("config-load-error")).toBeInTheDocument();
+    const switches = screen.getAllByRole("switch");
+    for (const optimizerSwitch of switches.slice(5)) {
+      expect(optimizerSwitch).toBeDisabled();
+    }
+  });
+
+  it("shows an error instead of default log settings", async () => {
+    mockInvoke({
+      get_log_config: () => {
+        throw new Error("nope");
+      },
+    });
+    render(<LogConfigPanel />);
+    expect(await screen.findByTestId("config-load-error")).toBeInTheDocument();
+    expect(screen.queryByRole("switch")).toBeNull();
+  });
+
+  it("rejects a blank connectivity timeout instead of saving a default", async () => {
+    const api = mockInvoke({
+      get_stream_check_config: {
+        timeoutSecs: 10,
+        maxRetries: 2,
+        degradedThresholdMs: 5000,
+      },
+      save_stream_check_config: null,
+    });
+    render(<ConnectivityCheckConfigPanel />);
+
+    const timeout = await screen.findByLabelText("streamCheck.timeout");
+    expect(timeout).toHaveValue(10);
+    fireEvent.change(timeout, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /common.save/ }));
+
+    expect(
+      await screen.findByText("streamCheck.rangeError"),
+    ).toBeInTheDocument();
+    expect(api.callsTo("save_stream_check_config")).toHaveLength(0);
+
+    fireEvent.change(timeout, { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: /common.save/ }));
+    await waitFor(() =>
+      expect(api.callsTo("save_stream_check_config")).toHaveLength(1),
+    );
+    expect(api.callsTo("save_stream_check_config")[0].args).toEqual({
+      config: { timeoutSecs: 12, maxRetries: 2, degradedThresholdMs: 5000 },
+    });
   });
 });
 

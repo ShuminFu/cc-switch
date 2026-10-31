@@ -305,6 +305,14 @@ export const queryKeys = {
   },
 
   modelsDevPricing: ["models-dev-pricing"] as const,
+
+  /** Backend config blobs edited by Settings/Usage panels (FE-UI-10). */
+  backendConfig: {
+    rectifier: ["backendConfig", "rectifier"] as const,
+    optimizer: ["backendConfig", "optimizer"] as const,
+    log: ["backendConfig", "log"] as const,
+    streamCheck: ["backendConfig", "streamCheck"] as const,
+  },
 } as const;
 
 /**
