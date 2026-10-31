@@ -26,6 +26,7 @@
     "test:e2e": "node --test --test-concurrency=1 e2e/journeys.e2e.mjs",
     "check:repo": "node scripts/check-repo.mjs",
     "docs:sync": "node scripts/sync-readme.mjs",
+    "roadmap:status": "node scripts/roadmap-status.mjs",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm i18n:check && pnpm check:repo && pnpm test:unit",
     "check:rust": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && cargo fmt --check --manifest-path src-tauri/Cargo.toml && cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --locked --manifest-path src-tauri/Cargo.toml",
     "bundle:report": "vite build && node scripts/bundle-report.mjs",

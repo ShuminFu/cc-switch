@@ -1,0 +1,69 @@
+{
+  "TEST-43": {
+    "status": "ALREADY-DONE",
+    "note": "CI and release read .node-version via .github/actions/setup-pnpm and setup-node node-version-file; package.json engines.node >=22.12.0 (CI-09)",
+    "commits": ["b8efbbe", "2d4e6cf"]
+  },
+  "CI-42": {
+    "status": "ALREADY-DONE",
+    "note": "release.yml top-level permissions are contents: read, build legs read-only with persist-credentials: false, only publish-release writes",
+    "commits": ["d3a46ee"]
+  },
+  "TEST-12": {
+    "status": "PARTIAL",
+    "note": "files mocking @/lib/api: 30 -> 25 in wave 5; the rest (SettingsDialog, useSettings, useProviderActions, ...) still mock it"
+  },
+  "TEST-28": {
+    "status": "PARTIAL",
+    "note": "WebDAV and S3 upload/download round-trips run against in-process fake servers (32eae2b, webdav_sync.rs) and live S3 runs nightly; balance.rs still has no tests because each provider hard-codes its URL (needs a base-URL seam per query function)",
+    "commits": ["32eae2b"]
+  },
+  "DOCS-14": {
+    "status": "SKIPPED",
+    "note": "needs a backend import-summary event plus a dialog in provider components owned by other wave-5 clusters"
+  },
+  "DOCS-15": {
+    "status": "PARTIAL",
+    "note": "collect_diagnostics command and Copy-diagnostics format specified in docs/dev/diagnostics.md; command and Settings UI not implemented"
+  },
+  "DOCS-16": {
+    "status": "PARTIAL",
+    "note": "HelpLink component and topic map with fallback landed; not yet placed in panel headers"
+  },
+  "DOCS-19": {
+    "status": "PARTIAL",
+    "note": "showError presenter landed; call sites and the ESLint ban are not migrated"
+  },
+  "DOCS-31": {
+    "status": "SKIPPED",
+    "note": "needs import commands to return a reason and ProviderList/EmptyState copy changes owned by the providers cluster"
+  },
+  "CI-35": {
+    "status": "PARTIAL",
+    "note": "workarounds stay on by default (the cited reports are native Debian/NVIDIA, not AppImage-only); CC_SWITCH_WEBKIT_GPU=1 opts out, documented in troubleshooting"
+  },
+  "CI-15": {
+    "status": "PARTIAL",
+    "note": "once_cell replaced by std LazyLock/OnceLock; json5 vs json-five (different APIs: serde vs round-trip parser), rusqlite, rquickjs and axum bumps remain"
+  },
+  "CI-38": {
+    "status": "SKIPPED",
+    "note": "crate-to-workspace split would conflict with every concurrent change to src-tauri; needs a dedicated, frozen window"
+  },
+  "CI-22": {
+    "status": "SKIPPED",
+    "note": "publishing to Homebrew/AUR/winget/Scoop needs maintainer accounts and tokens; manual steps are in RELEASING.md"
+  },
+  "CI-37": {
+    "status": "PARTIAL",
+    "note": "phase 1 integrity items and dry run landed via CI-01/03/04/05/20/21; bot-driven release PRs need a PAT or GitHub App (GITHUB_TOKEN tags do not trigger release.yml), package channels need CI-22"
+  },
+  "DOCS-03": {
+    "status": "SKIPPED",
+    "note": "new screenshots need a running GUI on a desktop; the Playwright harness (e2e/) can script them later"
+  },
+  "PRODUCT-39": {
+    "status": "SKIPPED",
+    "note": "a beta updater channel needs a second signed endpoint (beta.json) that cannot be exercised here"
+  }
+}
