@@ -1181,6 +1181,42 @@ mod tests {
         assert_eq!(headers[0].1.to_str().unwrap(), "Bearer sk-or-test");
     }
 
+    /// TEST-23 (regression for af58740): Codex OAuth requests carry the
+    /// official client identity as a pair (`originator` + `version`) next to
+    /// the bearer token; the backend routes model cohorts on it.
+    #[test]
+    fn test_get_auth_headers_codex_oauth_sends_client_identity_pair() {
+        let adapter = ClaudeAdapter::new();
+        let auth = AuthInfo::new("oauth-access-token".to_string(), AuthStrategy::CodexOAuth);
+
+        let headers = adapter.get_auth_headers(&auth).unwrap();
+        let get = |name: &str| {
+            headers
+                .iter()
+                .find(|(k, _)| k.as_str() == name)
+                .map(|(_, v)| v.to_str().unwrap().to_string())
+        };
+        assert_eq!(headers.len(), 3, "{headers:?}");
+        assert_eq!(
+            get("authorization").as_deref(),
+            Some("Bearer oauth-access-token")
+        );
+        assert_eq!(get("originator").as_deref(), Some("codex_cli_rs"));
+        assert_eq!(
+            get("version"),
+            Some(codex_oauth_client_version()),
+            "version must accompany originator"
+        );
+        assert!(get("x-api-key").is_none());
+
+        // The API-key strategies never leak the Codex client identity.
+        let api_key = AuthInfo::new("sk-relay".to_string(), AuthStrategy::ClaudeAuth);
+        let api_headers = adapter.get_auth_headers(&api_key).unwrap();
+        assert!(api_headers
+            .iter()
+            .all(|(k, _)| k.as_str() != "originator" && k.as_str() != "version"));
+    }
+
     #[test]
     fn test_get_auth_headers_rejects_illegal_header_chars() {
         // 用户粘贴含 \r\n 的"脏"key 不能让进程 panic

@@ -3299,4 +3299,55 @@ mod tests {
                 .is_none()
         );
     }
+
+    /// TEST-23 (regression for 9ca1a41): strict OpenAI-compatible providers
+    /// reject any tool whose `parameters` is not an object schema, so every
+    /// shape a Responses client may send must come out as `type: object` with
+    /// `properties`, while valid schemas keep their content.
+    #[test]
+    fn normalize_function_parameters_table() {
+        let cases: Vec<(Option<Value>, Value)> = vec![
+            (None, json!({"type": "object", "properties": {}})),
+            (
+                Some(Value::Null),
+                json!({"type": "object", "properties": {}}),
+            ),
+            (
+                Some(json!({"type": null})),
+                json!({"type": "object", "properties": {}}),
+            ),
+            (Some(json!({})), json!({"type": "object", "properties": {}})),
+            (
+                Some(
+                    json!({"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}),
+                ),
+                json!({"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}),
+            ),
+        ];
+        for (input, expected) in cases {
+            let out = normalize_function_parameters(input.as_ref());
+            assert_eq!(out["type"], "object", "input {input:?} -> {out}");
+            assert!(out["properties"].is_object(), "input {input:?} -> {out}");
+            assert_eq!(out, expected, "input {input:?}");
+        }
+
+        // End to end: a tool with no `parameters` key at all and one with
+        // `parameters: null` both reach the Chat request as object schemas.
+        let body = json!({
+            "model": "m",
+            "input": "hi",
+            "tools": [
+                {"type": "function", "name": "nokey"},
+                {"type": "function", "name": "nullparams", "parameters": null}
+            ]
+        });
+        let result = responses_to_chat_completions(body).unwrap();
+        for i in 0..2 {
+            assert_eq!(
+                result["tools"][i]["function"]["parameters"]["type"], "object",
+                "{}",
+                result["tools"][i]
+            );
+        }
+    }
 }

@@ -40,3 +40,55 @@ impl SwitchLockManager {
         lock.lock_owned().await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::FutureExt;
+
+    // TEST-19: contention is checked by polling once (`now_or_never`), not by
+    // racing timers, so the tests are deterministic.
+
+    #[tokio::test]
+    async fn same_app_switches_are_serialised() {
+        let locks = SwitchLockManager::new();
+        let held = locks.lock_for_app("claude").await;
+        assert!(
+            locks.lock_for_app("claude").now_or_never().is_none(),
+            "a second switch for the same app must wait"
+        );
+        drop(held);
+        assert!(locks.lock_for_app("claude").now_or_never().is_some());
+    }
+
+    #[tokio::test]
+    async fn different_apps_switch_in_parallel() {
+        let locks = SwitchLockManager::new();
+        let _claude = locks.lock_for_app("claude").await;
+        assert!(locks.lock_for_app("codex").now_or_never().is_some());
+    }
+
+    #[tokio::test]
+    async fn clones_share_the_same_locks() {
+        let locks = SwitchLockManager::new();
+        let clone = locks.clone();
+        let _held = locks.lock_for_app("gemini").await;
+        assert!(clone.lock_for_app("gemini").now_or_never().is_none());
+    }
+
+    #[tokio::test]
+    async fn waiter_acquires_after_release() {
+        let locks = SwitchLockManager::new();
+        let held = locks.lock_for_app("claude").await;
+        let waiter = {
+            let locks = locks.clone();
+            tokio::spawn(async move {
+                let _g = locks.lock_for_app("claude").await;
+            })
+        };
+        drop(held);
+        waiter
+            .await
+            .expect("waiter finished once the lock was released");
+    }
+}
