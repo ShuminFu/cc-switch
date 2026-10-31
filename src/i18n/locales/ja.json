@@ -196,6 +196,37 @@
       "label": "プロバイダーを絞り込む",
       "all": "すべて",
       "inQueue": "フェイルオーバーキュー内"
+    },
+    "importPicker": {
+      "done": "{{count}} 件のプロバイダーをインポートしました",
+      "failed": "{{count}} 件のプロバイダーをインポートした後に失敗しました",
+      "title": "ライブ設定からインポート",
+      "description": "アプリの現在の設定ファイルで定義されているプロバイダーです。CC Switch に追加するものを選択してください。",
+      "readFailed": "ライブ設定を読み込めませんでした。",
+      "none": "ライブ設定にプロバイダーが見つかりません。",
+      "alreadyAdded": "すでにリストにあります",
+      "import": "選択項目をインポート（{{count}}）",
+      "open": "ライブ設定からプロバイダーを選択…"
+    },
+    "preview": {
+      "title": "変更をプレビュー",
+      "description": "{{name}} に切り替えたときにライブ設定ファイルへ書き込まれる内容です。切り替えるまで何も書き込まれません。",
+      "failed": "プレビューを計算できませんでした：{{error}}",
+      "unsupported": "このアプリではまだプレビューを利用できません。",
+      "noChanges": "切り替えてもライブファイルは変更されません。",
+      "newFile": "新規ファイル"
+    },
+    "health": {
+      "title": "プロバイダーの状態",
+      "description": "各プロバイダーのエンドポイントへの到達性と、ローカルルーティングで発生した失敗です。",
+      "notCheckable": "公式：プローブ対象外",
+      "checkFailed": "チェック失敗",
+      "notChecked": "未チェック",
+      "failures": "{{count}} 回連続で失敗",
+      "lastSuccess": "{{time}} に正常",
+      "noTraffic": "ルーティングされたリクエストなし",
+      "checkAll": "すべてチェック（{{count}}）",
+      "open": "プロバイダーの状態…"
     }
   },
   "claudeCode": {
@@ -246,7 +277,8 @@
         "active": "Claude Desktop ローカルルーティングは起動中です - {{address}}:{{port}}",
         "inactive": "モデルマッピングや形式変換が必要なプロバイダー向けに Claude Desktop ローカルルーティングを起動します。設定アドレス: {{address}}:{{port}}"
       },
-      "stopBlockedByTakeover": "他のアプリがプロキシ引き継ぎを使用中です。先に設定で該当アプリの引き継ぎをオフにしてから、ローカルルーティングを停止してください。"
+      "stopBlockedByTakeover": "他のアプリがプロキシ引き継ぎを使用中です。先に設定で該当アプリの引き継ぎをオフにしてから、ローカルルーティングを停止してください。",
+      "stopBlockedByDesktop": "Claude Desktop はまだローカルルーティング経由でリクエストを送信しています。先に Claude Desktop を直接接続のプロバイダーに切り替えてから、ローカルルーティングを停止してください。"
     }
   },
   "notifications": {
@@ -994,6 +1026,24 @@
       "placeholder": "設定を検索…",
       "label": "設定を検索",
       "noResults": "一致する設定はありません"
+    },
+    "codexHistoryBackups": {
+      "purged": "Codex 履歴バックアップ {{size}} を削除しました",
+      "purgeFailed": "Codex 履歴バックアップの削除に失敗しました",
+      "title": "履歴移行のバックアップ",
+      "empty": "ディスク上にバックアップはありません。",
+      "usage": "ディスク使用量 {{total}}：削除可能 {{purgeable}}、復元台帳 {{ledger}}。",
+      "purge": "バックアップを削除",
+      "confirmTitle": "Codex 履歴バックアップを削除しますか？",
+      "confirmMessage": "Codex 履歴移行で作成されたバックアップ（{{size}}）を削除します。セッションには影響しません。",
+      "includeLedger": "復元台帳（{{size}}）も削除します。削除後は、履歴の統合をオフにしても元の履歴を復元できなくなります。"
+    },
+    "configDirSource": {
+      "override": "cc-switch の設定",
+      "env": "{{var}} 環境変数",
+      "default": "デフォルト",
+      "inUse": "使用中：{{path}}（{{source}}）",
+      "missing": "ディレクトリはまだ存在しません"
     }
   },
   "apps": {
@@ -1119,7 +1169,10 @@
       "unarchive": "セッションのアーカイブを解除",
       "archive": "セッションをアーカイブ",
       "showArchived": "アーカイブ済みを表示（{{count}}）",
-      "saveFailed": "セッションラベルを保存できませんでした"
+      "saveFailed": "セッションラベルを保存できませんでした",
+      "editTags": "タグを編集",
+      "tagsInput": "タグ（カンマ区切り）",
+      "tagsPlaceholder": "bugfix, client-a"
     },
     "trash": {
       "restored": "セッションを復元しました",
@@ -2102,6 +2155,10 @@
         "name": "@upstash/context7-mcp",
         "description": "最新のライブラリドキュメントとコード例を提供する Context7 ドキュメント検索ツール。キー設定で上限が拡張されます"
       }
+    },
+    "syncSkip": {
+      "hint": "{{app}} は同期されていません：設定ディレクトリ {{dir}} が存在しません。{{app}} を一度起動してから、サーバーを再度切り替えてください。",
+      "badge": "{{app}}：未同期"
     }
   },
   "prompts": {
@@ -2180,7 +2237,9 @@
     "applySuccess": "プロジェクトを適用しました",
     "applyFailed": "プロジェクトの適用に失敗しました: {{detail}}",
     "applyWarnings": "プロジェクトを適用しました（警告 {{warningCount}} 件）：\n{{details}}",
-    "clearSuccess": "プロジェクトを使用しない状態に切り替えました"
+    "clearSuccess": "プロジェクトを使用しない状態に切り替えました",
+    "previewMcp": "{{count}} 個の MCP",
+    "previewTitle": "適用すると有効になります：{{summary}}"
   },
   "workspace": {
     "title": "ワークスペースファイル",
@@ -3003,7 +3062,43 @@
       "lastError": "最新のエラー：{{error}}",
       "lastRequestAt": "最新のリクエスト：{{time}}",
       "empty": "今日のリクエストはありません",
-      "openDetail": "{{time}} のリクエスト {{status}} {{model}}"
+      "openDetail": "{{time}} のリクエスト {{status}} {{model}}",
+      "view": "リクエスト表示",
+      "tabLog": "リクエストログ",
+      "tabAttempts": "プロバイダー試行"
+    },
+    "flightRecorder": {
+      "served": "応答済み",
+      "failover": "フェイルオーバー済み",
+      "aborted": "中断",
+      "skipped": "スキップ",
+      "copied": "最近のリクエストを JSON Lines としてコピーしました",
+      "copyFailed": "最近のリクエストのコピーに失敗しました",
+      "hint": "プロキシ起動以降、各リクエストが試行したすべてのプロバイダーです。メモリ内にのみ保持されます。",
+      "export": "JSON Lines としてコピー",
+      "empty": "プロキシ起動以降のリクエストはありません",
+      "ok": "OK",
+      "fail": "失敗"
+    },
+    "routing": {
+      "saved": "ルーティング設定を保存しました",
+      "saveFailed": "ルーティング設定の保存に失敗しました",
+      "title": "ルーティング",
+      "description": "リクエストがキュー内のどのプロバイダーを最初に試すかを決めます。フェイルオーバーは引き続きキューの残りを順に試します。",
+      "strategyLabel": "ルーティング戦略",
+      "weightsHint": "重みが大きいほど最初に試される頻度が高くなります。0 は最初に試されないことを意味します。",
+      "sticky": "スティッキーセッション",
+      "stickyHint": "会話を最初のリクエストを処理したプロバイダーに固定し、プロンプトキャッシュを有効に保ちます。",
+      "stickyTtl": "最終使用後の固定期間（秒、0 = デフォルト）",
+      "maxConcurrent": "プロバイダーごとの最大同時リクエスト数（0 = 無制限）。ビジーなプロバイダーはスキップされます",
+      "strategy": {
+        "priority": "優先順位",
+        "roundRobin": "ラウンドロビン",
+        "weighted": "重み付け"
+      }
+    },
+    "discover": {
+      "open": "ローカルルーティングとフェイルオーバー"
     }
   },
   "streamCheck": {
@@ -3555,6 +3650,22 @@
       "import": "{{count}} 件をインポート",
       "title": "共有バンドル",
       "subtitle": "キーを含めずにプロバイダー、MCP サーバー、プロンプトを共有"
+    }
+  },
+  "validation": {
+    "codex": {
+      "wireApi": {
+        "invalid": "wire_api \"{{value}}\" はサポートされていません。次のいずれかを使用してください：{{allowed}}"
+      },
+      "modelProvider": {
+        "undefined": "model_provider \"{{value}}\" に対応する [model_providers.{{value}}] テーブルがありません"
+      }
+    },
+    "env": {
+      "keyCase": "\"{{value}}\" は \"{{expected}}\" と記述してください"
+    },
+    "toml": {
+      "syntax": "TOML 構文エラー：{{message}}"
     }
   }
 }

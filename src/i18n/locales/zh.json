@@ -196,6 +196,37 @@
       "label": "筛选供应商",
       "all": "全部",
       "inQueue": "在故障转移队列中"
+    },
+    "importPicker": {
+      "done": "已导入 {{count}} 个供应商",
+      "failed": "导入 {{count}} 个供应商后失败",
+      "title": "从实时配置导入",
+      "description": "该应用当前配置文件中定义的供应商。选择要添加到 CC Switch 的项。",
+      "readFailed": "无法读取实时配置。",
+      "none": "实时配置中未找到供应商。",
+      "alreadyAdded": "已在列表中",
+      "import": "导入所选（{{count}}）",
+      "open": "从实时配置中选择供应商…"
+    },
+    "preview": {
+      "title": "预览更改",
+      "description": "切换到 {{name}} 时将写入实时配置文件的内容。切换前不会写入任何内容。",
+      "failed": "无法生成预览：{{error}}",
+      "unsupported": "该应用暂不支持预览。",
+      "noChanges": "切换不会更改任何实时文件。",
+      "newFile": "新文件"
+    },
+    "health": {
+      "title": "供应商健康状态",
+      "description": "各供应商端点的可达性，以及本地路由记录到的失败情况。",
+      "notCheckable": "官方：不探测",
+      "checkFailed": "检测失败",
+      "notChecked": "尚未检测",
+      "failures": "连续失败 {{count}} 次",
+      "lastSuccess": "{{time}} 正常",
+      "noTraffic": "无路由请求",
+      "checkAll": "全部检测（{{count}}）",
+      "open": "供应商健康状态…"
     }
   },
   "claudeCode": {
@@ -246,7 +277,8 @@
         "active": "Claude Desktop 本地路由已开启 - {{address}}:{{port}}",
         "inactive": "开启 Claude Desktop 本地路由，用于需要模型映射或格式转换的供应商。当前配置地址：{{address}}:{{port}}"
       },
-      "stopBlockedByTakeover": "其它应用正在使用代理接管。请先在设置中关闭对应应用接管，再停止本地路由。"
+      "stopBlockedByTakeover": "其它应用正在使用代理接管。请先在设置中关闭对应应用接管，再停止本地路由。",
+      "stopBlockedByDesktop": "Claude Desktop 仍通过本地路由发送请求。请先将 Claude Desktop 切换到直连供应商，再停止本地路由。"
     }
   },
   "notifications": {
@@ -994,6 +1026,24 @@
       "placeholder": "搜索设置…",
       "label": "搜索设置",
       "noResults": "没有匹配的设置"
+    },
+    "codexHistoryBackups": {
+      "purged": "已删除 {{size}} 的 Codex 历史备份",
+      "purgeFailed": "删除 Codex 历史备份失败",
+      "title": "历史迁移备份",
+      "empty": "磁盘上没有备份。",
+      "usage": "磁盘占用 {{total}}：{{purgeable}} 可安全删除，{{ledger}} 为恢复记录。",
+      "purge": "删除备份",
+      "confirmTitle": "删除 Codex 历史备份？",
+      "confirmMessage": "这将删除 Codex 历史迁移时创建的备份（{{size}}）。你的会话不受影响。",
+      "includeLedger": "同时删除恢复记录（{{size}}）。删除后关闭历史统一将无法再恢复原始历史。"
+    },
+    "configDirSource": {
+      "override": "cc-switch 设置",
+      "env": "{{var}} 环境变量",
+      "default": "默认",
+      "inUse": "使用中：{{path}}（{{source}}）",
+      "missing": "目录尚不存在"
     }
   },
   "apps": {
@@ -1119,7 +1169,10 @@
       "unarchive": "取消归档会话",
       "archive": "归档会话",
       "showArchived": "显示已归档（{{count}}）",
-      "saveFailed": "无法保存会话标签"
+      "saveFailed": "无法保存会话标签",
+      "editTags": "编辑标签",
+      "tagsInput": "标签，用逗号分隔",
+      "tagsPlaceholder": "bugfix, client-a"
     },
     "trash": {
       "restored": "会话已恢复",
@@ -2102,6 +2155,10 @@
         "name": "@upstash/context7-mcp",
         "description": "Context7 文档搜索工具，提供最新的库文档和代码示例，配置 key 会有更高限额"
       }
+    },
+    "syncSkip": {
+      "hint": "{{app}} 未同步：其配置目录 {{dir}} 不存在。请先运行一次 {{app}}，再重新切换该服务器。",
+      "badge": "{{app}}：未同步"
     }
   },
   "prompts": {
@@ -2180,7 +2237,9 @@
     "applySuccess": "项目已应用",
     "applyFailed": "应用项目失败: {{detail}}",
     "applyWarnings": "项目已应用，{{warningCount}} 条警告：\n{{details}}",
-    "clearSuccess": "已切换为不使用项目"
+    "clearSuccess": "已切换为不使用项目",
+    "previewMcp": "{{count}} 个 MCP",
+    "previewTitle": "应用后将启用：{{summary}}"
   },
   "workspace": {
     "title": "Workspace 文件管理",
@@ -3003,7 +3062,43 @@
       "lastError": "最近错误：{{error}}",
       "lastRequestAt": "最近请求：{{time}}",
       "empty": "今日暂无请求",
-      "openDetail": "{{time}} 的请求 {{status}} {{model}}"
+      "openDetail": "{{time}} 的请求 {{status}} {{model}}",
+      "view": "请求视图",
+      "tabLog": "请求日志",
+      "tabAttempts": "供应商尝试"
+    },
+    "flightRecorder": {
+      "served": "已响应",
+      "failover": "已故障转移",
+      "aborted": "已中止",
+      "skipped": "已跳过",
+      "copied": "最近请求已复制为 JSON Lines",
+      "copyFailed": "复制最近请求失败",
+      "hint": "代理启动以来每个请求尝试过的所有供应商。仅保存在内存中。",
+      "export": "复制为 JSON Lines",
+      "empty": "代理启动以来暂无请求",
+      "ok": "成功",
+      "fail": "失败"
+    },
+    "routing": {
+      "saved": "路由设置已保存",
+      "saveFailed": "保存路由设置失败",
+      "title": "路由",
+      "description": "请求优先尝试队列中的哪个供应商。故障转移仍会依次尝试队列中的其余供应商。",
+      "strategyLabel": "路由策略",
+      "weightsHint": "权重越高，越常被优先尝试。0 表示从不优先。",
+      "sticky": "粘性会话",
+      "stickyHint": "让同一对话保持在处理其首个请求的供应商上，以保持提示缓存有效。",
+      "stickyTtl": "最后使用后的固定时长（秒，0 = 默认）",
+      "maxConcurrent": "每个供应商的最大并发请求数（0 = 不限）；繁忙的供应商将被跳过",
+      "strategy": {
+        "priority": "优先级",
+        "roundRobin": "轮询",
+        "weighted": "加权"
+      }
+    },
+    "discover": {
+      "open": "本地路由与故障转移"
     }
   },
   "streamCheck": {
@@ -3555,6 +3650,22 @@
       "import": "导入 {{count}} 项",
       "title": "分享包",
       "subtitle": "分享供应商、MCP 服务器和提示词，不含你的密钥"
+    }
+  },
+  "validation": {
+    "codex": {
+      "wireApi": {
+        "invalid": "不支持 wire_api \"{{value}}\"；请使用以下之一：{{allowed}}"
+      },
+      "modelProvider": {
+        "undefined": "model_provider \"{{value}}\" 没有对应的 [model_providers.{{value}}] 表"
+      }
+    },
+    "env": {
+      "keyCase": "\"{{value}}\" 应写作 \"{{expected}}\""
+    },
+    "toml": {
+      "syntax": "TOML 语法错误：{{message}}"
     }
   }
 }
