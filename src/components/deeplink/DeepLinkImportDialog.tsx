@@ -1,0 +1,1108 @@
+import { useState, useEffect, useMemo, useId, useRef } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { DeepLinkImportRequest, deeplinkApi } from "@/lib/api/deeplink";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { providersApi } from "@/lib/api/providers";
+import type { AppId } from "@/lib/api/types";
+import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
+import { PromptConfirmation } from "./PromptConfirmation";
+import { McpConfirmation } from "./McpConfirmation";
+import { SkillConfirmation } from "./SkillConfirmation";
+import { ProviderIcon } from "@/components/ProviderIcon";
+import { decodeBase64Lenient, getEndpointHost } from "./safety";
+import {
+  deeplinkV2Api,
+  isBundle,
+  type BundleItemChoice,
+  type BundleItemResult,
+  type DeepLinkImportRequestV2,
+} from "./api";
+import { BundleConfirmation } from "./BundleConfirmation";
+import { PublisherBadge } from "./PublisherBadge";
+
+/** Import stays disabled this long after the reviewed content changes, so a
+ * request swapped in under the cursor cannot be approved by a stray click. */
+const IMPORT_ARM_DELAY_MS = 800;
+
+const defaultChoices = (
+  request: DeepLinkImportRequestV2 | null,
+): BundleItemChoice[] =>
+  (request?.bundle?.items ?? []).map((_, index) => ({
+    index,
+    accept: true,
+    enabled: false,
+    usageEnabled: false,
+  }));
+
+interface DeeplinkError {
+  url: string;
+  error: string;
+}
+
+export function DeepLinkImportDialog() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [request, setRequest] = useState<DeepLinkImportRequestV2 | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  // Links that arrive while a dialog is open or importing wait their turn
+  // instead of replacing the request under review (SESS-39, SESS-30).
+  const [queue, setQueue] = useState<DeepLinkImportRequestV2[]>([]);
+  const preparingRef = useRef(false);
+  const [armed, setArmed] = useState(false);
+  const [bundleChoices, setBundleChoices] = useState<BundleItemChoice[]>([]);
+  const [promptEnableNow, setPromptEnableNow] = useState(false);
+  const [trustPublisher, setTrustPublisher] = useState(false);
+  const trustCheckboxId = useId();
+  // Explicit, per-import user choices. They always start unticked, whatever
+  // the link asks for: a deep link alone must never switch the current
+  // provider, write MCP servers into live configs or enable a usage script.
+  const [switchNow, setSwitchNow] = useState(false);
+  const [mcpEnableNow, setMcpEnableNow] = useState(false);
+  const [usageScriptEnabled, setUsageScriptEnabled] = useState(false);
+  // null = unknown; "" = no current provider for the target app
+  const [currentProviderId, setCurrentProviderId] = useState<string | null>(
+    null,
+  );
+  const switchCheckboxId = useId();
+  const usageCheckboxId = useId();
+
+  useEffect(() => {
+    setSwitchNow(false);
+    setMcpEnableNow(false);
+    setUsageScriptEnabled(false);
+    setPromptEnableNow(false);
+    setTrustPublisher(false);
+    setBundleChoices(defaultChoices(request));
+    setCurrentProviderId(null);
+    setArmed(false);
+    const armTimer = request
+      ? setTimeout(() => setArmed(true), IMPORT_ARM_DELAY_MS)
+      : undefined;
+
+    if (!request?.app || (request.resource && request.resource !== "provider"))
+      return () => {
+        if (armTimer) clearTimeout(armTimer);
+      };
+    let cancelled = false;
+    providersApi
+      .getCurrent(request.app as AppId)
+      .then((id) => {
+        if (!cancelled) setCurrentProviderId(id ?? "");
+      })
+      .catch(() => {
+        /* informational only */
+      });
+    return () => {
+      cancelled = true;
+      if (armTimer) clearTimeout(armTimer);
+    };
+  }, [request]);
+
+  // 容错判断：MCP 导入结果可能缺少 type 字段
+  const isMcpImportResult = (
+    value: unknown,
+  ): value is {
+    importedCount: number;
+    importedIds: string[];
+    failed: Array<{ id: string; error: string }>;
+    type?: "mcp";
+  } => {
+    if (!value || typeof value !== "object") return false;
+    const v = value as Record<string, unknown>;
+    return (
+      typeof v.importedCount === "number" &&
+      Array.isArray(v.importedIds) &&
+      Array.isArray(v.failed)
+    );
+  };
+
+  useEffect(() => {
+    const showRequest = (payload: DeepLinkImportRequestV2) => {
+      setQueue((current) => [...current, payload]);
+    };
+
+    const showError = (payload: DeeplinkError) => {
+      console.error("Deep link error:", payload);
+      toast.error(t("deeplink.parseError"), {
+        description: payload.error,
+      });
+    };
+
+    // Listen for deep link import events
+    const unlistenImport = listen<DeepLinkImportRequest>(
+      "deeplink-import",
+      (event) => showRequest(event.payload),
+    );
+
+    // Listen for deep link error events
+    const unlistenError = listen<DeeplinkError>("deeplink-error", (event) =>
+      showError(event.payload),
+    );
+
+    // Once both listeners exist, tell the backend and pick up any link that
+    // arrived before the webview was listening (cold start, lightweight mode).
+    Promise.all([unlistenImport, unlistenError])
+      .then(() => deeplinkApi.frontendReady())
+      .then((pending) => {
+        if (pending?.kind === "import") {
+          void showRequest(pending.request);
+        } else if (pending?.kind === "error") {
+          showError(pending);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to fetch pending deep link:", error);
+      });
+
+    return () => {
+      unlistenImport.then((fn) => fn());
+      unlistenError.then((fn) => fn());
+    };
+  }, [t]);
+
+  // Show the next queued link once nothing is under review. The reviewed
+  // request is frozen when it opens: later links only grow the queue.
+  useEffect(() => {
+    if (isOpen || isImporting || preparingRef.current || queue.length === 0)
+      return;
+    const [next, ...rest] = queue;
+    setQueue(rest);
+    preparingRef.current = true;
+    const prepare = async (): Promise<DeepLinkImportRequestV2> => {
+      if (!isBundle(next) && next.resource === "provider" && next.config) {
+        try {
+          const merged = await deeplinkApi.mergeDeeplinkConfig(next);
+          // Keep the backend's nonce/bundle: the merge echoes request fields.
+          return { ...merged, nonce: next.nonce, bundle: next.bundle };
+        } catch (error) {
+          console.error("Failed to merge config:", error);
+          toast.error(t("deeplink.configMergeError"), {
+            description: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      return next;
+    };
+    void prepare().then((prepared) => {
+      preparingRef.current = false;
+      setRequest(prepared);
+      setIsOpen(true);
+    });
+  }, [isImporting, isOpen, queue, t]);
+
+  const finishBundleImport = async (results: BundleItemResult[]) => {
+    const failed = results.filter((r) => !r.ok);
+    const resources = new Set(
+      results.filter((r) => r.ok).map((r) => r.resource),
+    );
+    if (resources.has("provider")) {
+      await queryClient.invalidateQueries({ queryKey: ["providers"] });
+    }
+    if (resources.has("mcp")) {
+      await queryClient.invalidateQueries({
+        queryKey: ["mcp", "all"],
+        refetchType: "all",
+      });
+    }
+    if (resources.has("skill")) {
+      await queryClient.invalidateQueries({
+        queryKey: ["skills"],
+        refetchType: "all",
+      });
+    }
+    if (resources.has("prompt")) {
+      window.dispatchEvent(new CustomEvent("prompt-imported", { detail: {} }));
+    }
+    if (failed.length > 0) {
+      toast.warning(
+        t("deeplink.bundlePartial", {
+          defaultValue: "Imported {{ok}} of {{total}} items",
+          ok: results.length - failed.length,
+          total: results.length,
+        }),
+        { description: failed.map((f) => f.error).join("\n") },
+      );
+    } else {
+      toast.success(
+        t("deeplink.bundleSuccess", {
+          defaultValue: "Imported {{count}} items",
+          count: results.length,
+        }),
+        { closeButton: true },
+      );
+    }
+  };
+
+  const handleImport = async () => {
+    if (!request) return;
+
+    setIsImporting(true);
+
+    try {
+      if (isBundle(request)) {
+        const results = await deeplinkV2Api.importBundle(
+          request.nonce ?? "",
+          bundleChoices,
+          trustPublisher,
+        );
+        await finishBundleImport(results);
+        setIsOpen(false);
+        return;
+      }
+      // Replace the link-supplied flags with the user's explicit choices.
+      const finalRequest: DeepLinkImportRequest = { ...request };
+      if (request.resource === "mcp") {
+        finalRequest.enabled = mcpEnableNow;
+      } else if (request.resource === "prompt") {
+        finalRequest.enabled = promptEnableNow;
+      } else if (request.resource === "provider" || !request.resource) {
+        finalRequest.enabled = switchNow;
+        if (request.usageScript) {
+          finalRequest.usageEnabled = usageScriptEnabled;
+        } else if (request.usageEnabled !== undefined) {
+          finalRequest.usageEnabled = false;
+        }
+      }
+      const result = await deeplinkApi.importFromDeeplink(finalRequest);
+      const refreshMcp = async (summary: {
+        importedCount: number;
+        importedIds: string[];
+        failed: Array<{ id: string; error: string }>;
+      }) => {
+        // 强制刷新 MCP 相关缓存，确保管理页重新从数据库加载
+        await queryClient.invalidateQueries({
+          queryKey: ["mcp", "all"],
+          refetchType: "all",
+        });
+        await queryClient.refetchQueries({
+          queryKey: ["mcp", "all"],
+          type: "all",
+        });
+
+        if (summary.failed.length > 0) {
+          toast.warning(t("deeplink.mcpPartialSuccess"), {
+            description: t("deeplink.mcpPartialSuccessDescription", {
+              success: summary.importedCount,
+              failed: summary.failed.length,
+            }),
+          });
+        } else {
+          toast.success(t("deeplink.mcpImportSuccess"), {
+            description: t("deeplink.mcpImportSuccessDescription", {
+              count: summary.importedCount,
+            }),
+            closeButton: true,
+          });
+        }
+      };
+
+      // Handle different result types
+      if ("type" in result) {
+        if (result.type === "provider") {
+          await queryClient.invalidateQueries({
+            queryKey: ["providers", request.app],
+          });
+          toast.success(t("deeplink.importSuccess"), {
+            description: t("deeplink.importSuccessDescription", {
+              name: request.name,
+            }),
+            closeButton: true,
+          });
+        } else if (result.type === "prompt") {
+          // Prompts don't use React Query, trigger a custom event for refresh
+          window.dispatchEvent(
+            new CustomEvent("prompt-imported", {
+              detail: { app: request.app },
+            }),
+          );
+          toast.success(t("deeplink.promptImportSuccess"), {
+            description: t("deeplink.promptImportSuccessDescription", {
+              name: request.name,
+            }),
+            closeButton: true,
+          });
+        } else if (result.type === "mcp") {
+          await refreshMcp(result);
+        } else if (result.type === "skill") {
+          // Refresh Skills with aggressive strategy
+          queryClient.invalidateQueries({
+            queryKey: ["skills"],
+            refetchType: "all",
+          });
+          await queryClient.refetchQueries({
+            queryKey: ["skills"],
+            type: "all",
+          });
+          toast.success(t("deeplink.skillImportSuccess"), {
+            description: t("deeplink.skillImportSuccessDescription", {
+              repo: request.repo,
+            }),
+            closeButton: true,
+          });
+        }
+      } else if (isMcpImportResult(result)) {
+        // 兜底处理：旧版本后端可能未返回 type 字段
+        await refreshMcp(result);
+      } else {
+        // Legacy return type (string ID) - assume provider
+        await queryClient.invalidateQueries({
+          queryKey: ["providers", request.app],
+        });
+        toast.success(t("deeplink.importSuccess"), {
+          description: t("deeplink.importSuccessDescription", {
+            name: request.name,
+          }),
+          closeButton: true,
+        });
+      }
+
+      // Close dialog after all refreshes complete
+      setIsOpen(false);
+    } catch (error) {
+      console.error("Failed to import from deep link:", error);
+      toast.error(t("deeplink.importError"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleCancel = () => {
+    if (request?.nonce) {
+      void deeplinkV2Api.discard(request.nonce).catch(() => {
+        /* already gone */
+      });
+    }
+    setIsOpen(false);
+  };
+
+  // Mask API key for display (show first 4 chars + ***)
+  const maskedApiKey =
+    request?.apiKey && request.apiKey.length > 4
+      ? `${request.apiKey.substring(0, 4)}${"*".repeat(20)}`
+      : "****";
+
+  const endpointHosts = useMemo(
+    () =>
+      (request?.endpoint ?? "")
+        .split(",")
+        .map((ep) => ep.trim())
+        .filter(Boolean)
+        .map(getEndpointHost),
+    [request?.endpoint],
+  );
+  const primaryHost = endpointHosts[0] ?? "";
+
+  const decodedUsageScript = useMemo(
+    () =>
+      request?.usageScript ? decodeBase64Lenient(request.usageScript) : null,
+    [request?.usageScript],
+  );
+
+  // Check if config file is present
+  const hasConfigFile = !!(request?.config || request?.configUrl);
+  const configSource = request?.config
+    ? "base64"
+    : request?.configUrl
+      ? "url"
+      : null;
+
+  // Parse config file content for display
+  interface ParsedConfig {
+    type: "claude" | "codex" | "gemini";
+    env?: Record<string, string>;
+    auth?: Record<string, string>;
+    tomlConfig?: string;
+    raw: Record<string, unknown>;
+  }
+
+  // Helper to decode base64 with UTF-8 support
+  const b64ToUtf8 = (str: string): string => {
+    try {
+      const binString = atob(str);
+      const bytes = Uint8Array.from(binString, (m) => m.codePointAt(0) || 0);
+      return new TextDecoder().decode(bytes);
+    } catch (e) {
+      console.error("Failed to decode base64:", e);
+      return atob(str);
+    }
+  };
+
+  const parsedConfig = useMemo((): ParsedConfig | null => {
+    if (!request?.config) return null;
+    try {
+      const decoded = b64ToUtf8(request.config);
+      const parsed = JSON.parse(decoded) as Record<string, unknown>;
+
+      if (request.app === "claude") {
+        // Claude 格式: { env: { ANTHROPIC_AUTH_TOKEN: ..., ... } }
+        return {
+          type: "claude",
+          env: (parsed.env as Record<string, string>) || {},
+          raw: parsed,
+        };
+      } else if (request.app === "codex") {
+        // Codex 格式: { auth: { OPENAI_API_KEY: ... }, config: "TOML string" }
+        return {
+          type: "codex",
+          auth: (parsed.auth as Record<string, string>) || {},
+          tomlConfig: (parsed.config as string) || "",
+          raw: parsed,
+        };
+      } else if (request.app === "gemini") {
+        // Gemini 格式: 扁平结构 { GEMINI_API_KEY: ..., GEMINI_BASE_URL: ... }
+        return {
+          type: "gemini",
+          env: parsed as Record<string, string>,
+          raw: parsed,
+        };
+      }
+      return null;
+    } catch (e) {
+      console.error("Failed to parse config:", e);
+      return null;
+    }
+  }, [request?.config, request?.app]);
+
+  // Helper to mask sensitive values
+  const maskValue = (key: string, value: string): string => {
+    const sensitiveKeys = ["TOKEN", "KEY", "SECRET", "PASSWORD"];
+    const isSensitive = sensitiveKeys.some((k) =>
+      key.toUpperCase().includes(k),
+    );
+    if (isSensitive && value.length > 8) {
+      return `${value.substring(0, 8)}${"*".repeat(12)}`;
+    }
+    return value;
+  };
+
+  const getTitle = () => {
+    if (!request) return t("deeplink.confirmImport");
+    if (isBundle(request))
+      return t("deeplink.importBundle", { defaultValue: "Import bundle" });
+    switch (request.resource) {
+      case "prompt":
+        return t("deeplink.importPrompt");
+      case "mcp":
+        return t("deeplink.importMcp");
+      case "skill":
+        return t("deeplink.importSkill");
+      default:
+        return t("deeplink.confirmImport");
+    }
+  };
+
+  const getDescription = () => {
+    if (!request) return t("deeplink.confirmImportDescription");
+    switch (request.resource) {
+      case "prompt":
+        return t("deeplink.importPromptDescription");
+      case "mcp":
+        return t("deeplink.importMcpDescription");
+      case "skill":
+        return t("deeplink.importSkillDescription");
+      default:
+        return t("deeplink.confirmImportDescription");
+    }
+  };
+
+  return (
+    <Dialog
+      open={isOpen && !!request}
+      onOpenChange={(open) => {
+        if (!open) handleCancel();
+        else setIsOpen(true);
+      }}
+    >
+      <DialogContent className="sm:max-w-[500px]" zIndex="top">
+        {request && (
+          <>
+            {/* 标题显式左对齐，避免默认居中样式影响 */}
+            <DialogHeader className="text-left sm:text-left">
+              <DialogTitle>{getTitle()}</DialogTitle>
+              <DialogDescription>{getDescription()}</DialogDescription>
+            </DialogHeader>
+
+            {/* 主体内容整体右移，略大于标题内边距，让内容看起来不贴边 */}
+            <div className="space-y-4 px-8 py-4 max-h-[60vh] overflow-y-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-200 dark:[&::-webkit-scrollbar-thumb]:bg-gray-700">
+              <PublisherBadge signature={request.bundle?.signature} />
+              {request.bundle?.signature.status === "verified" &&
+                request.bundle.signature.trust === "new" && (
+                  <div className="flex items-start gap-2 text-xs">
+                    <Checkbox
+                      id={trustCheckboxId}
+                      checked={trustPublisher}
+                      onCheckedChange={(v) => setTrustPublisher(v === true)}
+                    />
+                    <label htmlFor={trustCheckboxId} className="leading-tight">
+                      {t("deeplink.trustPublisher", {
+                        defaultValue:
+                          "Remember this key as “{{publisher}}” for future links",
+                        publisher: request.bundle.signature.publisher,
+                      })}
+                    </label>
+                  </div>
+                )}
+              {queue.length > 0 && (
+                <div
+                  className="rounded-md bg-muted px-3 py-2 text-xs"
+                  data-testid="deeplink-queue-notice"
+                >
+                  {t("deeplink.queuedRequests", {
+                    defaultValue:
+                      "{{count}} more import request(s) will be shown after this one.",
+                    count: queue.length,
+                  })}
+                </div>
+              )}
+              {isBundle(request) && request.bundle && (
+                <BundleConfirmation
+                  items={request.bundle.items}
+                  choices={bundleChoices}
+                  onChange={setBundleChoices}
+                />
+              )}
+              {!isBundle(request) && request.resource === "prompt" && (
+                <PromptConfirmation
+                  request={request}
+                  enableNow={promptEnableNow}
+                  onEnableNowChange={setPromptEnableNow}
+                />
+              )}
+              {!isBundle(request) && request.resource === "mcp" && (
+                <McpConfirmation
+                  request={request}
+                  enableNow={mcpEnableNow}
+                  onEnableNowChange={setMcpEnableNow}
+                />
+              )}
+              {!isBundle(request) && request.resource === "skill" && (
+                <SkillConfirmation request={request} />
+              )}
+
+              {/* Legacy Provider View */}
+              {!isBundle(request) &&
+                (request.resource === "provider" || !request.resource) && (
+                  <>
+                    {/* Provider Icon - enlarge and center near the top */}
+                    {request.icon && (
+                      <div className="flex justify-center pt-2 pb-1">
+                        <ProviderIcon
+                          icon={request.icon}
+                          name={request.name || request.icon}
+                          size={80}
+                          className="drop-shadow-sm"
+                        />
+                      </div>
+                    )}
+
+                    {/* Destination host: where every request will be sent */}
+                    <div
+                      className="rounded-lg border border-blue-300 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20"
+                      data-testid="deeplink-endpoint-host"
+                    >
+                      <div className="text-xs font-medium text-muted-foreground">
+                        {t("deeplink.endpointHostLabel", {
+                          defaultValue: "Requests will be sent to",
+                        })}
+                      </div>
+                      <div className="mt-1 text-lg font-semibold font-mono break-all">
+                        {primaryHost || "-"}
+                      </div>
+                      {endpointHosts.length > 1 && (
+                        <div className="mt-1 text-xs font-mono text-muted-foreground break-all">
+                          {endpointHosts.slice(1).join(", ")}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* App Type */}
+                    <div className="grid grid-cols-3 items-center gap-4">
+                      <div className="font-medium text-sm text-muted-foreground">
+                        {t("deeplink.app")}
+                      </div>
+                      <div className="col-span-2 text-sm font-medium capitalize">
+                        {request.app}
+                      </div>
+                    </div>
+
+                    {/* Provider Name */}
+                    <div className="grid grid-cols-3 items-center gap-4">
+                      <div className="font-medium text-sm text-muted-foreground">
+                        {t("deeplink.providerName")}
+                      </div>
+                      <div className="col-span-2 text-sm font-medium">
+                        {request.name}
+                      </div>
+                    </div>
+
+                    {/* Homepage */}
+                    <div className="grid grid-cols-3 items-center gap-4">
+                      <div className="font-medium text-sm text-muted-foreground">
+                        {t("deeplink.homepage")}
+                      </div>
+                      <div className="col-span-2 text-sm break-all text-blue-600 dark:text-blue-400">
+                        {request.homepage}
+                      </div>
+                    </div>
+
+                    {/* API Endpoint */}
+                    <div className="grid grid-cols-3 items-start gap-4">
+                      <div className="font-medium text-sm text-muted-foreground pt-0.5">
+                        {t("deeplink.endpoint")}
+                      </div>
+                      <div className="col-span-2 text-sm break-all space-y-1">
+                        {request.endpoint?.split(",").map((ep, idx) => (
+                          <div
+                            key={idx}
+                            className={
+                              idx === 0
+                                ? "font-medium"
+                                : "text-muted-foreground"
+                            }
+                          >
+                            {idx === 0 ? "🔹 " : "└ "}
+                            {ep.trim()}
+                            {idx === 0 && request.endpoint?.includes(",") && (
+                              <span className="text-xs text-muted-foreground ml-2">
+                                ({t("deeplink.primaryEndpoint")})
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* API Key (masked) */}
+                    <div className="grid grid-cols-3 items-center gap-4">
+                      <div className="font-medium text-sm text-muted-foreground">
+                        {t("deeplink.apiKey")}
+                      </div>
+                      <div className="col-span-2 text-sm font-mono text-muted-foreground">
+                        {maskedApiKey}
+                      </div>
+                    </div>
+
+                    {/* Model Fields - 根据应用类型显示不同的模型字段 */}
+                    {request.app === "claude" ? (
+                      <>
+                        {/* Claude 四种模型字段 */}
+                        {request.haikuModel && (
+                          <div className="grid grid-cols-3 items-center gap-4">
+                            <div className="font-medium text-sm text-muted-foreground">
+                              {t("deeplink.haikuModel")}
+                            </div>
+                            <div className="col-span-2 text-sm font-mono">
+                              {request.haikuModel}
+                            </div>
+                          </div>
+                        )}
+                        {request.sonnetModel && (
+                          <div className="grid grid-cols-3 items-center gap-4">
+                            <div className="font-medium text-sm text-muted-foreground">
+                              {t("deeplink.sonnetModel")}
+                            </div>
+                            <div className="col-span-2 text-sm font-mono">
+                              {request.sonnetModel}
+                            </div>
+                          </div>
+                        )}
+                        {request.opusModel && (
+                          <div className="grid grid-cols-3 items-center gap-4">
+                            <div className="font-medium text-sm text-muted-foreground">
+                              {t("deeplink.opusModel")}
+                            </div>
+                            <div className="col-span-2 text-sm font-mono">
+                              {request.opusModel}
+                            </div>
+                          </div>
+                        )}
+                        {request.model && (
+                          <div className="grid grid-cols-3 items-center gap-4">
+                            <div className="font-medium text-sm text-muted-foreground">
+                              {t("deeplink.multiModel")}
+                            </div>
+                            <div className="col-span-2 text-sm font-mono">
+                              {request.model}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {/* Codex 和 Gemini 使用通用 model 字段 */}
+                        {request.model && (
+                          <div className="grid grid-cols-3 items-center gap-4">
+                            <div className="font-medium text-sm text-muted-foreground">
+                              {t("deeplink.model")}
+                            </div>
+                            <div className="col-span-2 text-sm font-mono">
+                              {request.model}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* Notes (if present) */}
+                    {request.notes && (
+                      <div className="grid grid-cols-3 items-start gap-4">
+                        <div className="font-medium text-sm text-muted-foreground">
+                          {t("deeplink.notes")}
+                        </div>
+                        <div className="col-span-2 text-sm text-muted-foreground">
+                          {request.notes}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Config File Details (v3.8+) */}
+                    {hasConfigFile && (
+                      <div className="space-y-3 pt-2 border-t border-border-default">
+                        <div className="grid grid-cols-3 items-center gap-4">
+                          <div className="font-medium text-sm text-muted-foreground">
+                            {t("deeplink.configSource")}
+                          </div>
+                          <div className="col-span-2 text-sm">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-medium">
+                              {configSource === "base64"
+                                ? t("deeplink.configEmbedded")
+                                : t("deeplink.configRemote")}
+                            </span>
+                            {request.configFormat && (
+                              <span className="ml-2 text-xs text-muted-foreground uppercase">
+                                {request.configFormat}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Parsed Config Details */}
+                        {parsedConfig && (
+                          <div className="rounded-lg bg-muted/50 p-3 space-y-2">
+                            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                              {t("deeplink.configDetails")}
+                            </div>
+
+                            {/* Claude config */}
+                            {parsedConfig.type === "claude" &&
+                              parsedConfig.env && (
+                                <div className="space-y-1.5">
+                                  {Object.entries(parsedConfig.env).map(
+                                    ([key, value]) => (
+                                      <div
+                                        key={key}
+                                        className="grid grid-cols-2 gap-2 text-xs"
+                                      >
+                                        <span className="font-mono text-muted-foreground truncate">
+                                          {key}
+                                        </span>
+                                        <span className="font-mono truncate">
+                                          {maskValue(key, String(value))}
+                                        </span>
+                                      </div>
+                                    ),
+                                  )}
+                                </div>
+                              )}
+
+                            {/* Codex config */}
+                            {parsedConfig.type === "codex" && (
+                              <div className="space-y-2">
+                                {parsedConfig.auth &&
+                                  Object.keys(parsedConfig.auth).length > 0 && (
+                                    <div className="space-y-1.5">
+                                      <div className="text-xs text-muted-foreground">
+                                        Auth:
+                                      </div>
+                                      {Object.entries(parsedConfig.auth).map(
+                                        ([key, value]) => (
+                                          <div
+                                            key={key}
+                                            className="grid grid-cols-2 gap-2 text-xs pl-2"
+                                          >
+                                            <span className="font-mono text-muted-foreground truncate">
+                                              {key}
+                                            </span>
+                                            <span className="font-mono truncate">
+                                              {maskValue(key, String(value))}
+                                            </span>
+                                          </div>
+                                        ),
+                                      )}
+                                    </div>
+                                  )}
+                                {parsedConfig.tomlConfig && (
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-muted-foreground">
+                                      TOML Config:
+                                    </div>
+                                    <pre className="text-xs font-mono bg-background p-2 rounded overflow-x-auto max-h-24 whitespace-pre-wrap">
+                                      {parsedConfig.tomlConfig.substring(
+                                        0,
+                                        300,
+                                      )}
+                                      {parsedConfig.tomlConfig.length > 300 &&
+                                        "..."}
+                                    </pre>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Gemini config */}
+                            {parsedConfig.type === "gemini" &&
+                              parsedConfig.env && (
+                                <div className="space-y-1.5">
+                                  {Object.entries(parsedConfig.env).map(
+                                    ([key, value]) => (
+                                      <div
+                                        key={key}
+                                        className="grid grid-cols-2 gap-2 text-xs"
+                                      >
+                                        <span className="font-mono text-muted-foreground truncate">
+                                          {key}
+                                        </span>
+                                        <span className="font-mono truncate">
+                                          {maskValue(key, String(value))}
+                                        </span>
+                                      </div>
+                                    ),
+                                  )}
+                                </div>
+                              )}
+                          </div>
+                        )}
+
+                        {/* Config URL (if remote) */}
+                        {request.configUrl && (
+                          <div className="grid grid-cols-3 items-center gap-4">
+                            <div className="font-medium text-sm text-muted-foreground">
+                              {t("deeplink.configUrl")}
+                            </div>
+                            <div className="col-span-2 text-sm font-mono text-muted-foreground break-all">
+                              {request.configUrl}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Usage Script Configuration (v3.9+) */}
+                    {request.usageScript && (
+                      <div className="space-y-3 pt-2 border-t border-border-default">
+                        <div className="grid grid-cols-3 items-center gap-4">
+                          <div className="font-medium text-sm text-muted-foreground">
+                            {t("deeplink.usageScript", {
+                              defaultValue: "用量查询",
+                            })}
+                          </div>
+                          <div className="col-span-2 text-sm">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
+                                usageScriptEnabled
+                                  ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+                                  : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                              }`}
+                            >
+                              {usageScriptEnabled
+                                ? t("deeplink.usageScriptEnabled", {
+                                    defaultValue: "已启用",
+                                  })
+                                : t("deeplink.usageScriptDisabled", {
+                                    defaultValue: "未启用",
+                                  })}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Script source: users must be able to read the code */}
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">
+                            {t("deeplink.usageScriptSource", {
+                              defaultValue: "Script source",
+                            })}
+                          </div>
+                          <pre
+                            className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded border bg-muted/50 p-2 text-xs font-mono"
+                            data-testid="deeplink-usage-script-source"
+                          >
+                            {decodedUsageScript ??
+                              t("deeplink.usageScriptDecodeFailed", {
+                                defaultValue: "(script could not be decoded)",
+                              })}
+                          </pre>
+                        </div>
+
+                        <div className="flex items-start gap-2">
+                          <Checkbox
+                            id={usageCheckboxId}
+                            checked={usageScriptEnabled}
+                            disabled={decodedUsageScript === null}
+                            onCheckedChange={(v) =>
+                              setUsageScriptEnabled(v === true)
+                            }
+                          />
+                          <label
+                            htmlFor={usageCheckboxId}
+                            className="text-sm leading-tight"
+                          >
+                            {t("deeplink.usageScriptEnableLabel", {
+                              defaultValue:
+                                "Enable this usage script (it runs inside CC Switch on every usage query)",
+                            })}
+                          </label>
+                        </div>
+
+                        {/* Usage API Key (if different from provider) */}
+                        {request.usageApiKey &&
+                          request.usageApiKey !== request.apiKey && (
+                            <div className="grid grid-cols-3 items-center gap-4">
+                              <div className="font-medium text-sm text-muted-foreground">
+                                {t("deeplink.usageApiKey", {
+                                  defaultValue: "用量 API Key",
+                                })}
+                              </div>
+                              <div className="col-span-2 text-sm font-mono text-muted-foreground">
+                                {request.usageApiKey.length > 4
+                                  ? `${request.usageApiKey.substring(0, 4)}${"*".repeat(12)}`
+                                  : "****"}
+                              </div>
+                            </div>
+                          )}
+
+                        {/* Usage Base URL (if different from provider) */}
+                        {request.usageBaseUrl &&
+                          request.usageBaseUrl !== request.endpoint && (
+                            <div className="grid grid-cols-3 items-center gap-4">
+                              <div className="font-medium text-sm text-muted-foreground">
+                                {t("deeplink.usageBaseUrl", {
+                                  defaultValue: "用量查询地址",
+                                })}
+                              </div>
+                              <div className="col-span-2 text-sm break-all">
+                                {request.usageBaseUrl}
+                              </div>
+                            </div>
+                          )}
+
+                        {/* Auto Query Interval */}
+                        {request.usageAutoInterval &&
+                          request.usageAutoInterval > 0 && (
+                            <div className="grid grid-cols-3 items-center gap-4">
+                              <div className="font-medium text-sm text-muted-foreground">
+                                {t("deeplink.usageAutoInterval", {
+                                  defaultValue: "自动查询",
+                                })}
+                              </div>
+                              <div className="col-span-2 text-sm">
+                                {t("deeplink.usageAutoIntervalValue", {
+                                  defaultValue: "每 {{minutes}} 分钟",
+                                  minutes: request.usageAutoInterval,
+                                })}
+                              </div>
+                            </div>
+                          )}
+                      </div>
+                    )}
+
+                    {/* Switch to this provider: explicit, separate opt-in */}
+                    <div className="space-y-2 rounded-lg border p-3">
+                      {request.enabled && (
+                        <div
+                          className="rounded-md bg-red-50 p-2 text-sm font-medium text-red-800 dark:bg-red-900/20 dark:text-red-200"
+                          data-testid="deeplink-switch-requested-warning"
+                        >
+                          {t("deeplink.switchRequestedWarning", {
+                            defaultValue:
+                              "This link asks to make this provider current immediately, which would route all {{app}} traffic to {{host}}. It is only switched if you tick the box below.",
+                            app: request.app,
+                            host: primaryHost,
+                          })}
+                        </div>
+                      )}
+                      <div className="flex items-start gap-2">
+                        <Checkbox
+                          id={switchCheckboxId}
+                          checked={switchNow}
+                          onCheckedChange={(v) => setSwitchNow(v === true)}
+                        />
+                        <label
+                          htmlFor={switchCheckboxId}
+                          className="text-sm leading-tight"
+                        >
+                          {t("deeplink.switchNowLabel", {
+                            defaultValue:
+                              "Switch to this provider now (route all {{app}} traffic to {{host}})",
+                            app: request.app,
+                            host: primaryHost,
+                          })}
+                        </label>
+                      </div>
+                      {switchNow && (
+                        <div className="text-sm font-medium text-red-600 dark:text-red-400">
+                          {t("deeplink.switchNowWarning", {
+                            defaultValue:
+                              "All {{app}} traffic, including your prompts and file contents, will be sent to {{host}} right after import.",
+                            app: request.app,
+                            host: primaryHost,
+                          })}
+                        </div>
+                      )}
+                      {!switchNow && currentProviderId === "" && (
+                        <div className="text-xs text-yellow-700 dark:text-yellow-300">
+                          {t("deeplink.firstProviderNotice", {
+                            defaultValue:
+                              "No provider is active for {{app}} yet, so this provider will become the current one.",
+                            app: request.app,
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Warning */}
+                    <div className="rounded-lg bg-yellow-50 dark:bg-yellow-900/20 p-3 text-sm text-yellow-800 dark:text-yellow-200">
+                      {t("deeplink.warning")}
+                    </div>
+                  </>
+                )}
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={handleCancel}
+                disabled={isImporting}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                onClick={handleImport}
+                disabled={
+                  isImporting ||
+                  !armed ||
+                  (isBundle(request) && !bundleChoices.some((c) => c.accept))
+                }
+              >
+                {isImporting ? t("deeplink.importing") : t("deeplink.import")}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}

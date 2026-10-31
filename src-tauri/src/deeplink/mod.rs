@@ -13,7 +13,9 @@ mod parser;
 mod prompt;
 mod provider;
 mod skill;
+pub mod trust;
 mod utils;
+pub mod v2;
 
 #[cfg(test)]
 mod tests;
@@ -26,6 +28,7 @@ pub use parser::parse_deeplink_url;
 pub use prompt::import_prompt_from_deeplink;
 pub use provider::{import_provider_from_deeplink, parse_and_merge_config};
 pub use skill::import_skill_from_deeplink;
+pub use v2::{build_v2_link, DeepLinkBundle, SignatureStatus};
 
 /// Deep link import request model
 ///
@@ -139,4 +142,14 @@ pub struct DeepLinkImportRequest {
     /// Auto query interval in minutes (0 to disable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage_auto_interval: Option<u64>,
+
+    // ============ Trust model (v2, SESS-10) ============
+    /// Set by the backend when an OS-delivered link is held as a pending
+    /// import. Import commands only accept requests that carry the nonce of a
+    /// pending link; a request fabricated in the webview is rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
+    /// v2 links: every item plus signature / publisher information.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<Box<DeepLinkBundle>>,
 }

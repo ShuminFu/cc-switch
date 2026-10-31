@@ -23,15 +23,6 @@ export function SkillConfirmation({
 
       <div>
         <label className="block text-sm font-medium text-muted-foreground">
-          {t("deeplink.skill.directory")}
-        </label>
-        <div className="mt-1 text-sm font-mono bg-muted/50 p-2 rounded border">
-          {request.directory}
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-muted-foreground">
           {t("deeplink.skill.branch")}
         </label>
         <div className="mt-1 text-sm">{request.branch || "main"}</div>

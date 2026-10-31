@@ -93,6 +93,11 @@ pub fn import_mcp_from_deeplink(
             "No MCP servers found in config".to_string(),
         ));
     }
+    if mcp_servers.len() > MAX_DEEPLINK_SERVERS {
+        return Err(AppError::InvalidInput(format!(
+            "Too many MCP servers in one link (max {MAX_DEEPLINK_SERVERS})"
+        )));
+    }
 
     // Only write into live tool configs after an explicit opt-in.
     let enable_now = request.enabled == Some(true);
@@ -175,6 +180,9 @@ pub fn import_mcp_from_deeplink(
         failed,
     })
 }
+
+/// Maximum number of MCP servers one deep link may import (SESS-33).
+pub(crate) const MAX_DEEPLINK_SERVERS: usize = 50;
 
 /// Maximum accepted length of an MCP server id coming from a deep link.
 const MAX_SERVER_ID_LEN: usize = 128;

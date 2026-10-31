@@ -21,62 +21,47 @@ pub fn validate_url(url_str: &str, field_name: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Maximum decoded size of a base64 deep-link parameter (SESS-33).
+pub const MAX_DECODED_PARAM_BYTES: usize = 256 * 1024;
+
 /// Decode a Base64 parameter from deep link URL
 ///
-/// This function handles common issues with Base64 in URLs:
-/// - `+` being decoded as space
-/// - Missing padding `=`
-/// - Both standard and URL-safe Base64 variants
+/// One tolerant normalisation pass, then a single decode (SESS-33):
+/// - `+` that URL decoding turned into a space is restored
+/// - URL-safe `-`/`_` are mapped to the standard alphabet
+/// - missing `=` padding is added
+///
+/// Payloads that would decode to more than [`MAX_DECODED_PARAM_BYTES`] are
+/// rejected before decoding.
 pub fn decode_base64_param(field: &str, raw: &str) -> Result<Vec<u8>, AppError> {
-    let mut candidates: Vec<String> = Vec::new();
-    // Keep spaces (to restore `+`), but remove newlines
-    let trimmed = raw.trim_matches(|c| c == '\r' || c == '\n');
-
-    // First try restoring spaces to "+"
-    if trimmed.contains(' ') {
-        let replaced = trimmed.replace(' ', "+");
-        if !replaced.is_empty() && !candidates.contains(&replaced) {
-            candidates.push(replaced);
-        }
+    let mut normalized: String = raw
+        .trim_matches(|c| c == '\r' || c == '\n')
+        .chars()
+        .filter(|c| *c != '\r' && *c != '\n')
+        .map(|c| match c {
+            ' ' => '+',
+            '-' => '+',
+            '_' => '/',
+            other => other,
+        })
+        .collect();
+    let trimmed_len = normalized.trim_end_matches('=').len();
+    normalized.truncate(trimmed_len);
+    if normalized.len() / 4 * 3 > MAX_DECODED_PARAM_BYTES {
+        return Err(AppError::InvalidInput(format!(
+            "{field} parameter is too large (max {MAX_DECODED_PARAM_BYTES} bytes decoded)"
+        )));
+    }
+    let remainder = normalized.len() % 4;
+    if remainder != 0 {
+        normalized.extend(std::iter::repeat_n('=', 4 - remainder));
     }
 
-    // Original value
-    if !trimmed.is_empty() && !candidates.contains(&trimmed.to_string()) {
-        candidates.push(trimmed.to_string());
-    }
-
-    // Add padding variants
-    let existing = candidates.clone();
-    for candidate in existing {
-        let mut padded = candidate.clone();
-        let remainder = padded.len() % 4;
-        if remainder != 0 {
-            padded.extend(std::iter::repeat_n('=', 4 - remainder));
-        }
-        if !candidates.contains(&padded) {
-            candidates.push(padded);
-        }
-    }
-
-    let mut last_error: Option<String> = None;
-    for candidate in candidates {
-        for engine in [
-            &BASE64_STANDARD,
-            &BASE64_STANDARD_NO_PAD,
-            &BASE64_URL_SAFE,
-            &BASE64_URL_SAFE_NO_PAD,
-        ] {
-            match engine.decode(&candidate) {
-                Ok(bytes) => return Ok(bytes),
-                Err(err) => last_error = Some(err.to_string()),
-            }
-        }
-    }
-
-    Err(AppError::InvalidInput(format!(
-        "{field} 参数 Base64 解码失败：{}。请确认链接参数已用 Base64 编码并经过 URL 转义（尤其是将 '+' 编码为 %2B，或使用 URL-safe Base64）。",
-        last_error.unwrap_or_else(|| "未知错误".to_string())
-    )))
+    BASE64_STANDARD.decode(normalized.as_bytes()).map_err(|err| {
+        AppError::InvalidInput(format!(
+            "{field} 参数 Base64 解码失败：{err}。请确认链接参数已用 Base64 编码并经过 URL 转义（尤其是将 '+' 编码为 %2B，或使用 URL-safe Base64）。"
+        ))
+    })
 }
 
 /// Infer homepage URL from API endpoint

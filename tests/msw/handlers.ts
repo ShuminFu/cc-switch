@@ -127,6 +127,49 @@ export const handlers = [
 
   http.post(`${TAURI_ENDPOINT}/list_sessions`, () => success(listSessions())),
 
+  // Deep-link v2 (SESS-10)
+  http.post(`${TAURI_ENDPOINT}/import_deeplink_bundle`, async ({ request }) => {
+    const { choices } = await withJson<{
+      choices: Array<{ index: number; accept: boolean }>;
+    }>(request);
+    return success(
+      choices
+        .filter((choice) => choice.accept)
+        .map((choice) => ({
+          index: choice.index,
+          resource: "provider",
+          ok: true,
+          result: { type: "provider", id: `bundle-${choice.index}` },
+        })),
+    );
+  }),
+  http.post(`${TAURI_ENDPOINT}/discard_pending_deeplink`, () => success(true)),
+  http.post(`${TAURI_ENDPOINT}/build_deeplink_share_link`, () =>
+    success("ccswitch://v2/import?p=e30"),
+  ),
+
+  // Preset catalog (PRODUCT-07): bundled empty overlay.
+  http.post(`${TAURI_ENDPOINT}/get_preset_catalog`, () =>
+    success({
+      status: { source: "bundled", version: "0.0.0", autoUpdate: true },
+      catalog: { schema: 1, version: "0.0.0", apps: {}, promotions: {} },
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/refresh_preset_catalog`, () =>
+    success({ source: "bundled", version: "0.0.0", autoUpdate: true }),
+  ),
+  http.post(
+    `${TAURI_ENDPOINT}/set_preset_catalog_auto_update`,
+    async ({ request }) => {
+      const { enabled } = await withJson<{ enabled: boolean }>(request);
+      return success({
+        source: "bundled",
+        version: "0.0.0",
+        autoUpdate: enabled,
+      });
+    },
+  ),
+
   // Session index (SESS-09): the mock always returns the full list.
   http.post(`${TAURI_ENDPOINT}/scan_sessions_report`, () =>
     success({
