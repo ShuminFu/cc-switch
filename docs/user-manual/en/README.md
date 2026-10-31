@@ -13,7 +13,8 @@ CC Switch User Manual
 │   ├── 1.3 Interface Overview
 │   ├── 1.4 Quick Start
 │   ├── 1.5 Personalization
-│   └── 1.6 Projects
+│   ├── 1.6 Projects
+│   └── 1.7 What Works for Each App
 │
 ├── 2. Provider Management
 │   ├── 2.1 Add Provider
@@ -36,14 +37,16 @@ CC Switch User Manual
 │   ├── 4.2 App Takeover
 │   ├── 4.3 Failover
 │   ├── 4.4 Usage Statistics
-│   └── 4.5 Model Test
+│   ├── 4.5 Model Test
+│   └── 4.6 Proxy Semantics
 │
 └── 5. FAQ
     ├── 5.1 Configuration Files
     ├── 5.2 FAQ
     ├── 5.3 Deep Link Protocol
     ├── 5.4 Environment Variable Conflicts
-    └── 5.5 Command Line (ccs)
+    ├── 5.5 Command Line (ccs)
+    └── 5.6 Troubleshooting
 ```
 
 ## File List
@@ -58,6 +61,7 @@ CC Switch User Manual
 | [1.4-quickstart.md](./1-getting-started/1.4-quickstart.md) | 5-minute quick start tutorial |
 | [1.5-settings.md](./1-getting-started/1.5-settings.md) | Language, theme, directories, backups, WebDAV / S3 cloud sync |
 | [1.6-projects.md](./1-getting-started/1.6-projects.md) | Project profiles: save and switch provider / MCP / Skills / prompt snapshots |
+| [1.7-capabilities.md](./1-getting-started/1.7-capabilities.md) | Which features (MCP, prompts, Skills, takeover, projects, deep links) apply to which app |
 
 ### 2. Provider Management
 
@@ -90,6 +94,7 @@ CC Switch User Manual
 | [4.3-failover.md](./4-proxy/4.3-failover.md) | Failover queue, circuit breaker, health status |
 | [4.4-usage.md](./4-proxy/4.4-usage.md) | Usage statistics, trend charts, pricing configuration |
 | [4.5-model-test.md](./4-proxy/4.5-model-test.md) | Model test, health check, latency testing |
+| [4.6-semantics.md](./4-proxy/4.6-semantics.md) | Which errors fail over, timeouts, circuit breaker rules, what takeover changes on disk |
 
 ### 5. FAQ
 
@@ -100,6 +105,7 @@ CC Switch User Manual
 | [5.3-deeplink.md](./5-faq/5.3-deeplink.md) | Deep link protocol, generation and usage |
 | [5.4-env-conflict.md](./5-faq/5.4-env-conflict.md) | Environment variable conflict detection and resolution |
 | [5.5-command-line.md](./5-faq/5.5-command-line.md) | `ccs` command-line companion and headless proxy mode |
+| [5.6-troubleshooting.md](./5-faq/5.6-troubleshooting.md) | Per-OS fixes, log and crash-log locations, filing a bug report |
 
 ## Quick Links
 
@@ -110,7 +116,8 @@ CC Switch User Manual
 - **Use Grok Build**: See [2.7 Grok Build](./2-providers/2.7-grok-build.md)
 - **Switch whole setups at once**: See [1.6 Projects](./1-getting-started/1.6-projects.md)
 - **Using proxy**: See [4.1 Proxy Service](./4-proxy/4.1-service.md)
-- **Having trouble**: See [5.2 FAQ](./5-faq/5.2-questions.md)
+- **Having trouble**: See [5.6 Troubleshooting](./5-faq/5.6-troubleshooting.md) and [5.2 FAQ](./5-faq/5.2-questions.md)
+- **Step-by-step guides**: See [docs/guides](../../guides/README.md)
 
 ## Version Information
 
