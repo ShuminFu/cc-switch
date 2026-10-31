@@ -7,7 +7,7 @@ impl ProxyService {
     pub(super) async fn restore_live_config_for_app_inner(
         &self,
         app_type: &AppType,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         if !crate::adapters::adapter_for(app_type)
             .capabilities()
             .proxy_takeover
@@ -26,7 +26,7 @@ impl ProxyService {
     }
 
     /// 恢复原始 Live 配置
-    pub(super) async fn restore_live_configs(&self) -> Result<(), String> {
+    pub(super) async fn restore_live_configs(&self) -> Result<(), TakeoverError> {
         let mut errors = Vec::new();
 
         for adapter in crate::adapters::takeover_adapters() {
@@ -41,14 +41,21 @@ impl ProxyService {
         if errors.is_empty() {
             Ok(())
         } else {
-            Err(errors.join("；"))
+            Err(TakeoverError::new(
+                TakeoverErrorKind::Restore,
+                errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("；"),
+            ))
         }
     }
 
     pub(super) async fn restore_live_config_for_app_with_fallback(
         &self,
         app_type: &AppType,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let _guard = self.switch_locks.lock_for_app(app_type.as_str()).await;
         self.restore_live_config_for_app_with_fallback_inner(app_type)
             .await
@@ -57,7 +64,7 @@ impl ProxyService {
     pub(crate) async fn restore_live_config_for_app_with_fallback_inner(
         &self,
         app_type: &AppType,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let app_type_str = app_type.as_str();
 
         // 1) 优先从 Live 备份恢复（这是"原始 Live"的唯一可靠来源）
@@ -117,24 +124,33 @@ impl ProxyService {
         &self,
         app_type: &AppType,
         config: &Value,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         match app_type {
             AppType::Claude => self.write_claude_live(config),
             AppType::Codex => self.write_codex_live(config),
             AppType::Gemini => self.write_gemini_live(config),
             AppType::GrokBuild => self.write_grok_live(config),
-            _ => Err("该应用不支持代理功能".to_string()),
+            _ => Err(TakeoverError::new(
+                TakeoverErrorKind::UnsupportedApp,
+                "该应用不支持代理功能",
+            )),
         }
     }
 
     /// 读取代理接管所备份/恢复的原始 Live 快照（每个支持接管的应用一处分派）。
-    pub(super) fn read_live_config_for_app(&self, app_type: &AppType) -> Result<Value, String> {
+    pub(super) fn read_live_config_for_app(
+        &self,
+        app_type: &AppType,
+    ) -> Result<Value, TakeoverError> {
         match app_type {
             AppType::Claude => self.read_claude_live(),
             AppType::Codex => self.read_codex_live(),
             AppType::Gemini => self.read_gemini_live(),
             AppType::GrokBuild => self.read_grok_live(),
-            _ => Err("该应用不支持代理功能".to_string()),
+            _ => Err(TakeoverError::new(
+                TakeoverErrorKind::UnsupportedApp,
+                "该应用不支持代理功能",
+            )),
         }
     }
 
@@ -153,7 +169,7 @@ impl ProxyService {
     pub(super) fn restore_live_from_ssot_for_app(
         &self,
         app_type: &AppType,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, TakeoverError> {
         let current_id = crate::settings::get_effective_current_provider(&self.db, app_type)
             .map_err(|e| format!("获取 {app_type:?} 当前供应商失败: {e}"))?;
 
@@ -189,7 +205,7 @@ impl ProxyService {
     pub(super) fn cleanup_takeover_placeholders_in_live_for_app(
         &self,
         app_type: &AppType,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         match app_type {
             AppType::Claude => self.cleanup_claude_takeover_placeholders_in_live(),
             AppType::Codex => self.cleanup_codex_takeover_placeholders_in_live(),
@@ -252,7 +268,7 @@ impl ProxyService {
     pub(super) async fn live_takeover_matches_current_proxy(
         &self,
         app_type: &AppType,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, TakeoverError> {
         let (proxy_url, proxy_codex_base_url) = self.build_proxy_urls().await?;
         let proxy_grok_base_url = format!("{}/grokbuild/v1", proxy_url.trim_end_matches('/'));
 
@@ -304,7 +320,7 @@ impl ProxyService {
         }
     }
 
-    pub(super) fn cleanup_claude_takeover_placeholders_in_live(&self) -> Result<(), String> {
+    pub(super) fn cleanup_claude_takeover_placeholders_in_live(&self) -> Result<(), TakeoverError> {
         let mut config = self.read_claude_live()?;
 
         let Some(env) = config.get_mut("env").and_then(|v| v.as_object_mut()) else {
@@ -335,7 +351,7 @@ impl ProxyService {
         Ok(())
     }
 
-    pub(super) fn cleanup_codex_takeover_placeholders_in_live(&self) -> Result<(), String> {
+    pub(super) fn cleanup_codex_takeover_placeholders_in_live(&self) -> Result<(), TakeoverError> {
         let mut config = self.read_codex_live()?;
 
         if let Some(auth) = config.get_mut("auth").and_then(|v| v.as_object_mut()) {
@@ -366,7 +382,7 @@ impl ProxyService {
         crate::codex_config::remove_codex_toml_base_url_if(toml_str, Self::is_local_proxy_url)
     }
 
-    pub(super) fn cleanup_gemini_takeover_placeholders_in_live(&self) -> Result<(), String> {
+    pub(super) fn cleanup_gemini_takeover_placeholders_in_live(&self) -> Result<(), TakeoverError> {
         let mut config = self.read_gemini_live()?;
 
         let Some(env) = config.get_mut("env").and_then(|v| v.as_object_mut()) else {
@@ -390,7 +406,7 @@ impl ProxyService {
         Ok(())
     }
 
-    pub(super) fn cleanup_grok_takeover_placeholders_in_live(&self) -> Result<(), String> {
+    pub(super) fn cleanup_grok_takeover_placeholders_in_live(&self) -> Result<(), TakeoverError> {
         let config = self.read_grok_live()?;
         let Some(config_toml) = config.get("config").and_then(Value::as_str) else {
             return Ok(());
@@ -404,11 +420,14 @@ impl ProxyService {
         let updated = crate::grok_config::update_api_key(config_toml, "")
             .map_err(|e| format!("清理 Grok Build 接管占位符失败: {e}"))?;
         crate::config::write_text_file(&crate::grok_config::get_grok_config_path(), &updated)
-            .map_err(|e| format!("写入 Grok Build 配置失败: {e}"))
+            .map_err(TakeoverError::with(
+                TakeoverErrorKind::LiveWrite,
+                "写入 Grok Build 配置失败",
+            ))
     }
 
     /// 检查是否处于 Live 接管模式
-    pub async fn is_takeover_active(&self) -> Result<bool, String> {
+    pub async fn is_takeover_active(&self) -> Result<bool, TakeoverError> {
         let status = self.get_takeover_status().await?;
         Ok(status.claude || status.codex || status.gemini || status.grokbuild)
     }
@@ -417,7 +436,7 @@ impl ProxyService {
     ///
     /// 检测到 Live 备份残留时调用此方法。
     /// 会恢复 Live 配置、清除接管标志、删除备份。
-    pub async fn recover_from_crash(&self) -> Result<(), String> {
+    pub async fn recover_from_crash(&self) -> Result<(), TakeoverError> {
         // 1. 恢复 Live 配置
         self.restore_live_configs().await?;
 

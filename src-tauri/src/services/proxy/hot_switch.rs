@@ -7,7 +7,7 @@ impl ProxyService {
     pub async fn sync_claude_live_from_provider_while_proxy_active(
         &self,
         provider: &Provider,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let effective_provider = self.claude_provider_with_effective_settings(provider)?;
         let mut effective_settings = effective_provider.settings_config.clone();
         let (proxy_url, _) = self.build_proxy_urls().await?;
@@ -24,7 +24,7 @@ impl ProxyService {
     pub async fn sync_codex_live_from_provider_while_proxy_active(
         &self,
         provider: &Provider,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let existing_live = self.read_codex_live().ok();
         let mut effective_settings = build_effective_settings_with_common_config(
             self.db.as_ref(),
@@ -53,7 +53,7 @@ impl ProxyService {
     pub async fn sync_grok_live_from_provider_while_proxy_active(
         &self,
         provider: &Provider,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let existing_live = self.read_grok_live().ok();
         let mut effective_settings = build_effective_settings_with_common_config(
             self.db.as_ref(),
@@ -76,7 +76,7 @@ impl ProxyService {
     pub(super) fn get_current_provider_for_app(
         &self,
         app_type: &AppType,
-    ) -> Result<Option<Provider>, String> {
+    ) -> Result<Option<Provider>, TakeoverError> {
         let Some(current_id) = crate::settings::get_effective_current_provider(&self.db, app_type)
             .map_err(|e| format!("获取 {app_type:?} 当前供应商失败: {e}"))?
         else {
@@ -85,7 +85,12 @@ impl ProxyService {
 
         self.db
             .get_provider_by_id(&current_id, app_type.as_str())
-            .map_err(|e| format!("读取 {app_type:?} 当前供应商失败: {e}"))
+            .map_err(|e| {
+                TakeoverError::new(
+                    TakeoverErrorKind::Provider,
+                    format!("读取 {app_type:?} 当前供应商失败: {e}"),
+                )
+            })
     }
 
     pub(super) async fn refresh_active_target_from_current_provider(&self, app_type: &AppType) {
@@ -167,9 +172,13 @@ impl ProxyService {
     pub(super) fn require_current_provider_for_app(
         &self,
         app_type: &AppType,
-    ) -> Result<Provider, String> {
-        self.get_current_provider_for_app(app_type)?
-            .ok_or_else(|| format!("{app_type:?} 当前供应商不存在，无法接管 Live 配置"))
+    ) -> Result<Provider, TakeoverError> {
+        self.get_current_provider_for_app(app_type)?.ok_or_else(|| {
+            TakeoverError::new(
+                TakeoverErrorKind::Provider,
+                format!("{app_type:?} 当前供应商不存在，无法接管 Live 配置"),
+            )
+        })
     }
 
     /// 从供应商配置更新 Live 备份（用于代理模式下的热切换）
@@ -180,7 +189,7 @@ impl ProxyService {
         &self,
         app_type: &str,
         provider: &Provider,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let _guard = self.switch_locks.lock_for_app(app_type).await;
         self.update_live_backup_from_provider_inner(app_type, provider)
             .await
@@ -191,7 +200,7 @@ impl ProxyService {
         &self,
         app_type: &str,
         provider: &Provider,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let app_type_enum =
             AppType::from_str(app_type).map_err(|_| format!("未知的应用类型: {app_type}"))?;
         let mut effective_settings =
@@ -275,7 +284,12 @@ impl ProxyService {
                 serde_json::to_string(&env_backup)
                     .map_err(|e| format!("序列化 Gemini 配置失败: {e}"))?
             }
-            _ => return Err(format!("未知的应用类型: {app_type}")),
+            _ => {
+                return Err(TakeoverError::new(
+                    TakeoverErrorKind::UnsupportedApp,
+                    format!("未知的应用类型: {app_type}"),
+                ))
+            }
         };
 
         self.db
@@ -291,7 +305,7 @@ impl ProxyService {
         &self,
         app_type: &str,
         provider_id: &str,
-    ) -> Result<HotSwitchOutcome, String> {
+    ) -> Result<HotSwitchOutcome, TakeoverError> {
         let _guard = self.switch_locks.lock_for_app(app_type).await;
         self.hot_switch_provider_inner(app_type, provider_id).await
     }
@@ -300,7 +314,7 @@ impl ProxyService {
         &self,
         app_type: &str,
         provider_id: &str,
-    ) -> Result<HotSwitchOutcome, String> {
+    ) -> Result<HotSwitchOutcome, TakeoverError> {
         let app_type_enum =
             AppType::from_str(app_type).map_err(|_| format!("无效的应用类型: {app_type}"))?;
         let provider = self
@@ -319,7 +333,7 @@ impl ProxyService {
         {
             return Err(
                 "代理接管模式下不能切换到官方供应商 (Cannot switch to official provider during proxy takeover)"
-                    .to_string(),
+                    .into(),
             );
         }
 
@@ -360,7 +374,7 @@ impl ProxyService {
                 None
             };
 
-        let prepare_result: Result<(), String> = async {
+        let prepare_result: Result<(), TakeoverError> = async {
             if should_sync_backup {
                 self.update_live_backup_from_provider_inner(app_type, &provider)
                     .await?;
@@ -429,7 +443,10 @@ impl ProxyService {
                 previous_live_before_direct_write.as_ref(),
             )
             .await;
-            return Err(format!("更新本地当前供应商失败: {error}"));
+            return Err(TakeoverError::new(
+                TakeoverErrorKind::Provider,
+                format!("更新本地当前供应商失败: {error}"),
+            ));
         }
         if let Err(error) = self
             .db
@@ -450,7 +467,10 @@ impl ProxyService {
                 previous_live_before_direct_write.as_ref(),
             )
             .await;
-            return Err(format!("更新当前供应商失败: {error}"));
+            return Err(TakeoverError::new(
+                TakeoverErrorKind::Provider,
+                format!("更新当前供应商失败: {error}"),
+            ));
         }
 
         if let Some(server) = self.server.read().await.as_ref() {
@@ -475,7 +495,7 @@ impl ProxyService {
     pub(super) fn preserve_toml_mcp_servers_from_existing_config(
         target_settings: &mut Value,
         existing_config: &Value,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let target_obj = target_settings
             .as_object_mut()
             .ok_or_else(|| "TOML 应用备份必须是 JSON 对象".to_string())?;
@@ -537,7 +557,7 @@ impl ProxyService {
         target_settings: &mut Value,
         existing_backup: &Value,
         preserve_api_key: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let Some(existing_auth) = existing_backup
             .get("auth")
             .filter(|auth| {
@@ -574,7 +594,7 @@ impl ProxyService {
         &self,
         app_type: &str,
         provider_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let outcome = self.hot_switch_provider(app_type, provider_id).await?;
 
         if outcome.logical_target_changed {
@@ -593,10 +613,13 @@ impl ProxyService {
         toml_str: &str,
         proxy_url: &str,
         provider: Option<&Provider>,
-    ) -> Result<String, String> {
+    ) -> Result<String, TakeoverError> {
         if provider.is_some_and(crate::proxy::providers::is_codex_official_provider) {
             return crate::codex_config::apply_codex_official_proxy_route(toml_str, proxy_url)
-                .map_err(|e| format!("生成 Codex 官方接管配置失败: {e}"));
+                .map_err(TakeoverError::with(
+                    TakeoverErrorKind::LiveWrite,
+                    "生成 Codex 官方接管配置失败",
+                ));
         }
 
         let updated = crate::codex_config::update_codex_toml_field(toml_str, "base_url", proxy_url)
@@ -638,7 +661,7 @@ impl ProxyService {
         settings: &mut Value,
         proxy_base_url: &str,
         provider: &Provider,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         Self::apply_codex_takeover_auth_placeholder(settings, Some(provider));
         let config_text = settings
             .get("config")

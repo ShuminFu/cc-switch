@@ -3,10 +3,13 @@
 use super::*;
 
 impl ProxyService {
-    pub(super) fn read_claude_live(&self) -> Result<Value, String> {
+    pub(super) fn read_claude_live(&self) -> Result<Value, TakeoverError> {
         let path = get_claude_settings_path();
         if !path.exists() {
-            return Err("Claude 配置文件不存在".to_string());
+            return Err(TakeoverError::new(
+                TakeoverErrorKind::LiveRead,
+                "Claude 配置文件不存在",
+            ));
         }
 
         let mut value: Value =
@@ -25,31 +28,42 @@ impl ProxyService {
                 Value::Array(_) => "array",
                 Value::Object(_) => "object",
             };
-            return Err(format!(
-                "Claude 配置文件格式错误：根节点必须是 JSON 对象（当前为 {kind}），路径: {}",
-                path.display()
+            return Err(TakeoverError::new(
+                TakeoverErrorKind::LiveRead,
+                format!(
+                    "Claude 配置文件格式错误：根节点必须是 JSON 对象（当前为 {kind}），路径: {}",
+                    path.display()
+                ),
             ));
         }
 
         Ok(value)
     }
 
-    pub(super) fn write_claude_live(&self, config: &Value) -> Result<(), String> {
+    pub(super) fn write_claude_live(&self, config: &Value) -> Result<(), TakeoverError> {
         #[cfg(test)]
         if super::tests::FAIL_CLAUDE_LIVE_WRITE.with(|fail| fail.get()) {
-            return Err("写入 Claude 配置失败: injected test failure".to_string());
+            return Err(TakeoverError::new(
+                TakeoverErrorKind::LiveWrite,
+                "写入 Claude 配置失败: injected test failure",
+            ));
         }
         let path = get_claude_settings_path();
         let settings = crate::services::provider::sanitize_claude_settings_for_live(config);
-        write_json_file(&path, &settings).map_err(|e| format!("写入 Claude 配置失败: {e}"))
+        write_json_file(&path, &settings).map_err(TakeoverError::with(
+            TakeoverErrorKind::LiveWrite,
+            "写入 Claude 配置失败",
+        ))
     }
 
-    pub(super) fn read_codex_live(&self) -> Result<Value, String> {
-        crate::codex_config::read_codex_live_settings()
-            .map_err(|e| format!("读取 Codex Live 配置失败: {e}"))
+    pub(super) fn read_codex_live(&self) -> Result<Value, TakeoverError> {
+        crate::codex_config::read_codex_live_settings().map_err(TakeoverError::with(
+            TakeoverErrorKind::LiveRead,
+            "读取 Codex Live 配置失败",
+        ))
     }
 
-    pub(super) fn write_codex_live(&self, config: &Value) -> Result<(), String> {
+    pub(super) fn write_codex_live(&self, config: &Value) -> Result<(), TakeoverError> {
         self.write_codex_live_verbatim(config)
     }
 
@@ -57,7 +71,7 @@ impl ProxyService {
         &self,
         config: &Value,
         provider: Option<&Provider>,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let Some(provider) = provider else {
             if crate::settings::preserve_codex_official_auth_on_switch() {
                 if let (Some(auth), Some(config_str)) = (
@@ -94,7 +108,10 @@ impl ProxyService {
             config_str,
             profile,
         )
-        .map_err(|e| format!("写入 Codex 配置失败: {e}"))
+        .map_err(TakeoverError::with(
+            TakeoverErrorKind::LiveWrite,
+            "写入 Codex 配置失败",
+        ))
     }
 
     pub(super) fn codex_auth_has_proxy_placeholder(auth: &Value) -> bool {
@@ -105,7 +122,7 @@ impl ProxyService {
         &self,
         config: &Value,
         provider: Option<&Provider>,
-    ) -> Result<(), String> {
+    ) -> Result<(), TakeoverError> {
         let official_passthrough =
             provider.is_some_and(crate::proxy::providers::is_codex_official_provider);
         let placeholder_auth = config
@@ -143,7 +160,7 @@ impl ProxyService {
         self.write_codex_live_for_provider(config, provider)
     }
 
-    pub(super) fn write_codex_live_verbatim(&self, config: &Value) -> Result<(), String> {
+    pub(super) fn write_codex_live_verbatim(&self, config: &Value) -> Result<(), TakeoverError> {
         use crate::codex_config::{get_codex_auth_path, get_codex_config_path};
 
         let auth = config.get("auth");
@@ -210,19 +227,22 @@ impl ProxyService {
         Ok(())
     }
 
-    pub(super) fn read_gemini_live(&self) -> Result<Value, String> {
+    pub(super) fn read_gemini_live(&self) -> Result<Value, TakeoverError> {
         use crate::gemini_config::{env_to_json, get_gemini_env_path, read_gemini_env};
 
         let env_path = get_gemini_env_path();
         if !env_path.exists() {
-            return Err("Gemini .env 文件不存在".to_string());
+            return Err(TakeoverError::new(
+                TakeoverErrorKind::LiveRead,
+                "Gemini .env 文件不存在",
+            ));
         }
 
         let env_map = read_gemini_env().map_err(|e| format!("读取 Gemini env 失败: {e}"))?;
         Ok(env_to_json(&env_map))
     }
 
-    pub(super) fn write_gemini_live(&self, config: &Value) -> Result<(), String> {
+    pub(super) fn write_gemini_live(&self, config: &Value) -> Result<(), TakeoverError> {
         use crate::gemini_config::{json_to_env, write_gemini_env_atomic};
 
         let env_map = json_to_env(config).map_err(|e| format!("转换 Gemini 配置失败: {e}"))?;
@@ -230,14 +250,18 @@ impl ProxyService {
         Ok(())
     }
 
-    pub(super) fn read_grok_live(&self) -> Result<Value, String> {
-        crate::grok_config::read_grok_live_settings()
-            .map_err(|e| format!("读取 Grok Build 配置失败: {e}"))
+    pub(super) fn read_grok_live(&self) -> Result<Value, TakeoverError> {
+        crate::grok_config::read_grok_live_settings().map_err(TakeoverError::with(
+            TakeoverErrorKind::LiveRead,
+            "读取 Grok Build 配置失败",
+        ))
     }
 
-    pub(super) fn write_grok_live(&self, config: &Value) -> Result<(), String> {
-        crate::grok_config::write_grok_live_settings(config)
-            .map_err(|e| format!("写入 Grok Build 配置失败: {e}"))
+    pub(super) fn write_grok_live(&self, config: &Value) -> Result<(), TakeoverError> {
+        crate::grok_config::write_grok_live_settings(config).map_err(TakeoverError::with(
+            TakeoverErrorKind::LiveWrite,
+            "写入 Grok Build 配置失败",
+        ))
     }
 
     // ==================== 原有方法 ====================

@@ -13,7 +13,7 @@ use std::str::FromStr;
 pub async fn start_proxy_server(
     state: tauri::State<'_, AppState>,
 ) -> Result<ProxyServerInfo, String> {
-    state.proxy_service.start().await
+    state.proxy_service.start().await.map_err(String::from)
 }
 
 /// 停止代理服务器（仅停止服务，不恢复/清理 Live 接管状态）
@@ -35,7 +35,7 @@ pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), 
         );
     }
 
-    state.proxy_service.stop().await
+    state.proxy_service.stop().await.map_err(String::from)
 }
 
 async fn claude_desktop_routes_through_proxy(state: &AppState) -> bool {
@@ -61,7 +61,11 @@ pub async fn get_claude_desktop_proxy_dependency(
 #[tauri::command]
 #[specta::specta]
 pub async fn stop_proxy_with_restore(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.proxy_service.stop_with_restore().await
+    state
+        .proxy_service
+        .stop_with_restore()
+        .await
+        .map_err(String::from)
 }
 
 /// 获取各应用接管状态
@@ -69,7 +73,11 @@ pub async fn stop_proxy_with_restore(state: tauri::State<'_, AppState>) -> Resul
 pub async fn get_proxy_takeover_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<ProxyTakeoverStatus, String> {
-    state.proxy_service.get_takeover_status().await
+    state
+        .proxy_service
+        .get_takeover_status()
+        .await
+        .map_err(String::from)
 }
 
 /// 为指定应用开启/关闭接管
@@ -86,18 +94,19 @@ pub async fn set_proxy_takeover_for_app(
         .proxy_service
         .set_takeover_for_app(&app_type, enabled)
         .await
+        .map_err(String::from)
 }
 
 /// 获取代理服务器状态
 #[tauri::command]
 pub async fn get_proxy_status(state: tauri::State<'_, AppState>) -> Result<ProxyStatus, String> {
-    state.proxy_service.get_status().await
+    state.proxy_service.get_status().await.map_err(String::from)
 }
 
 /// 获取代理配置
 #[tauri::command]
 pub async fn get_proxy_config(state: tauri::State<'_, AppState>) -> Result<ProxyConfig, String> {
-    state.proxy_service.get_config().await
+    state.proxy_service.get_config().await.map_err(String::from)
 }
 
 /// 更新代理配置
@@ -106,7 +115,11 @@ pub async fn update_proxy_config(
     state: tauri::State<'_, AppState>,
     config: ProxyConfig,
 ) -> Result<(), String> {
-    state.proxy_service.update_config(&config).await
+    state
+        .proxy_service
+        .update_config(&config)
+        .await
+        .map_err(String::from)
 }
 
 // ==================== Global & Per-App Config ====================
@@ -183,6 +196,7 @@ pub async fn update_proxy_config_for_app(
         .proxy_service
         .update_circuit_breaker_config_for_app(&app_type, circuit_config)
         .await
+        .map_err(String::from)
 }
 
 fn preserve_switch_flags(incoming: &mut AppProxyConfig, current: &AppProxyConfig) {
@@ -327,7 +341,11 @@ pub async fn is_proxy_running(state: tauri::State<'_, AppState>) -> Result<bool,
 #[tauri::command]
 #[specta::specta]
 pub async fn is_live_takeover_active(state: tauri::State<'_, AppState>) -> Result<bool, String> {
-    state.proxy_service.is_takeover_active().await
+    state
+        .proxy_service
+        .is_takeover_active()
+        .await
+        .map_err(String::from)
 }
 
 /// 代理模式下切换供应商（热切换）
@@ -362,6 +380,7 @@ pub async fn switch_proxy_provider(
         .proxy_service
         .switch_proxy_target(&app_type, &provider_id)
         .await
+        .map_err(String::from)
 }
 
 // ==================== 故障转移相关命令 ====================

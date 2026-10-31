@@ -114,7 +114,7 @@ impl FailoverSwitchManager {
                     .proxy_service
                     .hot_switch_provider(app_type, provider_id)
                     .await
-                    .map_err(AppError::Message)?
+                    .map_err(|e| AppError::Message(e.to_string()))?
                     .logical_target_changed;
 
                 if !switched {

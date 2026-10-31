@@ -150,7 +150,12 @@ async fn update_config_port_change_reports_failed_live_rewrite() {
     FAIL_CLAUDE_LIVE_WRITE.with(|fail| fail.set(false));
 
     let err = result.expect_err("failed Claude live rewrite must be reported");
-    assert!(err.contains("claude"), "error should name the app: {err}");
+    assert!(
+        err.message().contains("claude"),
+        "error should name the app: {err}"
+    );
+    // SVC-22: the failure keeps a typed kind next to the unchanged text.
+    assert_eq!(err.kind(), TakeoverErrorKind::LiveWrite);
 
     let new_port = service.get_status().await.expect("status").port;
     assert_ne!(new_port, old_port, "proxy should have restarted");
@@ -219,9 +224,10 @@ async fn update_config_to_busy_port_keeps_running_server_and_config() {
         .await
         .expect_err("a busy port must be rejected");
     assert!(
-        err.contains(&busy_port.to_string()),
+        err.message().contains(&busy_port.to_string()),
         "names the port: {err}"
     );
+    assert_eq!(err.code(), "takeover.port_unavailable");
 
     assert!(service.is_running().await, "old server keeps running");
     assert_eq!(service.get_status().await.expect("status").port, old_port);

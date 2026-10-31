@@ -255,7 +255,7 @@ impl ProxyService {
     pub(super) fn claude_provider_with_effective_settings(
         &self,
         provider: &Provider,
-    ) -> Result<Provider, String> {
+    ) -> Result<Provider, TakeoverError> {
         let mut effective_provider = provider.clone();
         effective_provider.settings_config = build_effective_settings_with_common_config(
             self.db.as_ref(),
