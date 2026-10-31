@@ -8,6 +8,7 @@ import type {
   GlobalProxyConfig,
   AppProxyConfig,
   ProxyStatus,
+  RoutingConfig,
 } from "@/types/proxy";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { getAppLabel, isAnyTakeoverActive } from "@/config/proxyApps";
@@ -397,5 +398,42 @@ export function useUpdateAppProxyConfig() {
         }),
       );
     },
+  });
+}
+
+// ========== Routing (PROXY-19) and flight recorder (PROXY-21) ==========
+
+/** One app's routing settings (strategy, sticky sessions, concurrency). */
+export function useRoutingConfig(appType: string) {
+  return useQuery({
+    queryKey: queryKeys.proxy.routing(appType),
+    queryFn: () => proxyApi.getRoutingConfig(appType),
+    enabled: !!appType,
+  });
+}
+
+export function useSetRoutingConfig(appType: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (config: RoutingConfig) =>
+      proxyApi.setRoutingConfig(appType, config),
+    onSuccess: (_, config) => {
+      queryClient.setQueryData(queryKeys.proxy.routing(appType), config);
+    },
+  });
+}
+
+/** Refresh cadence of the flight recorder while the proxy runs. */
+const FLIGHT_RECORDER_REFETCH_MS = 5000;
+
+/** The proxy's last requests with every provider attempt (in memory). */
+export function useRecentProxyRequests(running: boolean, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.proxy.flightRecorder,
+    queryFn: () => proxyApi.listRecentRequests(),
+    enabled,
+    staleTime: 0,
+    refetchInterval: running ? FLIGHT_RECORDER_REFETCH_MS : false,
+    refetchIntervalInBackground: false,
   });
 }

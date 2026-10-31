@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { ProxyPanel } from "@/components/proxy";
 import { AutoFailoverConfigPanel } from "@/components/proxy/AutoFailoverConfigPanel";
 import { FailoverQueueManager } from "@/components/proxy/FailoverQueueManager";
+import { RoutingConfigPanel } from "@/components/proxy/RoutingConfigPanel";
 import { RectifierConfigPanel } from "@/components/settings/RectifierConfigPanel";
 import { GlobalProxySettings } from "@/components/settings/GlobalProxySettings";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -232,6 +233,9 @@ export function ProxyTabContent({
                           appType={appType}
                           disabled={failoverDisabled}
                         />
+                      </div>
+                      <div className="border-t border-border/50 pt-6">
+                        <RoutingConfigPanel appType={appType} />
                       </div>
                     </TabsContent>
                   );

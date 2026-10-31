@@ -7,6 +7,10 @@ import { useRequestLogs } from "@/lib/query/usage";
 import { RequestDetailPanel } from "@/components/usage/RequestDetailPanel";
 import type { ProxyStatus } from "@/types/proxy";
 import { cn } from "@/lib/utils";
+import { SegmentedControl } from "@/components/common/SegmentedControl";
+import { FlightRecorderList } from "./FlightRecorderList";
+
+type InspectorTab = "log" | "attempts";
 
 /** Rows shown in the inspector; the full history lives in Usage. */
 export const RECENT_REQUESTS_LIMIT = 10;
@@ -27,12 +31,15 @@ export function RecentRequestsPanel({ status }: RecentRequestsPanelProps) {
   const { t, i18n } = useTranslation();
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [tab, setTab] = useState<InspectorTab>("log");
   const { data } = useRequestLogs({
     filters: errorsOnly ? { statusMin: 400 } : {},
     range: { preset: "today" },
     page: 0,
     pageSize: RECENT_REQUESTS_LIMIT,
-    options: { refetchInterval: RECENT_REQUESTS_REFETCH_MS },
+    options: {
+      refetchInterval: tab === "log" ? RECENT_REQUESTS_REFETCH_MS : false,
+    },
   });
   const rows = data?.data ?? [];
   const time = (seconds: number) =>
@@ -45,20 +52,42 @@ export function RecentRequestsPanel({ status }: RecentRequestsPanelProps) {
           <ListTree className="h-4 w-4" />
           {t("proxy.inspector.title", { defaultValue: "Recent requests" })}
         </div>
-        <div className="flex items-center gap-2">
-          <Switch
-            id="proxy-inspector-errors-only"
-            checked={errorsOnly}
-            onCheckedChange={setErrorsOnly}
-          />
-          <Label
-            htmlFor="proxy-inspector-errors-only"
-            className="text-xs text-muted-foreground"
-          >
-            {t("proxy.inspector.errorsOnly", { defaultValue: "Errors only" })}
-          </Label>
-        </div>
+        {tab === "log" && (
+          <div className="flex items-center gap-2">
+            <Switch
+              id="proxy-inspector-errors-only"
+              checked={errorsOnly}
+              onCheckedChange={setErrorsOnly}
+            />
+            <Label
+              htmlFor="proxy-inspector-errors-only"
+              className="text-xs text-muted-foreground"
+            >
+              {t("proxy.inspector.errorsOnly", { defaultValue: "Errors only" })}
+            </Label>
+          </div>
+        )}
       </div>
+
+      <SegmentedControl<InspectorTab>
+        ariaLabel={t("proxy.inspector.view", {
+          defaultValue: "Request view",
+        })}
+        options={[
+          {
+            value: "log",
+            label: t("proxy.inspector.tabLog", { defaultValue: "Request log" }),
+          },
+          {
+            value: "attempts",
+            label: t("proxy.inspector.tabAttempts", {
+              defaultValue: "Provider attempts",
+            }),
+          },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
 
       {status.last_error && (
         <div
@@ -85,7 +114,9 @@ export function RecentRequestsPanel({ status }: RecentRequestsPanelProps) {
         </p>
       )}
 
-      {rows.length === 0 ? (
+      {tab === "attempts" ? (
+        <FlightRecorderList running={status.running} />
+      ) : rows.length === 0 ? (
         <p className="py-2 text-center text-xs text-muted-foreground">
           {t("proxy.inspector.empty", {
             defaultValue: "No requests today",

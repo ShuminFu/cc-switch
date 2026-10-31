@@ -111,4 +111,56 @@ describe("RecentRequestsPanel (FE-UI-39)", () => {
       ).toBe(true),
     );
   });
+
+  it("shows the flight recorder's provider attempts and copies them as JSON Lines (PROXY-21)", async () => {
+    const api = mockInvoke({
+      get_request_logs: { data: [], total: 0, page: 0, pageSize: 10 },
+      list_recent_proxy_requests: [
+        {
+          id: 7,
+          appType: "claude",
+          method: "POST",
+          endpoint: "/v1/messages",
+          startedAt: Date.UTC(2026, 9, 31, 8, 0, 0),
+          durationMs: 420,
+          success: true,
+          attempts: [
+            {
+              providerId: "p1",
+              providerName: "Relay",
+              result: "failover",
+              status: 502,
+              error: "bad gateway",
+              durationMs: 100,
+            },
+            {
+              providerId: "p2",
+              providerName: "Backup",
+              result: "served",
+              status: 200,
+              error: null,
+              durationMs: 320,
+            },
+          ],
+        },
+      ],
+      export_recent_proxy_requests: '{"id":7}\n',
+      copy_text_to_clipboard: null,
+    });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Provider attempts" }));
+    expect(
+      await screen.findByText("Relay 502 (failed over)"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Backup 200 (served)")).toBeInTheDocument();
+    expect(screen.getByText("claude POST /v1/messages")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy as JSON Lines" }));
+    await waitFor(() =>
+      expect(api.callsTo("copy_text_to_clipboard")[0]?.args).toEqual({
+        text: '{"id":7}\n',
+      }),
+    );
+  });
 });

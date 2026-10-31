@@ -139,3 +139,41 @@ export interface AppProxyConfig {
   circuitErrorRateThreshold: number;
   circuitMinRequests: number;
 }
+
+/** Which available provider a request tries first (PROXY-19). */
+export type RoutingStrategy = "priority" | "roundRobin" | "weighted";
+
+/** Per-app routing settings; the defaults reproduce the priority list. */
+export interface RoutingConfig {
+  strategy: RoutingStrategy;
+  stickySessions: boolean;
+  /** Sticky pin lifetime after last use; 0 = backend default. */
+  stickyTtlSecs: number;
+  /** In-flight requests allowed per provider; 0 = unlimited. */
+  maxConcurrentPerProvider: number;
+  /** Provider id -> weight for `weighted`; missing = 1. */
+  weights: Record<string, number>;
+}
+
+/** One provider attempt inside a flight-recorder request (PROXY-21). */
+export interface ProxyAttemptRecord {
+  providerId: string;
+  providerName: string;
+  result: "served" | "failover" | "aborted" | "skipped";
+  status: number | null;
+  error: string | null;
+  durationMs: number;
+}
+
+/** A request remembered by the in-memory flight recorder (no bodies). */
+export interface ProxyRequestRecord {
+  id: number;
+  appType: string;
+  method: string;
+  endpoint: string;
+  /** Unix milliseconds. */
+  startedAt: number;
+  durationMs: number;
+  success: boolean;
+  attempts: ProxyAttemptRecord[];
+}

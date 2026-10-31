@@ -218,6 +218,8 @@ export const queryKeys = {
     appConfig: (appType: string) => ["appProxyConfig", appType] as const,
     upstreamStatus: ["upstreamProxyStatus"] as const,
     globalUrl: ["globalProxyUrl"] as const,
+    routing: (appType: string) => ["proxyRouting", appType] as const,
+    flightRecorder: ["proxyFlightRecorder"] as const,
   },
 
   failover: {
