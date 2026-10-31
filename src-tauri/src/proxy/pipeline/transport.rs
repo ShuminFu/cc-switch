@@ -27,7 +27,8 @@ pub struct UpstreamRequest {
     pub method: http::Method,
     pub headers: http::HeaderMap,
     pub extensions: http::Extensions,
-    pub body: Vec<u8>,
+    /// Shared bytes: the client's own body on the passthrough path (PROXY-17).
+    pub body: bytes::Bytes,
     /// The client asked for a stream (governs which deadlines apply).
     pub streaming: bool,
     /// Native Anthropic upstream: keep the client's exact header casing.

@@ -345,6 +345,15 @@ export const handlers = [
 
   http.post(`${TAURI_ENDPOINT}/list_session_trash`, () => success([])),
 
+  // Session pin / archive / tags (SESS-18).
+  http.post(`${TAURI_ENDPOINT}/get_session_annotations`, () => success({})),
+  http.post(`${TAURI_ENDPOINT}/set_session_annotation`, async ({ request }) => {
+    const { annotation } = await withJson<{
+      annotation: { pinned: boolean; archived: boolean; tags: string[] };
+    }>(request);
+    return success(annotation);
+  }),
+
   http.post(`${TAURI_ENDPOINT}/restore_session_from_trash`, () =>
     HttpResponse.json("Trash entry not found", { status: 400 }),
   ),
@@ -549,6 +558,24 @@ export const handlers = [
   ),
 
   http.post(`${TAURI_ENDPOINT}/is_live_takeover_active`, () => success(false)),
+
+  // Proxy flight recorder (PROXY-21).
+  http.post(`${TAURI_ENDPOINT}/list_recent_proxy_requests`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/export_recent_proxy_requests`, () =>
+    success(""),
+  ),
+
+  // Proxy routing (PROXY-19): the default reproduces the priority list.
+  http.post(`${TAURI_ENDPOINT}/get_proxy_routing_config`, () =>
+    success({
+      strategy: "priority",
+      stickySessions: false,
+      stickyTtlSecs: 0,
+      maxConcurrentPerProvider: 0,
+      weights: {},
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/set_proxy_routing_config`, () => success(null)),
 
   // Failover / circuit breaker defaults
   http.post(`${TAURI_ENDPOINT}/get_failover_queue`, () => success([])),

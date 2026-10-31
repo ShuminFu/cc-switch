@@ -11,6 +11,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  Archive,
   Copy,
   RefreshCw,
   Search,
@@ -61,6 +62,12 @@ import {
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { SessionItem } from "./SessionItem";
+import { SessionTrashDialog } from "./SessionTrashDialog";
+import { useSessionAnnotations } from "./useSessionAnnotations";
+import {
+  applySessionAnnotations,
+  countArchived,
+} from "./sessionAnnotationsFilter";
 import {
   useIndexedSessions,
   useSessionTranscriptSearch,
@@ -251,12 +258,28 @@ export function SessionManagerPage({ appId }: { appId: string }) {
   const transcriptQuery = useSessionTranscriptSearch(search, transcriptSearch);
   const transcriptHits = transcriptQuery.data?.hits;
 
-  const providerSessions = useMemo(
+  // SESS-18: pinned sessions first, archived ones hidden unless requested.
+  const sessionAnnotations = useSessionAnnotations();
+  const [showArchived, setShowArchived] = useState(false);
+  const providerScopedSessions = useMemo(
     () =>
       providerFilter === "all"
         ? sessions
         : sessions.filter((session) => session.providerId === providerFilter),
     [providerFilter, sessions],
+  );
+  const archivedCount = useMemo(
+    () => countArchived(providerScopedSessions, sessionAnnotations.annotations),
+    [providerScopedSessions, sessionAnnotations.annotations],
+  );
+  const providerSessions = useMemo(
+    () =>
+      applySessionAnnotations(
+        providerScopedSessions,
+        sessionAnnotations.annotations,
+        showArchived,
+      ),
+    [providerScopedSessions, sessionAnnotations.annotations, showArchived],
   );
 
   const transcriptSnippets = useMemo(() => {
@@ -281,8 +304,19 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         .map((hit) => byKey.get(hit.sessionKey))
         .filter((session): session is SessionMeta => Boolean(session));
     }
-    return filterSessionsByQuery(providerSessions, deferredSearch);
-  }, [providerSessions, deferredSearch, transcriptHits, transcriptSearch]);
+    // Pinned first after the recency sort (archived were removed above).
+    return applySessionAnnotations(
+      filterSessionsByQuery(providerSessions, deferredSearch),
+      sessionAnnotations.annotations,
+      true,
+    );
+  }, [
+    providerSessions,
+    deferredSearch,
+    transcriptHits,
+    transcriptSearch,
+    sessionAnnotations.annotations,
+  ]);
 
   // PERF-46: mount the list incrementally instead of thousands of rows at once.
   const [visibleCount, setVisibleCount] = useState(SESSION_LIST_PAGE_SIZE);
@@ -831,6 +865,8 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         isCheckDisabled={!session.sourcePath}
         onSelect={setSelectedKey}
         onToggleChecked={(checked) => toggleSessionChecked(session, checked)}
+        annotation={sessionAnnotations.get(sessionKey)}
+        onAnnotate={(patch) => sessionAnnotations.update(sessionKey, patch)}
       />
     );
   };
@@ -1309,6 +1345,35 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                           </TooltipTrigger>
                           <TooltipContent>{t("common.refresh")}</TooltipContent>
                         </Tooltip>
+                        {archivedCount > 0 || showArchived ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant={showArchived ? "secondary" : "ghost"}
+                                size="icon"
+                                className="size-7"
+                                aria-pressed={showArchived}
+                                aria-label={t(
+                                  "sessionManager.annotations.showArchived",
+                                  {
+                                    defaultValue: "Show archived ({{count}})",
+                                    count: archivedCount,
+                                  },
+                                )}
+                                onClick={() => setShowArchived((v) => !v)}
+                              >
+                                <Archive className="size-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {t("sessionManager.annotations.showArchived", {
+                                defaultValue: "Show archived ({{count}})",
+                                count: archivedCount,
+                              })}
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : null}
+                        <SessionTrashDialog />
                       </div>
                     </div>
                     {selectionMode && (

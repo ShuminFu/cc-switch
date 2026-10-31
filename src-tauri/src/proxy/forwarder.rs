@@ -7,6 +7,7 @@
 //! at most one same-provider rectifier retry, until one serves the request.
 
 use super::circuit_breaker::HalfOpenPermit;
+use super::flight_recorder;
 use super::hyper_client::ProxyResponse;
 use super::pipeline::{
     attempt::{plan_rectification, AttemptOutcome, RectifierKind, RectifyDecision},
@@ -22,6 +23,7 @@ use super::pipeline::{
     transport::{self, should_preserve_exact_header_case, UpstreamRequest},
     validate::{validate_buffered_success, validate_stream_start, StreamFormat},
 };
+use super::routing::RoutingConfig;
 use super::{
     error::*,
     failover_switch::FailoverSwitchManager,
@@ -36,6 +38,7 @@ use super::{
 };
 use crate::commands::CopilotAuthState;
 use crate::{app_config::AppType, provider::Provider};
+use bytes::Bytes;
 use http::Extensions;
 use serde_json::Value;
 use std::borrow::Cow;
@@ -74,6 +77,9 @@ pub struct ForwardResult {
     /// 流式响应的最终结果上报器（PROXY-09）；由 `forward_with_retry` 挂到
     /// `connection_guard` 上，随流一起走到流结束。
     pub(crate) stream_health: Option<StreamHealthReporter>,
+    /// Per-provider concurrency slot (PROXY-19); moved into `connection_guard`
+    /// so it is released when the response (or stream) ends.
+    pub(crate) routing_permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
 pub struct ForwardError {
@@ -88,6 +94,8 @@ pub struct ForwardError {
 pub(crate) struct ActiveConnectionGuard {
     metrics: Arc<ProxyMetrics>,
     stream_health: Option<StreamHealthReporter>,
+    /// Held for the response lifetime; released on drop (PROXY-19).
+    _routing_permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
 impl ActiveConnectionGuard {
@@ -96,6 +104,7 @@ impl ActiveConnectionGuard {
         Self {
             metrics,
             stream_health: None,
+            _routing_permit: None,
         }
     }
 
@@ -185,6 +194,9 @@ struct AttemptRequest<'a> {
     headers: &'a http::HeaderMap,
     extensions: &'a Extensions,
     adapter: &'a dyn ProviderAdapter,
+    /// The client's parsed body; when the final outbound body equals it, the
+    /// client's own bytes are forwarded (PROXY-17).
+    client_body: &'a Value,
 }
 
 /// Per-request settings and shared stores handed to the forwarder.
@@ -202,6 +214,8 @@ pub struct ForwarderSettings {
     pub rectifier_config: RectifierConfig,
     pub optimizer_config: OptimizerConfig,
     pub copilot_optimizer_config: CopilotOptimizerConfig,
+    /// Per-app routing config (PROXY-19).
+    pub routing_config: Arc<RoutingConfig>,
 }
 
 pub struct RequestForwarder {
@@ -229,6 +243,8 @@ pub struct RequestForwarder {
     pub(crate) optimizer_config: OptimizerConfig,
     /// Copilot 优化器配置
     pub(crate) copilot_optimizer_config: CopilotOptimizerConfig,
+    /// Per-app routing config (PROXY-19): concurrency limits, sticky pins.
+    routing_config: Arc<RoutingConfig>,
     /// 本次请求的超时策略（PROXY-08）
     timeouts: TimeoutPolicy,
     /// 单个客户端请求最多尝试的 provider 数。
@@ -266,6 +282,7 @@ impl RequestForwarder {
             rectifier_config: settings.rectifier_config,
             optimizer_config: settings.optimizer_config,
             copilot_optimizer_config: settings.copilot_optimizer_config,
+            routing_config: settings.routing_config,
             timeouts: settings.timeouts,
             // max_retries 是「失败后重试次数」语义，attempt 上限 = retries + 1。
             max_attempts: (settings.max_retries as usize).saturating_add(1),
@@ -383,16 +400,39 @@ impl RequestForwarder {
             endpoint = endpoint,
             providers = providers.len(),
         );
+        // PROXY-21: attempt timeline for the in-memory flight recorder.
+        let started_at = chrono::Utc::now().timestamp_millis();
+        let request_started = std::time::Instant::now();
+        let method_name = method.to_string();
+        let mut attempts = Vec::new();
         let result = tracing::Instrument::instrument(
             self.forward_with_retry_inner(
-                app_type, method, endpoint, body, headers, extensions, providers,
+                app_type,
+                method,
+                endpoint,
+                body,
+                headers,
+                extensions,
+                providers,
+                &mut attempts,
             ),
             request_span,
         )
         .await;
+        flight_recorder::global().record(flight_recorder::RequestRecord {
+            id: 0,
+            app_type: app_type.as_str().to_string(),
+            method: method_name,
+            endpoint: flight_recorder::endpoint_path(endpoint),
+            started_at,
+            duration_ms: request_started.elapsed().as_millis() as u64,
+            success: result.is_ok(),
+            attempts,
+        });
         // Err 路径：guard 在函数 scope 内随返回值落地时自动 drop。
         result.map(|mut fr| {
             guard.stream_health = fr.stream_health.take();
+            guard._routing_permit = fr.routing_permit.take();
             fr.connection_guard = Some(guard);
             fr
         })
@@ -409,6 +449,7 @@ impl RequestForwarder {
         headers: axum::http::HeaderMap,
         extensions: Extensions,
         providers: Vec<Provider>,
+        attempts: &mut Vec<flight_recorder::AttemptRecord>,
     ) -> Result<ForwardResult, ForwardError> {
         let adapter = get_adapter(app_type);
         let app_type_str = app_type.as_str();
@@ -425,6 +466,7 @@ impl RequestForwarder {
             headers: &headers,
             extensions: &extensions,
             adapter: adapter.as_ref(),
+            client_body: body,
         };
 
         let mut last_error = None;
@@ -464,6 +506,34 @@ impl RequestForwarder {
                 guard
             };
 
+            // PROXY-19: per-provider concurrency limit (off unless configured).
+            // A provider at its limit is skipped like an open breaker.
+            let routing_permit = match self.router.routing().try_acquire(
+                app_type_str,
+                &self.routing_config,
+                &provider.id,
+            ) {
+                Ok(permit) => permit,
+                Err(limited) => {
+                    log::debug!(
+                        "[{app_type_str}] provider {} at concurrency limit {}, skipping",
+                        provider.id,
+                        limited.limit
+                    );
+                    let message = format!(
+                        "cc-switch: provider concurrency limit ({}) reached",
+                        limited.limit
+                    );
+                    attempts.push(skipped_attempt(provider, &message));
+                    last_error = Some(ProxyError::UpstreamError {
+                        status: 429,
+                        body: Some(message),
+                    });
+                    last_provider = Some(provider.clone());
+                    continue;
+                }
+            };
+
             // Budget hard limit (PRODUCT-05): skip a provider over its limit.
             if let Some((budget_err, limit_status)) =
                 self.check_budget_breach(app_type_str, provider).await
@@ -471,6 +541,7 @@ impl RequestForwarder {
                 if let Some(app) = self.app_handle.as_ref() {
                     notify_budget_breach(app, app_type_str, provider, &limit_status);
                 }
+                attempts.push(skipped_attempt(provider, &budget_err.to_string()));
                 last_error = Some(ProxyError::UpstreamError {
                     status: 429,
                     body: Some(budget_err.to_string()),
@@ -515,13 +586,18 @@ impl RequestForwarder {
                 matches!(outcome, AttemptOutcome::Served { .. }),
                 attempt_started.elapsed(),
             );
+            attempts.push(attempt_record(
+                provider,
+                &outcome,
+                attempt_started.elapsed(),
+            ));
             match outcome {
                 AttemptOutcome::Served {
                     response,
                     claude_api_format,
                     outbound_model,
                 } => {
-                    return Ok(self
+                    let mut result = self
                         .commit_success(
                             app_type_str,
                             provider,
@@ -531,7 +607,9 @@ impl RequestForwarder {
                             outbound_model,
                             last_error.is_some(),
                         )
-                        .await);
+                        .await;
+                    result.routing_permit = routing_permit;
+                    return Ok(result);
                 }
                 AttemptOutcome::Failover {
                     error,
@@ -771,6 +849,14 @@ impl RequestForwarder {
             app_type_str.to_string(),
             (provider.id.clone(), provider.name.clone()),
         );
+        // PROXY-19: pin the client's session to the provider that served it.
+        self.router.routing().record_served(
+            app_type_str,
+            &self.routing_config,
+            self.session_client_provided
+                .then_some(self.session_id.as_str()),
+            &provider.id,
+        );
         // PROXY-27: a failover is an earlier provider failing for this request, not
         // "served provider differs from the locally selected one".
         self.metrics.record_outcome(RequestOutcome::Served {
@@ -794,6 +880,7 @@ impl RequestForwarder {
             outbound_model,
             connection_guard: None,
             stream_health,
+            routing_permit: None,
         }
     }
 
@@ -814,6 +901,7 @@ impl RequestForwarder {
             headers,
             extensions,
             adapter,
+            client_body,
         } = *request;
 
         // Route.
@@ -923,11 +1011,15 @@ impl RequestForwarder {
 
         // GET/HEAD carry no body (e.g. Gemini models.list rejects one).
         let body_bytes = if matches!(*method, http::Method::GET | http::Method::HEAD) {
-            Vec::new()
+            Bytes::new()
+        } else if let Some(raw) = passthrough_body_bytes(extensions, client_body, &request_body) {
+            // PROXY-17: nothing changed the body; send the client's bytes as-is
+            // (no re-serialization, byte-identical on the wire).
+            raw
         } else {
-            serde_json::to_vec(&request_body).map_err(|e| {
+            Bytes::from(serde_json::to_vec(&request_body).map_err(|e| {
                 ProxyError::Internal(format!("Failed to serialize request body: {e}"))
-            })?
+            })?)
         };
         log_outbound_request(adapter.name(), &target.url, &request_body, &body_bytes);
 
@@ -1329,6 +1421,69 @@ fn provider_max_output_tokens(provider: &Provider) -> Option<u64> {
         .filter(|v| *v > 0)
 }
 
+/// Flight-recorder entry for one attempt (PROXY-21).
+fn attempt_record(
+    provider: &Provider,
+    outcome: &AttemptOutcome,
+    elapsed: std::time::Duration,
+) -> flight_recorder::AttemptRecord {
+    let (result, status, error) = match outcome {
+        AttemptOutcome::Served { response, .. } => (
+            flight_recorder::AttemptResult::Served,
+            Some(response.status().as_u16()),
+            None,
+        ),
+        AttemptOutcome::Failover { error, .. } => (
+            flight_recorder::AttemptResult::Failover,
+            upstream_status(error),
+            Some(flight_recorder::error_excerpt(&error.to_string())),
+        ),
+        AttemptOutcome::Abort { error } => (
+            flight_recorder::AttemptResult::Aborted,
+            upstream_status(error),
+            Some(flight_recorder::error_excerpt(&error.to_string())),
+        ),
+    };
+    flight_recorder::AttemptRecord {
+        provider_id: provider.id.clone(),
+        provider_name: provider.name.clone(),
+        result,
+        status,
+        error,
+        duration_ms: elapsed.as_millis() as u64,
+    }
+}
+
+fn skipped_attempt(provider: &Provider, reason: &str) -> flight_recorder::AttemptRecord {
+    flight_recorder::AttemptRecord {
+        provider_id: provider.id.clone(),
+        provider_name: provider.name.clone(),
+        result: flight_recorder::AttemptResult::Skipped,
+        status: Some(429),
+        error: Some(flight_recorder::error_excerpt(reason)),
+        duration_ms: 0,
+    }
+}
+
+fn upstream_status(error: &ProxyError) -> Option<u16> {
+    match error {
+        ProxyError::UpstreamError { status, .. } => Some(*status),
+        _ => None,
+    }
+}
+
+/// The client's original body bytes when the outbound body is unchanged
+/// (PROXY-17). `Value` equality ignores object key order, so a body that only
+/// went through the canonical-order pass still counts as unchanged.
+fn passthrough_body_bytes(
+    extensions: &Extensions,
+    client_body: &Value,
+    outbound: &Value,
+) -> Option<Bytes> {
+    let raw = extensions.get::<super::pipeline::inbound::ClientBodyBytes>()?;
+    (outbound == client_body).then(|| raw.0.clone())
+}
+
 fn log_outbound_request(tag: &str, url: &str, body: &Value, body_bytes: &[u8]) {
     let request_model = body
         .get("model")
@@ -1596,7 +1751,6 @@ mod tests {
     };
     use axum::http::header::{HeaderValue, ACCEPT};
     use axum::http::HeaderMap;
-    use bytes::Bytes;
     use futures::StreamExt;
     use http::StatusCode;
     use serde_json::json;
@@ -1644,6 +1798,7 @@ mod tests {
             rectifier_config: RectifierConfig::default(),
             optimizer_config: OptimizerConfig::default(),
             copilot_optimizer_config: CopilotOptimizerConfig::default(),
+            routing_config: Arc::new(RoutingConfig::default()),
             timeouts: TimeoutPolicy::from_secs(
                 non_streaming_timeout.as_secs(),
                 streaming_first_byte_timeout.as_secs(),
@@ -1759,6 +1914,32 @@ mod tests {
         let summary = summarize_text_for_log("line1\n\n line2   line3", 12);
 
         assert_eq!(summary, "line1 line2...");
+    }
+
+    #[test]
+    fn passthrough_reuses_the_client_buffer_only_when_the_body_is_unchanged() {
+        let raw = Bytes::from_static(br#"{"stream":false,"model":"m","max_tokens":1}"#);
+        let client: Value = serde_json::from_slice(&raw).unwrap();
+        let mut extensions = Extensions::new();
+        assert!(
+            passthrough_body_bytes(&extensions, &client, &client).is_none(),
+            "no captured bytes, no passthrough"
+        );
+        extensions.insert(super::super::pipeline::inbound::ClientBodyBytes(
+            raw.clone(),
+        ));
+
+        // Same JSON in canonical order: forwarded as the client's buffer
+        // (zero-copy: same allocation, no serialization).
+        let canonical = crate::proxy::json_canonical::canonicalize_value(client.clone());
+        let sent = passthrough_body_bytes(&extensions, &client, &canonical).expect("unchanged");
+        assert_eq!(sent.as_ptr(), raw.as_ptr());
+        assert_eq!(sent, raw);
+
+        // Any change (model mapping, stripping, transform) re-serializes.
+        let mut mapped = client.clone();
+        mapped["model"] = json!("mapped");
+        assert!(passthrough_body_bytes(&extensions, &client, &mapped).is_none());
     }
 
     #[test]
@@ -2072,6 +2253,7 @@ mod tests {
                     claude_provider("p1", &p1_url),
                     claude_provider("p2", &p2_url),
                 ],
+                &mut Vec::new(),
             )
             .await;
         let result = match result {

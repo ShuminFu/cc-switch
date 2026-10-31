@@ -35,8 +35,20 @@ impl ProxyService {
         let opencode_enabled = false;
         let openclaw_enabled = false;
 
+        // PROXY-30: Claude Desktop has no proxy_config row; it is taken over when
+        // its applied profile is in proxy mode and points at this gateway.
+        let claude_desktop_enabled = crate::claude_desktop_config::get_status(&self.db, true)
+            .map(|status| {
+                matches!(status.mode, Some(crate::provider::ClaudeDesktopMode::Proxy))
+                    && status.actual_base_url.is_some()
+                    && status.actual_base_url == status.expected_base_url
+            })
+            .unwrap_or(false);
+
         Ok(ProxyTakeoverStatus {
             claude: claude_enabled,
+            claude_desktop: claude_desktop_enabled,
+            hermes: false,
             codex: codex_enabled,
             gemini: gemini_enabled,
             grokbuild: grokbuild_enabled,

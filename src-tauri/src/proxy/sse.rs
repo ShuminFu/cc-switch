@@ -1,5 +1,24 @@
 use bytes::{Bytes, BytesMut};
 
+/// Encode one SSE frame `event: {name}\ndata: {json}\n\n` (PERF-18).
+///
+/// The JSON is serialized straight into the frame buffer: one allocation per
+/// event instead of a JSON `String` plus a `format!` copy. The bytes are
+/// identical to `format!("event: {name}\ndata: {}\n\n", to_string(payload))`.
+pub(crate) fn encode_event<T: serde::Serialize + ?Sized>(name: &str, payload: &T) -> Bytes {
+    let mut buf = Vec::with_capacity(name.len() + 128);
+    buf.extend_from_slice(b"event: ");
+    buf.extend_from_slice(name.as_bytes());
+    buf.extend_from_slice(b"\ndata: ");
+    // `to_string(..).unwrap_or_default()` wrote nothing on error; keep that.
+    let before = buf.len();
+    if serde_json::to_writer(&mut buf, payload).is_err() {
+        buf.truncate(before);
+    }
+    buf.extend_from_slice(b"\n\n");
+    Bytes::from(buf)
+}
+
 /// Strip an SSE field prefix (`field: value` or `field:value`) without allocating.
 #[inline]
 pub(crate) fn strip_sse_field<'a>(line: &'a str, field: &str) -> Option<&'a str> {
@@ -162,6 +181,24 @@ pub(crate) fn append_utf8_safe(buffer: &mut String, remainder: &mut Vec<u8>, new
 #[cfg(test)]
 mod tests {
     use super::{append_utf8_safe, strip_sse_field, take_sse_block, SseBlockBuffer};
+
+    #[test]
+    fn encode_event_is_byte_identical_to_the_format_based_frame() {
+        let payloads = [
+            serde_json::json!({"type": "content_block_delta", "index": 0,
+                "delta": {"type": "text_delta", "text": "héllo \"quoted\"\n世界"}}),
+            serde_json::json!({"type": "message_stop"}),
+            serde_json::json!(null),
+        ];
+        for payload in &payloads {
+            let old = format!(
+                "event: content_block_delta\ndata: {}\n\n",
+                serde_json::to_string(payload).unwrap_or_default()
+            );
+            let new = super::encode_event("content_block_delta", payload);
+            assert_eq!(new.as_ref(), old.as_bytes());
+        }
+    }
 
     #[test]
     fn strip_sse_field_accepts_optional_space() {

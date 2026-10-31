@@ -4,6 +4,7 @@
 
 use crate::app_config::AppType;
 use crate::provider::Provider;
+use crate::proxy::routing::RoutingConfig;
 use crate::proxy::{
     extract_session_id,
     forwarder::{ForwarderSettings, RequestForwarder},
@@ -13,6 +14,7 @@ use crate::proxy::{
     ProxyError,
 };
 use axum::http::HeaderMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 /// 流式超时配置
@@ -73,6 +75,8 @@ pub struct RequestContext {
     pub optimizer_config: OptimizerConfig,
     /// Copilot 优化器配置
     pub copilot_optimizer_config: CopilotOptimizerConfig,
+    /// Per-app routing config (PROXY-19; default = fixed priority order).
+    pub routing_config: Arc<RoutingConfig>,
 }
 
 impl RequestContext {
@@ -147,6 +151,17 @@ impl RequestContext {
                 _ => ProxyError::DatabaseError(e.to_string()),
             })?;
 
+        // PROXY-19: optional strategy / sticky-session reordering of the
+        // available providers. The default config returns them unchanged.
+        let routing = state.provider_router.routing();
+        let routing_config = routing
+            .config_for(state.provider_router.db(), app_type_str)
+            .await;
+        let sticky_session = session_result
+            .client_provided
+            .then_some(session_id.as_str());
+        let providers = routing.order(app_type_str, &routing_config, sticky_session, providers);
+
         let provider = providers
             .first()
             .cloned()
@@ -178,6 +193,7 @@ impl RequestContext {
             rectifier_config,
             optimizer_config,
             copilot_optimizer_config,
+            routing_config,
         })
     }
 
@@ -233,6 +249,7 @@ impl RequestContext {
                 rectifier_config: self.rectifier_config.clone(),
                 optimizer_config: self.optimizer_config.clone(),
                 copilot_optimizer_config: self.copilot_optimizer_config.clone(),
+                routing_config: self.routing_config.clone(),
             },
         )
     }

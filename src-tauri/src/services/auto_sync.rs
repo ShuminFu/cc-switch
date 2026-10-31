@@ -13,10 +13,17 @@
 //! snapshot that was just downloaded under this device's name. In addition,
 //! a transport whose local content is unchanged since its last sync is not
 //! re-uploaded.
+//!
+//! Deferred signals (SEC-36): a change reported while a guard is alive is not
+//! discarded. It sets a "deferred" flag, and when the last guard drops exactly
+//! one signal is enqueued under the new epoch. If the only writes during the
+//! window were the import's own, the upload finds the content unchanged since
+//! the download and is skipped; a user edit made during the download is
+//! uploaded.
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -40,24 +47,58 @@ pub(crate) type ChangeSignal = (String, usize);
 static DB_CHANGE_TX: OnceLock<Sender<ChangeSignal>> = OnceLock::new();
 static AUTO_SYNC_SUPPRESS_DEPTH: AtomicUsize = AtomicUsize::new(0);
 static AUTO_SYNC_SUPPRESS_EPOCH: AtomicUsize = AtomicUsize::new(0);
+/// A synced table changed while a guard was alive (SEC-36).
+static AUTO_SYNC_DEFERRED_SIGNAL: AtomicBool = AtomicBool::new(false);
 
 /// Suppresses auto-sync uploads while alive (used around downloads/imports).
-pub(crate) struct AutoSyncSuppressionGuard;
+pub(crate) struct AutoSyncSuppressionGuard {
+    /// Test hook: where the deferred signal goes instead of the global worker.
+    #[cfg(test)]
+    sender: Option<Sender<ChangeSignal>>,
+}
 
 impl AutoSyncSuppressionGuard {
     pub fn new() -> Self {
         AUTO_SYNC_SUPPRESS_EPOCH.fetch_add(1, Ordering::SeqCst);
         AUTO_SYNC_SUPPRESS_DEPTH.fetch_add(1, Ordering::SeqCst);
-        Self
+        Self {
+            #[cfg(test)]
+            sender: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_sender(sender: Sender<ChangeSignal>) -> Self {
+        let mut guard = Self::new();
+        guard.sender = Some(sender);
+        guard
     }
 }
 
 impl Drop for AutoSyncSuppressionGuard {
     fn drop(&mut self) {
-        let _ =
+        let previous =
             AUTO_SYNC_SUPPRESS_DEPTH.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
                 Some(value.saturating_sub(1))
             });
+        if previous == Ok(1) {
+            #[cfg(test)]
+            let sender = self.sender.as_ref().or_else(|| DB_CHANGE_TX.get());
+            #[cfg(not(test))]
+            let sender = DB_CHANGE_TX.get();
+            flush_deferred_signal(sender);
+        }
+    }
+}
+
+/// Enqueue the one signal deferred while suppressed, if any (SEC-36).
+fn flush_deferred_signal(tx: Option<&Sender<ChangeSignal>>) -> bool {
+    if !AUTO_SYNC_DEFERRED_SIGNAL.swap(false, Ordering::SeqCst) {
+        return false;
+    }
+    match tx {
+        Some(tx) => enqueue_change_signal(tx, "deferred"),
+        None => false,
     }
 }
 
@@ -111,13 +152,19 @@ pub(crate) fn should_run_auto_sync(enabled: bool, auto_sync: bool) -> bool {
 }
 
 pub fn notify_db_changed(table: &str) {
-    if is_auto_sync_suppressed() {
-        return;
-    }
+    notify_db_changed_with(DB_CHANGE_TX.get(), table);
+}
+
+fn notify_db_changed_with(tx: Option<&Sender<ChangeSignal>>, table: &str) {
     if !should_trigger_for_table(table) {
         return;
     }
-    let Some(tx) = DB_CHANGE_TX.get() else {
+    if is_auto_sync_suppressed() {
+        // Defer instead of dropping: the guard enqueues one signal on release.
+        AUTO_SYNC_DEFERRED_SIGNAL.store(true, Ordering::SeqCst);
+        return;
+    }
+    let Some(tx) = tx else {
         return;
     };
     let _ = enqueue_change_signal(tx, table);
@@ -427,6 +474,43 @@ mod tests {
 
         // A change made after the download still uploads.
         assert!(enqueue_change_signal(&tx, "providers"));
+        tokio::time::sleep(Duration::from_millis(AUTO_SYNC_DEBOUNCE_MS + 500)).await;
+        assert_eq!(uploads.load(Ordering::SeqCst), 1);
+
+        drop(tx);
+        worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    #[serial(auto_sync)]
+    async fn change_during_suppression_uploads_once_after_guard_drops() {
+        let (tx, rx) = channel::<ChangeSignal>(1);
+        let uploads = Arc::new(AtomicUsize::new(0));
+        let counter = uploads.clone();
+        let worker = tokio::spawn(run_worker_loop(rx, move |_| {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+        }));
+
+        let guard = AutoSyncSuppressionGuard::with_sender(tx.clone());
+        // Several edits while the download runs: none enqueued yet.
+        notify_db_changed_with(Some(&tx), "providers");
+        notify_db_changed_with(Some(&tx), "mcp_servers");
+        tokio::time::sleep(Duration::from_millis(AUTO_SYNC_DEBOUNCE_MS + 500)).await;
+        assert_eq!(uploads.load(Ordering::SeqCst), 0, "no upload while held");
+
+        drop(guard);
+        tokio::time::sleep(Duration::from_millis(AUTO_SYNC_DEBOUNCE_MS + 500)).await;
+        assert_eq!(
+            uploads.load(Ordering::SeqCst),
+            1,
+            "exactly one upload once the guard drops"
+        );
+
+        // Nothing deferred: releasing another guard uploads nothing.
+        drop(AutoSyncSuppressionGuard::with_sender(tx.clone()));
         tokio::time::sleep(Duration::from_millis(AUTO_SYNC_DEBOUNCE_MS + 500)).await;
         assert_eq!(uploads.load(Ordering::SeqCst), 1);
 

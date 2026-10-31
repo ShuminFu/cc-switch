@@ -258,6 +258,10 @@ export const queryKeys = {
 
   sessions: {
     all: ["sessions"] as const,
+    /** Recently deleted sessions (SESS-41); under `all` so deletes refresh it. */
+    trash: ["sessions", "trash"] as const,
+    /** Pin / archive / tags (SESS-18). */
+    annotations: ["sessions", "annotations"] as const,
     messages: (providerId?: string, sourcePath?: string) =>
       ["sessionMessages", providerId, sourcePath] as const,
   },
