@@ -191,7 +191,12 @@
     "shareLinkCopyFailed": "複製分享連結失敗：{{error}}",
     "searchShortcut": "搜尋供應商",
     "searchCloseShortcut": "關閉供應商搜尋",
-    "duplicateName": "{{name}} 副本"
+    "duplicateName": "{{name}} 副本",
+    "filter": {
+      "label": "篩選供應商",
+      "all": "全部",
+      "inQueue": "在故障轉移佇列中"
+    }
   },
   "claudeCode": {
     "needsRouting": "需要路由",
@@ -292,7 +297,8 @@
     "proxyReasonClaudeDesktop": "使用 Claude Desktop 本地路由模式",
     "openclawModelsRegisterFailed": "供應商已新增，但其模型無法註冊到 OpenClaw：{{error}}",
     "undoDeleteFailed": "無法還原供應商：{{error}}",
-    "removeFromConfigFailed": "從設定中移除失敗：{{error}}"
+    "removeFromConfigFailed": "從設定中移除失敗：{{error}}",
+    "switchUndone": "已切換回去"
   },
   "confirm": {
     "deleteProvider": "刪除供應商",
@@ -499,6 +505,7 @@
       "deleteConfirmMessage": "此備份將被永久刪除，此操作無法復原。",
       "openFolderFailed": "無法開啟備份資料夾",
       "showInFolder": "在資料夾中顯示",
+      "keepUsageHistory": "保留本裝置自該備份以來記錄的使用歷史",
       "kind": {
         "manual": "手動",
         "manualHint": "透過「立即備份」建立，不會被自動輪替清除",
@@ -922,6 +929,7 @@
     "revertImportFailed": "復原匯入失敗：{{message}}",
     "unsavedChanges": "有未儲存的變更",
     "discardChanges": "捨棄",
+    "preserveCodexOfficialAuthOnSwitchDefaultOnDescription": "預設開啟。控制未開啟本機路由時切換第三方供應商的行為；路由接管期間一律保留 Codex 官方登入。",
     "cloudSync": {
       "conflict": {
         "localChanged": "自上次同步以來，本機資料已有變更。現在下載將以雲端資料取代這些本機變更。如需保留，請取消並先上傳。",
@@ -980,6 +988,12 @@
       "pendingIn": "仍有 {{count}} 個金鑰儲存在資料庫中。",
       "pendingOut": "部分金鑰仍在鑰匙圈中。",
       "retry": "重試"
+    },
+    "search": {
+      "shortcut": "搜尋設定",
+      "placeholder": "搜尋設定…",
+      "label": "搜尋設定",
+      "noResults": "沒有符合的設定"
     }
   },
   "apps": {
@@ -1096,7 +1110,25 @@
     "messagesLoadFailed": "載入此工作階段失敗",
     "showMore": "顯示更多（剩餘 {{count}} 筆）",
     "undoDelete": "復原",
-    "restoreFailed": "無法還原工作階段"
+    "restoreFailed": "無法還原工作階段",
+    "annotations": {
+      "pinned": "已釘選",
+      "archivedBadge": "已封存",
+      "unpin": "取消釘選工作階段",
+      "pin": "釘選工作階段",
+      "unarchive": "取消封存工作階段",
+      "archive": "封存工作階段",
+      "showArchived": "顯示已封存（{{count}}）",
+      "saveFailed": "無法儲存工作階段標籤"
+    },
+    "trash": {
+      "restored": "工作階段已還原",
+      "open": "最近刪除",
+      "title": "最近刪除的工作階段",
+      "description": "已刪除的工作階段會保留 30 天。還原後會回到原本的位置。",
+      "empty": "沒有最近刪除的工作階段",
+      "restore": "還原"
+    }
   },
   "console": {
     "providerSwitchReceived": "收到供應商切換事件：",
@@ -1893,12 +1925,16 @@
     "retry": "重試升級",
     "openReleases": "開啟發佈頁",
     "openConfigDir": "開啟設定目錄",
-    "quit": "結束"
+    "quit": "結束",
+    "checkFailed": "無法檢查更新（可能處於離線狀態）。你可以重試升級，或還原一個備份。"
   },
   "errors": {
     "usage_query_failed": "用量查詢失敗",
     "configLoadFailedTitle": "設定載入失敗",
-    "configLoadFailedMessage": "無法讀取設定檔：\n{{path}}\n\n錯誤詳情：\n{{detail}}\n\n請手動檢查 JSON 是否有效，或從同目錄的備份檔案（如 config.json.bak）還原。\n\n應用程式將退出以便您進行修復。"
+    "configLoadFailedMessage": "無法讀取設定檔：\n{{path}}\n\n錯誤詳情：\n{{detail}}\n\n請手動檢查 JSON 是否有效，或從同目錄的備份檔案（如 config.json.bak）還原。\n\n應用程式將退出以便您進行修復。",
+    "detailsCopied": "已複製詳細資訊",
+    "copyDetails": "複製詳細資訊",
+    "configLoadFailedRestoreGuide": "如何手動還原備份：\n{{url}}"
   },
   "presetSelector": {
     "title": "選擇設定類型",
@@ -2388,7 +2424,9 @@
     "delete": {
       "success": "環境變數已成功刪除",
       "error": "刪除環境變數失敗",
-      "undo": "復原"
+      "undo": "復原",
+      "skippedTitle": "有 {{count}} 個變數無法由 CC Switch 移除",
+      "skippedDescription": "{{names}} 來自行程環境（launchd、systemd、~/.zshenv 或父 shell）。請在設定它們的位置移除，然後重新啟動 CC Switch。"
     },
     "backup": {
       "location": "備份位置：{{path}}"
@@ -2405,6 +2443,11 @@
     "restore": {
       "success": "環境變數已還原",
       "error": "還原環境變數失敗"
+    },
+    "profile": {
+      "copy": "複製為 shell 設定檔",
+      "copied": "已複製環境變數（包含 API 金鑰）",
+      "copyFailed": "無法匯出環境變數"
     }
   },
   "skills": {
@@ -2533,6 +2576,9 @@
     "uninstallInMainPanel": "請在主面板中解除安裝技能",
     "notFound": "未找到技能",
     "openReadme": "開啟 README",
+    "uninstallWarnings": "部分檔案無法移除，請手動刪除",
+    "unmanagedConflictHint": "已存在名為 {{name}} 的受管技能，但未對此應用程式啟用，且此資料夾不是 CC Switch 的副本。匯入前請確認你需要哪個版本。",
+    "unmanagedConflict": "名稱衝突",
     "backup": {
       "location": "備份位置：{{path}}"
     },
@@ -2711,9 +2757,24 @@
   },
   "agents": {
     "title": "Agent",
+    "created": "已建立 Agent {{name}}",
+    "description": "來自 ~/.claude/agents 的 Claude Code 子 Agent。Claude Code 下次啟動時會載入它們。",
+    "new": "新增 Agent",
+    "empty": "尚無子 Agent，建立一個開始使用。",
+    "invalidHint": "frontmatter 需要包含 name 與 description，否則 Claude Code 會忽略此檔案。",
+    "invalid": "frontmatter 無效",
+    "create": "建立 Agent",
     "comingSoon": {
       "title": "即將推出",
       "description": "Agent 管理功能正在開發中，敬請期待強大的自主能力。"
+    },
+    "field": {
+      "name": "名稱",
+      "nameInvalid": "請使用小寫字母、數字與連字號。",
+      "description": "何時使用此 Agent",
+      "model": "模型",
+      "tools": "工具",
+      "prompt": "系統提示詞"
     }
   },
   "health": {
@@ -2935,7 +2996,15 @@
       "stopFailed": "停止路由服務失敗：{{detail}}"
     },
     "stoppedWithRestore": "路由服務已關閉，已還原所有路由設定",
-    "stopWithRestoreFailed": "停止失敗：{{detail}}"
+    "stopWithRestoreFailed": "停止失敗：{{detail}}",
+    "inspector": {
+      "title": "最近請求",
+      "errorsOnly": "僅顯示錯誤",
+      "lastError": "最近錯誤：{{error}}",
+      "lastRequestAt": "最近請求：{{time}}",
+      "empty": "今日尚無請求",
+      "openDetail": "{{time}} 的請求 {{status}} {{model}}"
+    }
   },
   "streamCheck": {
     "reachable": "{{providerName}} 連通正常 ({{responseTimeMs}}ms)",
@@ -3345,7 +3414,10 @@
     "deleteNow": "立即刪除請求日誌",
     "dbSize": "資料庫大小：{{size}}",
     "confirmTitle": "刪除請求日誌？",
-    "confirmMessage": "所有請求日誌的 Token 與成本計入每日彙總後，這些日誌將被刪除。用量圖表會保留彙總資料，但請求詳細資訊將不再可用。"
+    "confirmMessage": "所有請求日誌的 Token 與成本計入每日彙總後，這些日誌將被刪除。用量圖表會保留彙總資料，但請求詳細資訊將不再可用。",
+    "streamCheckTitle": "連線檢查日誌保留期限",
+    "streamCheckDescription": "供應商連線檢查的結果將在設定的天數後刪除。",
+    "keepForever": "永久保留"
   },
   "policy": {
     "signatureInvalid": "由於無法驗證簽章，已忽略一個受管理的原則檔案。",
@@ -3363,5 +3435,126 @@
     "export": "匯出",
     "markdown": "Markdown (.md)",
     "json": "JSON (.json)"
+  },
+  "helpLink": {
+    "open": "開啟使用手冊"
+  },
+  "shortcuts": {
+    "show": "顯示鍵盤快速鍵",
+    "title": "鍵盤快速鍵",
+    "description": "目前頁面可用的快速鍵。"
+  },
+  "startupWarnings": {
+    "settingsCorrupt": {
+      "title": "無法讀取設定檔",
+      "description": "settings.json 無效，已移至 {{path}}。目前使用預設設定，請在設定中檢查。"
+    },
+    "configDirUnavailable": {
+      "title": "資料目錄無法使用",
+      "description": "設定的資料目錄 {{path}} 不存在。CC Switch 正在使用預設目錄，請檢查 設定 > 進階 > 設定檔目錄。"
+    },
+    "proxyRestoreFailed": {
+      "title": "無法還原代理接管",
+      "description": "還原 {{app}} 的代理接管失敗：{{error}}。請開啟 設定 > 路由 重新啟用。"
+    },
+    "generic": {
+      "title": "啟動警告"
+    }
+  },
+  "workbench": {
+    "promptCopy": {
+      "title": "用於其他應用程式",
+      "done": "已將提示詞複製到 {{count}} 個應用程式",
+      "description": "將「{{name}}」複製到其他應用程式的提示詞清單。若現有提示詞檔案曾在 CC Switch 之外被修改，會保留為一個備份提示詞。",
+      "activate": "設為對應應用程式的目前提示詞",
+      "copy": "複製"
+    },
+    "audit": {
+      "exported": "稽核日誌已儲存至 {{path}}",
+      "filter": "依操作、來源或 ID 篩選",
+      "export": "匯出 JSONL",
+      "empty": "尚無記錄的事件。",
+      "time": "時間",
+      "actor": "來源",
+      "action": "操作",
+      "entity": "對象"
+    },
+    "history": {
+      "restoredMissingKeys": "已還原版本。請重新輸入 API 金鑰：歷史記錄中不保存金鑰。",
+      "restored": "已還原版本",
+      "description": "每個供應商的最近 50 個版本，包括切換時從正在使用的設定回寫的變更。API 金鑰永遠不會儲存在歷史記錄中。",
+      "empty": "尚無記錄的變更。",
+      "entities": "有歷史記錄的供應商",
+      "versions": "{{count}} 個版本",
+      "deleted": "已刪除",
+      "pick": "選擇一個供應商以查看其版本。",
+      "restore": "還原此版本",
+      "moreChanges": "+{{count}} 項",
+      "restoreConfirm": "以 {{when}} 的版本取代此供應商？若它是目前使用的供應商，其正在使用的設定會被重寫。目前的 API 金鑰會保留。",
+      "title": "變更歷史與稽核日誌",
+      "subtitle": "查看變更內容及來源，並可復原"
+    },
+    "tools": {
+      "activated": "設定檔已寫入該工具的設定檔案",
+      "importedName": "目前設定",
+      "description": "為沒有獨立分頁的 CLI 工具切換端點、金鑰與模型。僅修改列出的鍵，其他設定與註解保持不變，並會備份原檔案。將 JSON 描述檔放入 {{dir}} 即可新增更多工具。",
+      "detected": "已偵測到",
+      "notDetected": "未偵測到",
+      "importLive": "匯入目前設定",
+      "addProfile": "新增設定檔",
+      "noProfiles": "尚無設定檔。",
+      "active": "使用中",
+      "apply": "套用",
+      "editProfile": "編輯設定檔",
+      "deleteProfile": "刪除設定檔",
+      "profileName": "設定檔名稱",
+      "secretKept": "已儲存 — 留空則保持不變",
+      "deleteConfirm": "刪除設定檔「{{name}}」？該工具的設定檔案不會被修改。",
+      "title": "其他 CLI 工具",
+      "subtitle": "為 Qwen Code、Aider 等工具管理端點、金鑰與模型設定檔"
+    },
+    "projectUsage": {
+      "title": "依專案統計用量",
+      "description": "請求會比對到工作階段，並依工作階段所在的 Git 儲存庫分組。",
+      "range": "時間範圍",
+      "lastDays": "最近 {{count}} 天",
+      "empty": "此期間沒有記錄的請求。",
+      "project": "專案",
+      "sessions": "工作階段",
+      "requests": "請求",
+      "tokens": "Token",
+      "cost": "費用",
+      "unattributed": "未歸屬",
+      "total": "合計"
+    },
+    "recovery": {
+      "title": "或還原一個此版本可以開啟的備份",
+      "description": "目前的資料庫會保留在備份資料夾中，你之後仍可升級。備份之後所做的變更不包含在備份中。",
+      "restore": "還原並重新啟動"
+    },
+    "sessionCost": {
+      "title": "已記錄 {{requests}} 次請求 · 輸入 {{input}} / 輸出 {{output}} Token"
+    },
+    "bundle": {
+      "exported": "已儲存 {{providers}} 個供應商、{{mcp}} 個 MCP 伺服器與 {{prompts}} 個提示詞（已移除 {{secrets}} 個金鑰）",
+      "applied": "已匯入：新增 {{added}} 項，更新 {{updated}} 項，略過 {{skipped}} 項",
+      "statusNew": "新增",
+      "statusIdentical": "無變更",
+      "statusConflict": "已存在 — 有差異",
+      "exportTitle": "匯出分享包",
+      "mcp": "MCP 伺服器",
+      "prompts": "提示詞",
+      "stripSecrets": "移除 API 金鑰與權杖",
+      "secretsWarning": "該檔案將包含你的 API 金鑰，請僅透過可信任的管道分享。",
+      "export": "匯出…",
+      "importTitle": "匯入分享包",
+      "importDescription": "項目會合併到你的資料中，不會啟用任何內容。只有在你允許時才會取代現有項目，並保留其金鑰。",
+      "chooseFile": "選擇檔案…",
+      "enterKey": "輸入金鑰（選填）",
+      "overwrite": "取代有差異的現有項目",
+      "import": "匯入 {{count}} 項",
+      "title": "分享包",
+      "subtitle": "分享供應商、MCP 伺服器與提示詞，不含你的金鑰"
+    }
   }
 }

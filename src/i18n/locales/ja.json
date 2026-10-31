@@ -191,7 +191,12 @@
     "shareLinkCopyFailed": "共有リンクのコピーに失敗しました: {{error}}",
     "searchShortcut": "プロバイダーを検索",
     "searchCloseShortcut": "プロバイダー検索を閉じる",
-    "duplicateName": "{{name}} のコピー"
+    "duplicateName": "{{name}} のコピー",
+    "filter": {
+      "label": "プロバイダーを絞り込む",
+      "all": "すべて",
+      "inQueue": "フェイルオーバーキュー内"
+    }
   },
   "claudeCode": {
     "needsRouting": "ルーティングが必要",
@@ -292,7 +297,8 @@
     "proxyReasonClaudeDesktop": "Claude Desktop ローカルルーティングモードを使用しており",
     "openclawModelsRegisterFailed": "プロバイダーを追加しましたが、モデルを OpenClaw に登録できませんでした: {{error}}",
     "undoDeleteFailed": "プロバイダーを復元できませんでした: {{error}}",
-    "removeFromConfigFailed": "設定からの削除に失敗しました: {{error}}"
+    "removeFromConfigFailed": "設定からの削除に失敗しました: {{error}}",
+    "switchUndone": "元に戻しました"
   },
   "confirm": {
     "deleteProvider": "プロバイダーを削除",
@@ -499,6 +505,7 @@
       "deleteConfirmMessage": "このバックアップは完全に削除されます。この操作は取り消せません。",
       "openFolderFailed": "バックアップフォルダーを開けませんでした",
       "showInFolder": "フォルダーで表示",
+      "keepUsageHistory": "バックアップ以降にこのデバイスで記録された利用履歴を保持する",
       "kind": {
         "manual": "手動",
         "manualHint": "「今すぐバックアップ」で作成。自動ローテーションで削除されません",
@@ -922,6 +929,7 @@
     "revertImportFailed": "インポートを元に戻せませんでした: {{message}}",
     "unsavedChanges": "未保存の変更があります",
     "discardChanges": "破棄",
+    "preserveCodexOfficialAuthOnSwitchDefaultOnDescription": "デフォルトでオン。ローカルルーティングが無効な場合のサードパーティ切替を制御します。ルーティング接管中は常に Codex の公式ログインを保持します。",
     "cloudSync": {
       "conflict": {
         "localChanged": "前回の同期以降、ローカルデータが変更されています。今ダウンロードすると、これらのローカルの変更はクラウドのデータで置き換えられます。残す場合は、キャンセルして先にアップロードしてください。",
@@ -980,6 +988,12 @@
       "pendingIn": "{{count}} 件のキーがまだデータベースに保存されています。",
       "pendingOut": "一部のキーがまだキーチェーンにあります。",
       "retry": "再試行"
+    },
+    "search": {
+      "shortcut": "設定を検索",
+      "placeholder": "設定を検索…",
+      "label": "設定を検索",
+      "noResults": "一致する設定はありません"
     }
   },
   "apps": {
@@ -1096,7 +1110,25 @@
     "messagesLoadFailed": "このセッションの読み込みに失敗しました",
     "showMore": "さらに表示（残り {{count}} 件）",
     "undoDelete": "元に戻す",
-    "restoreFailed": "セッションを復元できませんでした"
+    "restoreFailed": "セッションを復元できませんでした",
+    "annotations": {
+      "pinned": "ピン留め済み",
+      "archivedBadge": "アーカイブ済み",
+      "unpin": "セッションのピン留めを解除",
+      "pin": "セッションをピン留め",
+      "unarchive": "セッションのアーカイブを解除",
+      "archive": "セッションをアーカイブ",
+      "showArchived": "アーカイブ済みを表示（{{count}}）",
+      "saveFailed": "セッションラベルを保存できませんでした"
+    },
+    "trash": {
+      "restored": "セッションを復元しました",
+      "open": "最近削除した項目",
+      "title": "最近削除したセッション",
+      "description": "削除したセッションは 30 日間保持されます。復元すると元の場所に戻ります。",
+      "empty": "最近削除したセッションはありません",
+      "restore": "復元"
+    }
   },
   "console": {
     "providerSwitchReceived": "プロバイダー切り替えイベントを受信:",
@@ -1893,12 +1925,16 @@
     "retry": "更新を再試行",
     "openReleases": "リリースページを開く",
     "openConfigDir": "設定フォルダを開く",
-    "quit": "終了"
+    "quit": "終了",
+    "checkFailed": "更新を確認できませんでした（オフラインの可能性があります）。アップグレードを再試行するか、バックアップを復元できます。"
   },
   "errors": {
     "usage_query_failed": "利用状況の取得に失敗しました",
     "configLoadFailedTitle": "設定の読み込みに失敗しました",
-    "configLoadFailedMessage": "設定ファイルを読み込めません:\n{{path}}\n\nエラー詳細:\n{{detail}}\n\nJSON が正しいか確認するか、同じディレクトリのバックアップファイル（config.json.bak など）から復元してください。\n\nアプリを終了して修正してください。"
+    "configLoadFailedMessage": "設定ファイルを読み込めません:\n{{path}}\n\nエラー詳細:\n{{detail}}\n\nJSON が正しいか確認するか、同じディレクトリのバックアップファイル（config.json.bak など）から復元してください。\n\nアプリを終了して修正してください。",
+    "detailsCopied": "詳細をコピーしました",
+    "copyDetails": "詳細をコピー",
+    "configLoadFailedRestoreGuide": "バックアップを手動で復元する方法：\n{{url}}"
   },
   "presetSelector": {
     "title": "設定タイプを選択",
@@ -2388,7 +2424,9 @@
     "delete": {
       "success": "環境変数を削除しました",
       "error": "環境変数の削除に失敗しました",
-      "undo": "元に戻す"
+      "undo": "元に戻す",
+      "skippedTitle": "{{count}} 個の変数を CC Switch で削除できませんでした",
+      "skippedDescription": "{{names}} はプロセス環境（launchd、systemd、~/.zshenv、または親シェル）から来ています。設定されている場所で削除してから、CC Switch を再起動してください。"
     },
     "backup": {
       "location": "バックアップ場所: {{path}}"
@@ -2405,6 +2443,11 @@
     "restore": {
       "success": "環境変数を復元しました",
       "error": "環境変数の復元に失敗しました"
+    },
+    "profile": {
+      "copy": "シェルプロファイルとしてコピー",
+      "copied": "環境変数をコピーしました（API キーを含みます）",
+      "copyFailed": "環境変数をエクスポートできませんでした"
     }
   },
   "skills": {
@@ -2533,6 +2576,9 @@
     "uninstallInMainPanel": "メインパネルからスキルをアンインストールしてください",
     "notFound": "スキルが見つかりません",
     "openReadme": "README を開く",
+    "uninstallWarnings": "一部のファイルを削除できませんでした。手動で削除してください",
+    "unmanagedConflictHint": "{{name}} という名前の管理対象スキルがありますが、このアプリでは有効になっておらず、このフォルダーは CC Switch のコピーではありません。インポートする前に、どちらのバージョンを使うか確認してください。",
+    "unmanagedConflict": "名前の競合",
     "backup": {
       "location": "バックアップ場所: {{path}}"
     },
@@ -2711,9 +2757,24 @@
   },
   "agents": {
     "title": "エージェント",
+    "created": "エージェント {{name}} を作成しました",
+    "description": "~/.claude/agents にある Claude Code のサブエージェントです。Claude Code の次回起動時に読み込まれます。",
+    "new": "新しいエージェント",
+    "empty": "サブエージェントはまだありません。作成して始めましょう。",
+    "invalidHint": "frontmatter には name と description が必要です。ないと Claude Code はこのファイルを無視します。",
+    "invalid": "frontmatter が無効です",
+    "create": "エージェントを作成",
     "comingSoon": {
       "title": "近日公開",
       "description": "エージェント管理機能は現在開発中です。強力な自律機能にご期待ください。"
+    },
+    "field": {
+      "name": "名前",
+      "nameInvalid": "小文字の英字、数字、ハイフンを使用してください。",
+      "description": "このエージェントを使用するタイミング",
+      "model": "モデル",
+      "tools": "ツール",
+      "prompt": "システムプロンプト"
     }
   },
   "health": {
@@ -2935,7 +2996,15 @@
       "stopFailed": "ルーティングサービスの停止に失敗しました: {{detail}}"
     },
     "stoppedWithRestore": "ルーティングサービスが停止し、すべてのルーティング設定が復元されました",
-    "stopWithRestoreFailed": "停止に失敗しました: {{detail}}"
+    "stopWithRestoreFailed": "停止に失敗しました: {{detail}}",
+    "inspector": {
+      "title": "最近のリクエスト",
+      "errorsOnly": "エラーのみ",
+      "lastError": "最新のエラー：{{error}}",
+      "lastRequestAt": "最新のリクエスト：{{time}}",
+      "empty": "今日のリクエストはありません",
+      "openDetail": "{{time}} のリクエスト {{status}} {{model}}"
+    }
   },
   "streamCheck": {
     "reachable": "{{providerName}} は接続可能 ({{responseTimeMs}}ms)",
@@ -3345,7 +3414,10 @@
     "deleteNow": "リクエストログを今すぐ削除",
     "dbSize": "データベースサイズ: {{size}}",
     "confirmTitle": "リクエストログを削除しますか？",
-    "confirmMessage": "すべてのリクエストログは、トークンとコストを日次集計に加算した後に削除されます。使用量グラフの集計は残りますが、リクエストの詳細は失われます。"
+    "confirmMessage": "すべてのリクエストログは、トークンとコストを日次集計に加算した後に削除されます。使用量グラフの集計は残りますが、リクエストの詳細は失われます。",
+    "streamCheckTitle": "接続チェックログの保持期間",
+    "streamCheckDescription": "プロバイダーの接続チェック結果は、指定した日数が経過すると削除されます。",
+    "keepForever": "無期限に保持"
   },
   "policy": {
     "signatureInvalid": "署名を検証できなかったため、管理ポリシーファイルを無視しました。",
@@ -3363,5 +3435,126 @@
     "export": "エクスポート",
     "markdown": "Markdown (.md)",
     "json": "JSON (.json)"
+  },
+  "helpLink": {
+    "open": "マニュアルを開く"
+  },
+  "shortcuts": {
+    "show": "キーボードショートカットを表示",
+    "title": "キーボードショートカット",
+    "description": "現在のページで使用できるショートカットです。"
+  },
+  "startupWarnings": {
+    "settingsCorrupt": {
+      "title": "設定ファイルを読み込めませんでした",
+      "description": "settings.json が無効だったため、{{path}} に退避しました。現在はデフォルト設定を使用しています。設定で確認してください。"
+    },
+    "configDirUnavailable": {
+      "title": "データディレクトリを使用できません",
+      "description": "設定されたデータディレクトリ {{path}} が存在しません。CC Switch はデフォルトのディレクトリを使用しています。設定 > 詳細 > 設定ディレクトリ を確認してください。"
+    },
+    "proxyRestoreFailed": {
+      "title": "プロキシ引き継ぎを復元できませんでした",
+      "description": "{{app}} のプロキシ引き継ぎの復元に失敗しました：{{error}}。設定 > ルーティング を開いて再度有効にしてください。"
+    },
+    "generic": {
+      "title": "起動時の警告"
+    }
+  },
+  "workbench": {
+    "promptCopy": {
+      "title": "他のアプリで使用",
+      "done": "プロンプトを {{count}} 個のアプリにコピーしました",
+      "description": "「{{name}}」を他のアプリのプロンプト一覧にコピーします。CC Switch 以外で編集された既存のプロンプトファイルは、バックアッププロンプトとして保持されます。",
+      "activate": "コピー先で有効なプロンプトにする",
+      "copy": "コピー"
+    },
+    "audit": {
+      "exported": "監査ログを {{path}} に保存しました",
+      "filter": "操作、ソース、ID で絞り込む",
+      "export": "JSONL をエクスポート",
+      "empty": "記録されたイベントはまだありません。",
+      "time": "時刻",
+      "actor": "ソース",
+      "action": "操作",
+      "entity": "対象"
+    },
+    "history": {
+      "restoredMissingKeys": "バージョンを復元しました。API キーを再入力してください（履歴には保存されません）。",
+      "restored": "バージョンを復元しました",
+      "description": "各プロバイダーの直近 50 バージョンです。切り替え時に使用中の設定から書き戻された変更も含みます。API キーが履歴に保存されることはありません。",
+      "empty": "記録された変更はまだありません。",
+      "entities": "履歴のあるプロバイダー",
+      "versions": "{{count}} バージョン",
+      "deleted": "削除済み",
+      "pick": "プロバイダーを選択するとバージョンが表示されます。",
+      "restore": "このバージョンを復元",
+      "moreChanges": "他 {{count}} 件",
+      "restoreConfirm": "このプロバイダーを {{when}} のバージョンで置き換えますか？使用中のプロバイダーの場合、ライブ設定が書き換えられます。現在の API キーは保持されます。",
+      "title": "変更履歴と監査ログ",
+      "subtitle": "何がどこから変更されたかを確認し、ロールバック"
+    },
+    "tools": {
+      "activated": "プロファイルをツールの設定ファイルに書き込みました",
+      "importedName": "現在の設定",
+      "description": "専用タブのない CLI ツールのエンドポイント、キー、モデルを切り替えます。一覧にあるキーのみ変更し、他の設定やコメントは保持され、元のファイルはバックアップされます。{{dir}} に JSON 記述ファイルを置くとツールを追加できます。",
+      "detected": "検出済み",
+      "notDetected": "未検出",
+      "importLive": "現在の設定をインポート",
+      "addProfile": "プロファイルを追加",
+      "noProfiles": "プロファイルはまだありません。",
+      "active": "使用中",
+      "apply": "適用",
+      "editProfile": "プロファイルを編集",
+      "deleteProfile": "プロファイルを削除",
+      "profileName": "プロファイル名",
+      "secretKept": "保存済み — 空欄のままで保持",
+      "deleteConfirm": "プロファイル「{{name}}」を削除しますか？ツールの設定ファイルは変更されません。",
+      "title": "その他の CLI ツール",
+      "subtitle": "Qwen Code、Aider などのエンドポイント、キー、モデルのプロファイル"
+    },
+    "projectUsage": {
+      "title": "プロジェクト別の利用状況",
+      "description": "リクエストをセッションに照合し、セッションの Git リポジトリごとにまとめます。",
+      "range": "期間",
+      "lastDays": "過去 {{count}} 日間",
+      "empty": "この期間に記録されたリクエストはありません。",
+      "project": "プロジェクト",
+      "sessions": "セッション",
+      "requests": "リクエスト",
+      "tokens": "トークン",
+      "cost": "コスト",
+      "unattributed": "未分類",
+      "total": "合計"
+    },
+    "recovery": {
+      "title": "または、このバージョンで開けるバックアップを復元",
+      "description": "現在のデータベースはバックアップフォルダーに保持されるため、後からアップグレードすることもできます。バックアップ以降の変更は含まれません。",
+      "restore": "復元して再起動"
+    },
+    "sessionCost": {
+      "title": "記録されたリクエスト {{requests}} 件 · 入力 {{input}} / 出力 {{output}} トークン"
+    },
+    "bundle": {
+      "exported": "プロバイダー {{providers}} 件、MCP サーバー {{mcp}} 件、プロンプト {{prompts}} 件を保存しました（シークレット {{secrets}} 件を削除）",
+      "applied": "インポート完了：追加 {{added}} 件、更新 {{updated}} 件、スキップ {{skipped}} 件",
+      "statusNew": "新規",
+      "statusIdentical": "変更なし",
+      "statusConflict": "既存 — 差分あり",
+      "exportTitle": "共有バンドルをエクスポート",
+      "mcp": "MCP サーバー",
+      "prompts": "プロンプト",
+      "stripSecrets": "API キーとトークンを削除",
+      "secretsWarning": "このファイルには API キーが含まれます。信頼できる経路でのみ共有してください。",
+      "export": "エクスポート…",
+      "importTitle": "共有バンドルをインポート",
+      "importDescription": "項目は既存のデータにマージされ、何も有効化されません。既存の項目は許可した場合にのみ置き換えられ、そのキーは保持されます。",
+      "chooseFile": "ファイルを選択…",
+      "enterKey": "キーを入力（任意）",
+      "overwrite": "差分のある既存項目を置き換える",
+      "import": "{{count}} 件をインポート",
+      "title": "共有バンドル",
+      "subtitle": "キーを含めずにプロバイダー、MCP サーバー、プロンプトを共有"
+    }
   }
 }

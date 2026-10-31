@@ -191,7 +191,12 @@
     "shareLinkCopyFailed": "Failed to copy the share link: {{error}}",
     "searchShortcut": "Search providers",
     "searchCloseShortcut": "Close provider search",
-    "duplicateName": "{{name}} copy"
+    "duplicateName": "{{name}} copy",
+    "filter": {
+      "label": "Filter providers",
+      "all": "All",
+      "inQueue": "In failover queue"
+    }
   },
   "claudeCode": {
     "needsRouting": "Needs Routing",
@@ -292,7 +297,8 @@
     "proxyReasonClaudeDesktop": "uses Claude Desktop local routing mode",
     "openclawModelsRegisterFailed": "Provider added, but its models could not be registered in OpenClaw: {{error}}",
     "undoDeleteFailed": "Could not restore the provider: {{error}}",
-    "removeFromConfigFailed": "Failed to remove from config: {{error}}"
+    "removeFromConfigFailed": "Failed to remove from config: {{error}}",
+    "switchUndone": "Switched back"
   },
   "confirm": {
     "deleteProvider": "Delete Provider",
@@ -506,7 +512,8 @@
         "safetyHint": "Taken automatically before an import, restore or sync download replaced the database"
       },
       "openFolderFailed": "Could not open the backup folder",
-      "showInFolder": "Show in folder"
+      "showInFolder": "Show in folder",
+      "keepUsageHistory": "Keep usage history recorded on this device since the backup"
     },
     "webdavSync": {
       "title": "WebDAV Cloud Sync",
@@ -980,7 +987,14 @@
     "revertImportSuccess": "Import reverted",
     "revertImportFailed": "Failed to revert the import: {{message}}",
     "unsavedChanges": "Unsaved changes",
-    "discardChanges": "Discard"
+    "discardChanges": "Discard",
+    "preserveCodexOfficialAuthOnSwitchDefaultOnDescription": "On by default. Controls third-party switches when local routing is off. Takeover routing always preserves the Codex official login.",
+    "search": {
+      "shortcut": "Search settings",
+      "placeholder": "Search settings…",
+      "label": "Search settings",
+      "noResults": "No matching settings"
+    }
   },
   "apps": {
     "claude": "Claude",
@@ -1096,7 +1110,25 @@
     "messagesLoadFailed": "Failed to load this session",
     "showMore": "Show more ({{count}} remaining)",
     "undoDelete": "Undo",
-    "restoreFailed": "Could not restore the session"
+    "restoreFailed": "Could not restore the session",
+    "annotations": {
+      "pinned": "Pinned",
+      "archivedBadge": "Archived",
+      "unpin": "Unpin session",
+      "pin": "Pin session",
+      "unarchive": "Unarchive session",
+      "archive": "Archive session",
+      "showArchived": "Show archived ({{count}})",
+      "saveFailed": "Could not save the session label"
+    },
+    "trash": {
+      "restored": "Session restored",
+      "open": "Recently deleted",
+      "title": "Recently deleted sessions",
+      "description": "Deleted sessions are kept for 30 days. Restore one to move it back to where it was.",
+      "empty": "No recently deleted sessions",
+      "restore": "Restore"
+    }
   },
   "console": {
     "providerSwitchReceived": "Received provider switch event:",
@@ -1893,12 +1925,16 @@
     "retry": "Retry upgrade",
     "openReleases": "Open releases page",
     "openConfigDir": "Open config folder",
-    "quit": "Quit"
+    "quit": "Quit",
+    "checkFailed": "Could not check for updates (offline?). You can retry the upgrade or restore a backup."
   },
   "errors": {
     "usage_query_failed": "Usage query failed",
     "configLoadFailedTitle": "Configuration Load Failed",
-    "configLoadFailedMessage": "Unable to read configuration file:\n{{path}}\n\nError details:\n{{detail}}\n\nPlease check if the JSON is valid, or restore from a backup file (e.g., config.json.bak) in the same directory.\n\nThe app will exit so you can fix this."
+    "configLoadFailedMessage": "Unable to read configuration file:\n{{path}}\n\nError details:\n{{detail}}\n\nPlease check if the JSON is valid, or restore from a backup file (e.g., config.json.bak) in the same directory.\n\nThe app will exit so you can fix this.",
+    "detailsCopied": "Details copied",
+    "copyDetails": "Copy details",
+    "configLoadFailedRestoreGuide": "How to restore a backup by hand:\n{{url}}"
   },
   "presetSelector": {
     "title": "Select Configuration Type",
@@ -2388,7 +2424,9 @@
     "delete": {
       "success": "Environment variables deleted successfully",
       "error": "Failed to delete environment variables",
-      "undo": "Undo"
+      "undo": "Undo",
+      "skippedTitle": "{{count}} variable(s) could not be removed by CC Switch",
+      "skippedDescription": "{{names}} come from the process environment (launchd, systemd, ~/.zshenv or the parent shell). Remove them where they are set, then restart CC Switch."
     },
     "backup": {
       "location": "Backup location: {{path}}"
@@ -2405,6 +2443,11 @@
     "restore": {
       "success": "Environment variables restored",
       "error": "Failed to restore environment variables"
+    },
+    "profile": {
+      "copy": "Copy as shell profile",
+      "copied": "Environment variables copied (includes the API key)",
+      "copyFailed": "Could not export environment variables"
     }
   },
   "skills": {
@@ -2567,7 +2610,10 @@
       "successMultiple": "Successfully installed {{count}} skills",
       "noSkillsFound": "No skills found in ZIP file (requires SKILL.md file)"
     },
-    "openReadme": "Open README"
+    "openReadme": "Open README",
+    "uninstallWarnings": "Some files could not be removed; delete them manually",
+    "unmanagedConflictHint": "A managed skill named {{name}} exists but is not enabled for this app, and this folder is not a CC Switch copy. Check which version you want before importing.",
+    "unmanagedConflict": "Name conflict"
   },
   "deeplink": {
     "confirmImport": "Confirm Import Provider",
@@ -2714,7 +2760,22 @@
     "comingSoon": {
       "title": "Coming Soon",
       "description": "The Agents management feature is currently under development. Stay tuned for powerful autonomous capabilities."
-    }
+    },
+    "created": "Agent {{name}} created",
+    "description": "Claude Code subagents from ~/.claude/agents. Claude Code picks them up on its next start.",
+    "new": "New agent",
+    "empty": "No subagents yet. Create one to get started.",
+    "invalidHint": "The frontmatter needs a name and a description, or Claude Code ignores this file.",
+    "invalid": "Invalid frontmatter",
+    "field": {
+      "name": "Name",
+      "nameInvalid": "Use lowercase letters, digits and hyphens.",
+      "description": "When to use this agent",
+      "model": "Model",
+      "tools": "Tools",
+      "prompt": "System prompt"
+    },
+    "create": "Create agent"
   },
   "health": {
     "operational": "Operational",
@@ -2935,7 +2996,15 @@
       "stopFailed": "Failed to stop routing service: {{detail}}"
     },
     "stoppedWithRestore": "Routing service stopped, all routing configs restored",
-    "stopWithRestoreFailed": "Stop failed: {{detail}}"
+    "stopWithRestoreFailed": "Stop failed: {{detail}}",
+    "inspector": {
+      "title": "Recent requests",
+      "errorsOnly": "Errors only",
+      "lastError": "Last error: {{error}}",
+      "lastRequestAt": "Last request: {{time}}",
+      "empty": "No requests today",
+      "openDetail": "Request {{status}} {{model}} at {{time}}"
+    }
   },
   "streamCheck": {
     "reachable": "{{providerName}} is reachable ({{responseTimeMs}}ms)",
@@ -3345,7 +3414,10 @@
     "deleteNow": "Delete request logs now",
     "dbSize": "Database size: {{size}}",
     "confirmTitle": "Delete request logs?",
-    "confirmMessage": "All per-request log rows are deleted after their tokens and costs are added to the daily totals. Usage charts keep their totals but request details are gone."
+    "confirmMessage": "All per-request log rows are deleted after their tokens and costs are added to the daily totals. Usage charts keep their totals but request details are gone.",
+    "streamCheckTitle": "Connectivity check log retention",
+    "streamCheckDescription": "Results of provider connectivity checks are deleted after this many days.",
+    "keepForever": "Keep forever"
   },
   "policy": {
     "signatureInvalid": "A managed policy file was ignored because its signature could not be verified.",
@@ -3363,5 +3435,126 @@
     "export": "Export",
     "markdown": "Markdown (.md)",
     "json": "JSON (.json)"
+  },
+  "helpLink": {
+    "open": "Open the manual"
+  },
+  "shortcuts": {
+    "show": "Show keyboard shortcuts",
+    "title": "Keyboard shortcuts",
+    "description": "Shortcuts available on the current page."
+  },
+  "startupWarnings": {
+    "settingsCorrupt": {
+      "title": "Settings file could not be read",
+      "description": "settings.json was invalid and has been moved aside to {{path}}. Default settings are in use; review them in Settings."
+    },
+    "configDirUnavailable": {
+      "title": "Data directory unavailable",
+      "description": "The configured data directory {{path}} does not exist. CC Switch is using the default directory; check Settings > Advanced > Configuration Directory."
+    },
+    "proxyRestoreFailed": {
+      "title": "Proxy takeover could not be restored",
+      "description": "Restoring the proxy takeover for {{app}} failed: {{error}}. Open Settings > Routing to re-enable it."
+    },
+    "generic": {
+      "title": "Startup warning"
+    }
+  },
+  "workbench": {
+    "promptCopy": {
+      "title": "Use in other apps",
+      "done": "Prompt copied to {{count}} apps",
+      "description": "Copy \"{{name}}\" to the prompt lists of other apps. An existing prompt file that was edited outside CC Switch is kept as a backup prompt.",
+      "activate": "Make it the active prompt there",
+      "copy": "Copy"
+    },
+    "audit": {
+      "exported": "Audit log saved to {{path}}",
+      "filter": "Filter by action, actor or id",
+      "export": "Export JSONL",
+      "empty": "No events recorded yet.",
+      "time": "Time",
+      "actor": "Source",
+      "action": "Action",
+      "entity": "Entity"
+    },
+    "history": {
+      "restoredMissingKeys": "Version restored. Re-enter the API key: it is not kept in the history.",
+      "restored": "Version restored",
+      "description": "The last 50 versions of each provider, including changes written back from the live config when you switch. API keys are never stored in the history.",
+      "empty": "No changes recorded yet.",
+      "entities": "Providers with history",
+      "versions": "{{count}} versions",
+      "deleted": "deleted",
+      "pick": "Pick a provider to see its versions.",
+      "restore": "Restore this version",
+      "moreChanges": "+{{count}} more",
+      "restoreConfirm": "Replace the provider with the version from {{when}}? If it is the active provider, its live config is rewritten. The current API key is kept.",
+      "title": "Change history & audit log",
+      "subtitle": "See what changed, where it came from, and roll back"
+    },
+    "tools": {
+      "activated": "Profile written to the tool's config files",
+      "importedName": "Current config",
+      "description": "Switch endpoint, key and model for CLI tools that do not have their own tab. Only the listed keys are changed; other settings and comments are kept, and the previous file is backed up. Add more tools by placing a JSON descriptor in {{dir}}.",
+      "detected": "Detected",
+      "notDetected": "Not detected",
+      "importLive": "Import current",
+      "addProfile": "Add profile",
+      "noProfiles": "No profiles yet.",
+      "active": "Active",
+      "apply": "Apply",
+      "editProfile": "Edit profile",
+      "deleteProfile": "Delete profile",
+      "profileName": "Profile name",
+      "secretKept": "Saved — leave empty to keep",
+      "deleteConfirm": "Delete profile \"{{name}}\"? The tool's config files are not changed.",
+      "title": "Other CLI tools",
+      "subtitle": "Endpoint, key and model profiles for Qwen Code, Aider and more"
+    },
+    "projectUsage": {
+      "title": "Usage by project",
+      "description": "Requests are matched to sessions and grouped by the session's git repository.",
+      "range": "Time range",
+      "lastDays": "Last {{count}} days",
+      "empty": "No requests logged in this period.",
+      "project": "Project",
+      "sessions": "Sessions",
+      "requests": "Requests",
+      "tokens": "Tokens",
+      "cost": "Cost",
+      "unattributed": "Unattributed",
+      "total": "Total"
+    },
+    "recovery": {
+      "title": "Or restore a backup this version can open",
+      "description": "The current database is kept in the backups folder, so you can still upgrade later. Changes made after the backup are not in it.",
+      "restore": "Restore and restart"
+    },
+    "sessionCost": {
+      "title": "{{requests}} logged requests · {{input}} input / {{output}} output tokens"
+    },
+    "bundle": {
+      "exported": "Saved {{providers}} providers, {{mcp}} MCP servers and {{prompts}} prompts ({{secrets}} secrets removed)",
+      "applied": "Imported: {{added}} added, {{updated}} updated, {{skipped}} skipped",
+      "statusNew": "New",
+      "statusIdentical": "Unchanged",
+      "statusConflict": "Exists — differs",
+      "exportTitle": "Export a share bundle",
+      "mcp": "MCP servers",
+      "prompts": "Prompts",
+      "stripSecrets": "Remove API keys and tokens",
+      "secretsWarning": "The file will contain your API keys. Only share it over a trusted channel.",
+      "export": "Export…",
+      "importTitle": "Import a share bundle",
+      "importDescription": "Items are merged into your data; nothing is activated. Existing items are only replaced when you allow it, and their keys are kept.",
+      "chooseFile": "Choose file…",
+      "enterKey": "Enter key (optional)",
+      "overwrite": "Replace existing items that differ",
+      "import": "Import {{count}} items",
+      "title": "Share bundle",
+      "subtitle": "Share providers, MCP servers and prompts without your keys"
+    }
   }
 }

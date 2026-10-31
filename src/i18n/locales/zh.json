@@ -191,7 +191,12 @@
     "shareLinkCopyFailed": "复制分享链接失败：{{error}}",
     "searchShortcut": "搜索供应商",
     "searchCloseShortcut": "关闭供应商搜索",
-    "duplicateName": "{{name}} 副本"
+    "duplicateName": "{{name}} 副本",
+    "filter": {
+      "label": "筛选供应商",
+      "all": "全部",
+      "inQueue": "在故障转移队列中"
+    }
   },
   "claudeCode": {
     "needsRouting": "需要路由",
@@ -292,7 +297,8 @@
     "proxyReasonClaudeDesktop": "使用 Claude Desktop 本地路由模式",
     "openclawModelsRegisterFailed": "供应商已添加，但其模型无法注册到 OpenClaw：{{error}}",
     "undoDeleteFailed": "无法恢复供应商：{{error}}",
-    "removeFromConfigFailed": "从配置中移除失败：{{error}}"
+    "removeFromConfigFailed": "从配置中移除失败：{{error}}",
+    "switchUndone": "已切换回去"
   },
   "confirm": {
     "deleteProvider": "删除供应商",
@@ -499,6 +505,7 @@
       "deleteConfirmMessage": "此备份将被永久删除，此操作无法撤消。",
       "openFolderFailed": "无法打开备份文件夹",
       "showInFolder": "在文件夹中显示",
+      "keepUsageHistory": "保留本设备自该备份以来记录的使用历史",
       "kind": {
         "manual": "手动",
         "manualHint": "通过“立即备份”创建，不会被自动轮换清理",
@@ -922,6 +929,7 @@
     "revertImportFailed": "撤销导入失败：{{message}}",
     "unsavedChanges": "有未保存的更改",
     "discardChanges": "放弃",
+    "preserveCodexOfficialAuthOnSwitchDefaultOnDescription": "默认开启。控制未开启本地路由时切换第三方供应商的行为；路由接管期间始终保留 Codex 官方登录。",
     "cloudSync": {
       "conflict": {
         "localChanged": "自上次同步以来，本地数据已发生变化。现在下载将用云端数据替换这些本地更改。如需保留，请取消并先上传。",
@@ -980,6 +988,12 @@
       "pendingIn": "仍有 {{count}} 个密钥存储在数据库中。",
       "pendingOut": "部分密钥仍在钥匙串中。",
       "retry": "重试"
+    },
+    "search": {
+      "shortcut": "搜索设置",
+      "placeholder": "搜索设置…",
+      "label": "搜索设置",
+      "noResults": "没有匹配的设置"
     }
   },
   "apps": {
@@ -1096,7 +1110,25 @@
     "messagesLoadFailed": "加载此会话失败",
     "showMore": "显示更多（剩余 {{count}} 条）",
     "undoDelete": "撤销",
-    "restoreFailed": "无法恢复会话"
+    "restoreFailed": "无法恢复会话",
+    "annotations": {
+      "pinned": "已置顶",
+      "archivedBadge": "已归档",
+      "unpin": "取消置顶会话",
+      "pin": "置顶会话",
+      "unarchive": "取消归档会话",
+      "archive": "归档会话",
+      "showArchived": "显示已归档（{{count}}）",
+      "saveFailed": "无法保存会话标签"
+    },
+    "trash": {
+      "restored": "会话已恢复",
+      "open": "最近删除",
+      "title": "最近删除的会话",
+      "description": "已删除的会话会保留 30 天。恢复后会回到原来的位置。",
+      "empty": "没有最近删除的会话",
+      "restore": "恢复"
+    }
   },
   "console": {
     "providerSwitchReceived": "收到供应商切换事件:",
@@ -1893,12 +1925,16 @@
     "retry": "重试升级",
     "openReleases": "打开发布页",
     "openConfigDir": "打开配置目录",
-    "quit": "退出"
+    "quit": "退出",
+    "checkFailed": "无法检查更新（可能处于离线状态）。你可以重试升级，或恢复一个备份。"
   },
   "errors": {
     "usage_query_failed": "用量查询失败",
     "configLoadFailedTitle": "配置加载失败",
-    "configLoadFailedMessage": "无法读取配置文件：\n{{path}}\n\n错误详情：\n{{detail}}\n\n请手动检查 JSON 是否有效，或从同目录的备份文件（如 config.json.bak）恢复。\n\n应用将退出以便您进行修复。"
+    "configLoadFailedMessage": "无法读取配置文件：\n{{path}}\n\n错误详情：\n{{detail}}\n\n请手动检查 JSON 是否有效，或从同目录的备份文件（如 config.json.bak）恢复。\n\n应用将退出以便您进行修复。",
+    "detailsCopied": "已复制详情",
+    "copyDetails": "复制详情",
+    "configLoadFailedRestoreGuide": "如何手动恢复备份：\n{{url}}"
   },
   "presetSelector": {
     "title": "选择配置类型",
@@ -2388,7 +2424,9 @@
     "delete": {
       "success": "环境变量已成功删除",
       "error": "删除环境变量失败",
-      "undo": "撤销"
+      "undo": "撤销",
+      "skippedTitle": "有 {{count}} 个变量无法由 CC Switch 移除",
+      "skippedDescription": "{{names}} 来自进程环境（launchd、systemd、~/.zshenv 或父 shell）。请在设置它们的位置移除，然后重启 CC Switch。"
     },
     "backup": {
       "location": "备份位置: {{path}}"
@@ -2405,6 +2443,11 @@
     "restore": {
       "success": "环境变量已恢复",
       "error": "恢复环境变量失败"
+    },
+    "profile": {
+      "copy": "复制为 shell 配置",
+      "copied": "已复制环境变量（包含 API 密钥）",
+      "copyFailed": "无法导出环境变量"
     }
   },
   "skills": {
@@ -2533,6 +2576,9 @@
     "uninstallInMainPanel": "请在主面板中卸载技能",
     "notFound": "未找到技能",
     "openReadme": "打开 README",
+    "uninstallWarnings": "部分文件无法删除，请手动删除",
+    "unmanagedConflictHint": "已存在名为 {{name}} 的受管技能，但未对此应用启用，且此文件夹不是 CC Switch 的副本。导入前请确认你需要哪个版本。",
+    "unmanagedConflict": "名称冲突",
     "backup": {
       "location": "备份位置: {{path}}"
     },
@@ -2711,9 +2757,24 @@
   },
   "agents": {
     "title": "智能体",
+    "created": "已创建智能体 {{name}}",
+    "description": "来自 ~/.claude/agents 的 Claude Code 子智能体。Claude Code 下次启动时会加载它们。",
+    "new": "新建智能体",
+    "empty": "暂无子智能体，创建一个开始使用。",
+    "invalidHint": "frontmatter 需要包含 name 和 description，否则 Claude Code 会忽略此文件。",
+    "invalid": "frontmatter 无效",
+    "create": "创建智能体",
     "comingSoon": {
       "title": "即将推出",
       "description": "智能体管理功能正在开发中，敬请期待强大的自主能力。"
+    },
+    "field": {
+      "name": "名称",
+      "nameInvalid": "请使用小写字母、数字和连字符。",
+      "description": "何时使用此智能体",
+      "model": "模型",
+      "tools": "工具",
+      "prompt": "系统提示词"
     }
   },
   "health": {
@@ -2935,7 +2996,15 @@
       "stopFailed": "停止路由服务失败: {{detail}}"
     },
     "stoppedWithRestore": "路由服务已关闭，已恢复所有路由配置",
-    "stopWithRestoreFailed": "停止失败: {{detail}}"
+    "stopWithRestoreFailed": "停止失败: {{detail}}",
+    "inspector": {
+      "title": "最近请求",
+      "errorsOnly": "仅显示错误",
+      "lastError": "最近错误：{{error}}",
+      "lastRequestAt": "最近请求：{{time}}",
+      "empty": "今日暂无请求",
+      "openDetail": "{{time}} 的请求 {{status}} {{model}}"
+    }
   },
   "streamCheck": {
     "reachable": "{{providerName}} 连通正常 ({{responseTimeMs}}ms)",
@@ -3345,7 +3414,10 @@
     "deleteNow": "立即删除请求日志",
     "dbSize": "数据库大小：{{size}}",
     "confirmTitle": "删除请求日志？",
-    "confirmMessage": "所有请求日志的 Token 和成本计入每日汇总后，这些日志将被删除。用量图表会保留汇总数据，但请求详情将不再可用。"
+    "confirmMessage": "所有请求日志的 Token 和成本计入每日汇总后，这些日志将被删除。用量图表会保留汇总数据，但请求详情将不再可用。",
+    "streamCheckTitle": "连通性检查日志保留期限",
+    "streamCheckDescription": "供应商连通性检查的结果将在设定天数后删除。",
+    "keepForever": "永久保留"
   },
   "policy": {
     "signatureInvalid": "由于无法验证签名，已忽略一个托管策略文件。",
@@ -3363,5 +3435,126 @@
     "export": "导出",
     "markdown": "Markdown (.md)",
     "json": "JSON (.json)"
+  },
+  "helpLink": {
+    "open": "打开使用手册"
+  },
+  "shortcuts": {
+    "show": "显示键盘快捷键",
+    "title": "键盘快捷键",
+    "description": "当前页面可用的快捷键。"
+  },
+  "startupWarnings": {
+    "settingsCorrupt": {
+      "title": "无法读取设置文件",
+      "description": "settings.json 无效，已被移至 {{path}}。当前使用默认设置，请在设置中检查。"
+    },
+    "configDirUnavailable": {
+      "title": "数据目录不可用",
+      "description": "配置的数据目录 {{path}} 不存在。CC Switch 正在使用默认目录，请检查 设置 > 高级 > 配置文件目录。"
+    },
+    "proxyRestoreFailed": {
+      "title": "无法恢复代理接管",
+      "description": "恢复 {{app}} 的代理接管失败：{{error}}。请打开 设置 > 路由 重新启用。"
+    },
+    "generic": {
+      "title": "启动警告"
+    }
+  },
+  "workbench": {
+    "promptCopy": {
+      "title": "用于其他应用",
+      "done": "已将提示词复制到 {{count}} 个应用",
+      "description": "将“{{name}}”复制到其他应用的提示词列表。若现有提示词文件在 CC Switch 之外被修改过，会保留为一个备份提示词。",
+      "activate": "设为对应应用的当前提示词",
+      "copy": "复制"
+    },
+    "audit": {
+      "exported": "审计日志已保存到 {{path}}",
+      "filter": "按操作、来源或 ID 筛选",
+      "export": "导出 JSONL",
+      "empty": "暂无记录的事件。",
+      "time": "时间",
+      "actor": "来源",
+      "action": "操作",
+      "entity": "对象"
+    },
+    "history": {
+      "restoredMissingKeys": "已恢复版本。请重新输入 API 密钥：历史记录中不保存密钥。",
+      "restored": "已恢复版本",
+      "description": "每个供应商的最近 50 个版本，包括切换时从正在使用的配置回写的更改。API 密钥永远不会保存在历史记录中。",
+      "empty": "暂无记录的更改。",
+      "entities": "有历史记录的供应商",
+      "versions": "{{count}} 个版本",
+      "deleted": "已删除",
+      "pick": "选择一个供应商以查看其版本。",
+      "restore": "恢复此版本",
+      "moreChanges": "+{{count}} 项",
+      "restoreConfirm": "用 {{when}} 的版本替换此供应商？如果它是当前供应商，其正在使用的配置会被重写。当前的 API 密钥会保留。",
+      "title": "变更历史与审计日志",
+      "subtitle": "查看变更内容及来源，并可回滚"
+    },
+    "tools": {
+      "activated": "配置已写入该工具的配置文件",
+      "importedName": "当前配置",
+      "description": "为没有独立标签页的 CLI 工具切换端点、密钥和模型。仅修改列出的键，其他设置和注释保持不变，并会备份原文件。将 JSON 描述文件放入 {{dir}} 即可添加更多工具。",
+      "detected": "已检测到",
+      "notDetected": "未检测到",
+      "importLive": "导入当前配置",
+      "addProfile": "添加配置",
+      "noProfiles": "暂无配置。",
+      "active": "当前使用",
+      "apply": "应用",
+      "editProfile": "编辑配置",
+      "deleteProfile": "删除配置",
+      "profileName": "配置名称",
+      "secretKept": "已保存 — 留空则保持不变",
+      "deleteConfirm": "删除配置“{{name}}”？该工具的配置文件不会被修改。",
+      "title": "其他 CLI 工具",
+      "subtitle": "为 Qwen Code、Aider 等工具管理端点、密钥和模型配置"
+    },
+    "projectUsage": {
+      "title": "按项目统计用量",
+      "description": "请求会匹配到会话，并按会话所在的 Git 仓库分组。",
+      "range": "时间范围",
+      "lastDays": "最近 {{count}} 天",
+      "empty": "此期间没有记录的请求。",
+      "project": "项目",
+      "sessions": "会话",
+      "requests": "请求",
+      "tokens": "Token",
+      "cost": "费用",
+      "unattributed": "未归属",
+      "total": "合计"
+    },
+    "recovery": {
+      "title": "或恢复一个此版本可以打开的备份",
+      "description": "当前数据库会保留在备份文件夹中，你之后仍可升级。备份之后所做的更改不包含在备份中。",
+      "restore": "恢复并重启"
+    },
+    "sessionCost": {
+      "title": "已记录 {{requests}} 次请求 · 输入 {{input}} / 输出 {{output}} Token"
+    },
+    "bundle": {
+      "exported": "已保存 {{providers}} 个供应商、{{mcp}} 个 MCP 服务器和 {{prompts}} 个提示词（已移除 {{secrets}} 个密钥）",
+      "applied": "已导入：新增 {{added}} 项，更新 {{updated}} 项，跳过 {{skipped}} 项",
+      "statusNew": "新增",
+      "statusIdentical": "无变化",
+      "statusConflict": "已存在 — 有差异",
+      "exportTitle": "导出分享包",
+      "mcp": "MCP 服务器",
+      "prompts": "提示词",
+      "stripSecrets": "移除 API 密钥和令牌",
+      "secretsWarning": "该文件将包含你的 API 密钥，请仅通过可信渠道分享。",
+      "export": "导出…",
+      "importTitle": "导入分享包",
+      "importDescription": "条目会合并到你的数据中，不会激活任何内容。只有在你允许时才会替换现有条目，并保留其密钥。",
+      "chooseFile": "选择文件…",
+      "enterKey": "输入密钥（可选）",
+      "overwrite": "替换存在差异的现有条目",
+      "import": "导入 {{count}} 项",
+      "title": "分享包",
+      "subtitle": "分享供应商、MCP 服务器和提示词，不含你的密钥"
+    }
   }
 }

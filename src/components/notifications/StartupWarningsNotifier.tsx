@@ -54,7 +54,7 @@ function describeStartupWarning(
         }),
         description: t("startupWarnings.configDirUnavailable.description", {
           defaultValue:
-            "The configured data directory {{path}} does not exist. CC Switch is using the default directory; check Settings > Advanced > Directories.",
+            "The configured data directory {{path}} does not exist. CC Switch is using the default directory; check Settings > Advanced > Configuration Directory.",
           path: w.path ?? "",
         }),
       };
@@ -65,7 +65,7 @@ function describeStartupWarning(
         }),
         description: t("startupWarnings.proxyRestoreFailed.description", {
           defaultValue:
-            "Restoring the proxy takeover for {{app}} failed: {{error}}. Open Settings > Proxy to re-enable it.",
+            "Restoring the proxy takeover for {{app}} failed: {{error}}. Open Settings > Routing to re-enable it.",
           app: w.appType ?? "",
           error: w.message,
         }),
