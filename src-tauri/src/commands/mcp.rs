@@ -60,7 +60,6 @@ pub struct McpConfigResponse {
 use std::str::FromStr;
 
 #[tauri::command]
-#[allow(deprecated)] // 兼容层命令，内部调用已废弃的 Service 方法
 pub async fn get_mcp_config(
     state: State<'_, AppState>,
     app: String,
@@ -69,7 +68,11 @@ pub async fn get_mcp_config(
         .to_string_lossy()
         .to_string();
     let app_ty = AppType::from_str(&app)?;
-    let servers = McpService::get_servers(&state, app_ty)?;
+    let servers = McpService::get_all_servers(&state)?
+        .into_iter()
+        .filter(|(_, server)| server.apps.is_enabled_for(&app_ty))
+        .map(|(id, server)| (id, server.server))
+        .collect();
     Ok(McpConfigResponse {
         config_path,
         servers,
@@ -151,7 +154,6 @@ pub async fn delete_mcp_server_in_config(
 
 /// 设置启用状态并同步到客户端配置
 #[tauri::command]
-#[allow(deprecated)] // 兼容层命令，内部调用已废弃的 Service 方法
 pub async fn set_mcp_enabled(
     state: State<'_, AppState>,
     app: String,
@@ -159,7 +161,8 @@ pub async fn set_mcp_enabled(
     enabled: bool,
 ) -> Result<bool, AppError> {
     let app_ty = AppType::from_str(&app)?;
-    McpService::set_enabled(&state, app_ty, &id, enabled)
+    McpService::toggle_app(&state, &id, app_ty, enabled)?;
+    Ok(true)
 }
 
 // ============================================================================

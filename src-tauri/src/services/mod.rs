@@ -45,12 +45,6 @@ pub use omo::OmoService;
 pub use prompt::PromptService;
 pub use provider::{ProviderService, ProviderSortUpdate, SwitchResult};
 pub use proxy::ProxyService;
-#[allow(unused_imports)]
-pub use skill::{DiscoverableSkill, Skill, SkillRepo, SkillService};
+pub use skill::SkillService;
 pub use speedtest::{EndpointLatency, SpeedtestService};
 pub use usage_cache::UsageCache;
-#[allow(unused_imports)]
-pub use usage_stats::{
-    DailyStats, LogFilters, ModelStats, PaginatedLogs, ProviderLimitStatus, ProviderStats,
-    RequestLogDetail, UsageSummary, UsageSummaryByApp,
-};
