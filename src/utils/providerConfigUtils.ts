@@ -273,7 +273,81 @@ export const hasTomlCommonConfigSnippet = (
 
 // ========== Codex base_url utils ==========
 
-const TOML_SECTION_HEADER_PATTERN = /^\s*\[([^\]\r\n]+)\]\s*$/;
+const BARE_TOML_KEY = /^[A-Za-z0-9_-]+$/;
+
+/** A key segment in canonical form: bare when possible, else `"quoted"`. */
+const tomlKeySegment = (key: string): string =>
+  BARE_TOML_KEY.test(key) ? key : JSON.stringify(key);
+
+/**
+ * Split a dotted TOML key (`a. "b.c" .'d'`) into its segments, or
+ * `undefined` when it is malformed.
+ */
+const splitTomlDottedKey = (raw: string): string[] | undefined => {
+  const parts: string[] = [];
+  let i = 0;
+  const n = raw.length;
+  const skipWs = () => {
+    while (i < n && (raw[i] === " " || raw[i] === "\t")) i += 1;
+  };
+  while (true) {
+    skipWs();
+    if (i >= n) return undefined;
+    const ch = raw[i];
+    if (ch === '"') {
+      let value = "";
+      i += 1;
+      while (i < n && raw[i] !== '"') {
+        if (raw[i] === "\\" && i + 1 < n) {
+          const next = raw[i + 1];
+          value += next === "n" ? "\n" : next === "t" ? "\t" : next;
+          i += 2;
+          continue;
+        }
+        value += raw[i];
+        i += 1;
+      }
+      if (i >= n) return undefined;
+      i += 1;
+      parts.push(value);
+    } else if (ch === "'") {
+      const end = raw.indexOf("'", i + 1);
+      if (end === -1) return undefined;
+      parts.push(raw.slice(i + 1, end));
+      i = end + 1;
+    } else {
+      const start = i;
+      while (i < n && /[A-Za-z0-9_-]/.test(raw[i])) i += 1;
+      if (i === start) return undefined;
+      parts.push(raw.slice(start, i));
+    }
+    skipWs();
+    if (i >= n) return parts;
+    if (raw[i] !== ".") return undefined;
+    i += 1;
+  }
+};
+
+/**
+ * Canonical name of a TOML table header line, or `undefined` when the line
+ * is not a header (FE-ARCH-46). Recognises trailing comments, whitespace
+ * inside the brackets and quoted keys (`[model_providers."a.b"] # main`).
+ * Array tables (`[[profiles.x]]`) are returned as `[[profiles.x]]` so they
+ * end the previous section but never match a plain table name.
+ */
+const parseTomlSectionHeader = (line: string): string | undefined => {
+  const match = line.match(/^\s*(\[\[?)(.*?)(\]\]?)\s*(?:#.*)?$/);
+  if (!match) return undefined;
+  const [, open, inner, close] = match;
+  if (open.length !== close.length) return undefined;
+  const parts = splitTomlDottedKey(inner);
+  if (!parts) return undefined;
+  const name = parts.map(tomlKeySegment).join(".");
+  return open.length === 2 ? `[[${name}]]` : name;
+};
+
+const isTomlSectionHeader = (line: string): boolean =>
+  parseTomlSectionHeader(line) !== undefined;
 const TOML_BASE_URL_PATTERN =
   /^\s*base_url\s*=\s*(?:"((?:\\.|[^"\\\r\n])*)"|'([^'\r\n]*)')\s*(?:#.*)?$/;
 const TOML_EXPERIMENTAL_BEARER_TOKEN_PATTERN =
@@ -333,13 +407,13 @@ const getTomlSectionRange = (
   let headerLineIndex = -1;
 
   for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].match(TOML_SECTION_HEADER_PATTERN);
-    if (!match) {
+    const headerName = parseTomlSectionHeader(lines[index]);
+    if (headerName === undefined) {
       continue;
     }
 
     if (headerLineIndex === -1) {
-      if (match[1] === sectionName) {
+      if (headerName === sectionName) {
         headerLineIndex = index;
       }
       continue;
@@ -364,9 +438,7 @@ const getTomlSectionRange = (
 };
 
 const getTopLevelEndIndex = (lines: string[]): number => {
-  const firstSectionIndex = lines.findIndex((line) =>
-    TOML_SECTION_HEADER_PATTERN.test(line),
-  );
+  const firstSectionIndex = lines.findIndex(isTomlSectionHeader);
   return firstSectionIndex === -1 ? lines.length : firstSectionIndex;
 };
 
@@ -409,7 +481,9 @@ const getCodexProviderSectionName = (
   configText: string,
 ): string | undefined => {
   const providerName = getCodexModelProviderName(configText);
-  return providerName ? `model_providers.${providerName}` : undefined;
+  return providerName
+    ? `model_providers.${tomlKeySegment(providerName)}`
+    : undefined;
 };
 
 const isCustomCodexModelProviderId = (providerName: string): boolean => {
@@ -422,7 +496,7 @@ const getCodexCustomProviderSectionName = (
 ): string | undefined => {
   const providerName = getCodexModelProviderName(configText);
   return providerName && isCustomCodexModelProviderId(providerName)
-    ? `model_providers.${providerName}`
+    ? `model_providers.${tomlKeySegment(providerName)}`
     : undefined;
 };
 
@@ -491,9 +565,9 @@ const findTomlAssignments = (
   let currentSectionName: string | undefined;
 
   lines.forEach((line, index) => {
-    const sectionMatch = line.match(TOML_SECTION_HEADER_PATTERN);
-    if (sectionMatch) {
-      currentSectionName = sectionMatch[1];
+    const headerName = parseTomlSectionHeader(line);
+    if (headerName !== undefined) {
+      currentSectionName = headerName;
       return;
     }
 
@@ -536,6 +610,8 @@ const getRecoverableBaseUrlAssignments = (
     ({ sectionName }) =>
       sectionName !== targetSectionName &&
       !isMcpServerSection(sectionName) &&
+      // Array tables ([[profiles.x]]) own their keys; never move them.
+      !sectionName?.startsWith("[[") &&
       !isOtherProviderSection(sectionName, targetSectionName),
   );
 
