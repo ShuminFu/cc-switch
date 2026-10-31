@@ -13,6 +13,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { queryClient } from "@/lib/query";
 import { Toaster } from "@/components/ui/sonner";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
+import { manualRestoreUrl } from "@/components/common/manualLinks";
 import { invoke } from "@tauri-apps/api/core";
 import { message } from "@tauri-apps/plugin-dialog";
 import { exit } from "@tauri-apps/plugin-process";
@@ -47,13 +48,18 @@ async function handleConfigLoadError(
   const path = payload?.path ?? "~/.cc-switch/config.json";
   const detail = payload?.error ?? "Unknown error";
 
+  // Point at the manual's step-by-step restore section (DOCS-07).
+  const restoreGuide = i18n.t("errors.configLoadFailedRestoreGuide", {
+    url: manualRestoreUrl(i18n.language),
+    defaultValue: "How to restore a backup by hand:\n{{url}}",
+  });
   await message(
-    i18n.t("errors.configLoadFailedMessage", {
+    `${i18n.t("errors.configLoadFailedMessage", {
       path,
       detail,
       defaultValue:
         "Unable to read configuration file:\n{{path}}\n\nError details:\n{{detail}}\n\nPlease check if the JSON is valid, or restore from a backup file (e.g., config.json.bak) in the same directory.\n\nThe app will exit so you can fix this.",
-    }),
+    })}\n\n${restoreGuide}`,
     {
       title: i18n.t("errors.configLoadFailedTitle", {
         defaultValue: "Configuration Load Failed",
