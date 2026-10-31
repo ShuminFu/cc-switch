@@ -60,6 +60,7 @@ import { directoryValuesByApp } from "@/hooks/settingsDirectoryFields";
 import { useImportExport } from "@/hooks/useImportExport";
 import { useTranslation } from "react-i18next";
 import type { SettingsFormState } from "@/hooks/useSettings";
+import { RequestLogRetentionPanel } from "@/components/log-retention/RequestLogRetentionPanel";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -395,6 +396,9 @@ export function SettingsPage({
                           />
                           <div className="mt-4">
                             <SecretsVaultSettings />
+                          </div>
+                          <div className="mt-4">
+                            <RequestLogRetentionPanel />
                           </div>
                         </AccordionContent>
                       </AccordionItem>

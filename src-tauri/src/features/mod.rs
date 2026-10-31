@@ -5,5 +5,6 @@
 //! commands, so the core services only need a one-line hook to use it.
 
 pub mod deeplink_nav;
+pub mod log_retention;
 pub mod policy;
 pub mod session_export;

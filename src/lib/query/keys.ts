@@ -173,6 +173,11 @@ export const queryKeys = {
     status: ["managedPolicyStatus"] as const,
   },
 
+  /** Request-log retention window, PRODUCT-31. */
+  logRetention: {
+    status: ["requestLogRetention"] as const,
+  },
+
   proxy: {
     status: ["proxyStatus"] as const,
     takeoverStatus: ["proxyTakeoverStatus"] as const,

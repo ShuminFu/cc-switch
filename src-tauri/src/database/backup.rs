@@ -865,7 +865,8 @@ impl Database {
                 log::warn!("Periodic stream_check_logs cleanup failed: {e}");
             }
         }
-        match self.rollup_and_prune(30) {
+        // Retention window is user-configurable (PRODUCT-31, default 30 days).
+        match self.rollup_and_prune(crate::features::log_retention::effective_retention_days()) {
             Ok(deleted) => {
                 reclaimed_rows += deleted;
             }
