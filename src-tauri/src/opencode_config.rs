@@ -103,7 +103,7 @@ pub fn read_opencode_config() -> Result<Value, AppError> {
         }));
     };
 
-    json5::from_str(&live.text).map_err(|e| {
+    json_five::from_str(&live.text).map_err(|e| {
         AppError::Config(format!(
             "Failed to parse OpenCode config: {}: {e}",
             path.display()

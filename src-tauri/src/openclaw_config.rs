@@ -191,7 +191,7 @@ pub fn read_openclaw_config() -> Result<Value, AppError> {
     }
 
     let content = fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
-    json5::from_str(&content)
+    json_five::from_str(&content)
         .map_err(|e| AppError::Config(format!("Failed to parse OpenClaw config as JSON5: {e}")))
 }
 
@@ -205,7 +205,7 @@ pub fn scan_openclaw_config_health() -> Result<Vec<OpenClawHealthWarning>, AppEr
     }
 
     let content = fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
-    match json5::from_str::<Value>(&content) {
+    match json_five::from_str::<Value>(&content) {
         Ok(config) => Ok(scan_openclaw_health_from_value(&config)),
         Err(err) => Ok(vec![OpenClawHealthWarning {
             code: "config_parse_failed".to_string(),
@@ -280,7 +280,7 @@ impl OpenClawConfigDocument {
         let next_source = self.text.to_string();
         if current_source.as_deref() == Some(next_source.as_str()) {
             let warnings = scan_openclaw_health_from_value(
-                &json5::from_str::<Value>(&next_source).map_err(|e| {
+                &json_five::from_str::<Value>(&next_source).map_err(|e| {
                     AppError::Config(format!(
                         "Failed to parse unchanged OpenClaw config as JSON5: {e}"
                     ))
@@ -302,7 +302,7 @@ impl OpenClawConfigDocument {
         atomic_write_secret(&self.path, next_source.as_bytes())?;
 
         let warnings = scan_openclaw_health_from_value(
-            &json5::from_str::<Value>(&next_source).map_err(|e| {
+            &json_five::from_str::<Value>(&next_source).map_err(|e| {
                 AppError::Config(format!(
                     "Failed to parse newly written OpenClaw config as JSON5: {e}"
                 ))

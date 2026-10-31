@@ -478,7 +478,7 @@ mod tests {
         let path = dir.path().join("settings.json");
         let raw = "{\n  // theme picked by hand\n  \"theme\": \"dark\",\n  \"security\": {\n    \"auth\": { \"selectedType\": \"oauth-personal\" }\n  }\n}\n";
         fs::write(&path, raw).unwrap();
-        let mut value: Value = json5::from_str(raw).unwrap();
+        let mut value: Value = json_five::from_str(raw).unwrap();
         value["security"]["auth"]["selectedType"] = json!("gemini-api-key");
         write_json_preserving(&path, &value, WriteOptions::default()).unwrap();
         let written = fs::read_to_string(&path).unwrap();

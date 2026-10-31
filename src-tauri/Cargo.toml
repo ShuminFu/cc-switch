@@ -102,7 +102,6 @@ uuid = { version = "1.11", features = ["v4"] }
 sha2 = "0.10"
 minisign-verify = "0.2.5"
 hmac = "0.12"
-json5 = "0.4"
 json-five = "0.3.1"
 sys-locale = "0.3"
 # Secrets at rest and in sync (SEC-06, SVC-04, CMD-04): passphrase KDF, AEAD

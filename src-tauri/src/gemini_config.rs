@@ -461,7 +461,7 @@ pub fn read_gemini_settings_value(path: &Path) -> Result<Value, AppError> {
 
     let value = match serde_json::from_str::<Value>(content) {
         Ok(v) => v,
-        Err(strict_err) => match json5::from_str::<Value>(content) {
+        Err(strict_err) => match json_five::from_str::<Value>(content) {
             Ok(v) => {
                 log::warn!(
                     "Gemini settings.json 不是严格 JSON（可能含注释），已按 JSON5 解析: {}",
@@ -657,7 +657,7 @@ mod tests {
         let written = fs::read_to_string(&path).unwrap();
         // the JSONC comment survives the in-place edit
         assert!(written.starts_with("// keep\n"), "{written}");
-        let value: Value = json5::from_str(&written).unwrap();
+        let value: Value = json_five::from_str(&written).unwrap();
         assert_eq!(value["theme"], "dark");
         assert_eq!(value["mcpServers"]["x"]["command"], "x");
         assert_eq!(value["security"]["auth"]["selectedType"], "gemini-api-key");

@@ -100,7 +100,7 @@ impl OmoService {
     /// Parse JSONC with the same json5 dialect used for `opencode.json`
     /// (comments and trailing commas allowed, SVC-47).
     fn parse_jsonc_object(content: &str) -> Result<Map<String, Value>, AppError> {
-        let parsed: Value = json5::from_str(content.trim_start_matches('\u{feff}'))
+        let parsed: Value = json_five::from_str(content.trim_start_matches('\u{feff}'))
             .map_err(|e| AppError::Config(format!("Failed to parse oh-my-opencode config: {e}")))?;
         parsed
             .as_object()
