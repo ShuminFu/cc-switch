@@ -286,10 +286,7 @@ impl CodexChatHistoryInner {
     /// older than `ttl`. The newest entry is kept even if it alone exceeds the
     /// byte budget, so the very next request can still be enriched.
     fn prune_with(&mut self, max_responses: usize, max_bytes: usize, ttl: std::time::Duration) {
-        loop {
-            let Some(oldest_id) = self.response_order.front() else {
-                break;
-            };
+        while let Some(oldest_id) = self.response_order.front() {
             let expired = self
                 .responses
                 .get(oldest_id)

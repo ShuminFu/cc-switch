@@ -187,7 +187,7 @@ fn list_in(root: &Path) -> Vec<TrashEntry> {
         .filter_map(Result::ok)
         .filter_map(|e| read_entry(&e.path()))
         .collect();
-    entries.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.deleted_at));
     entries
 }
 
