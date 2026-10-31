@@ -298,48 +298,6 @@ export function useProxyStatus() {
 // ========== 代理服务器控制 Hooks ==========
 
 /**
- * 启动代理服务器
- */
-export function useStartProxyServer() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: () => proxyApi.startProxyServer(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
-      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.running });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.proxy.liveTakeoverActive,
-      });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.proxy.takeoverStatus,
-      });
-    },
-  });
-}
-
-/**
- * 停止代理服务器
- */
-export function useStopProxyServer() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: () => proxyApi.stopProxyWithRestore(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
-      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.running });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.proxy.liveTakeoverActive,
-      });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.proxy.takeoverStatus,
-      });
-    },
-  });
-}
-
-/**
  * 设置应用接管状态
  */
 export function useSetProxyTakeoverForApp() {
@@ -355,35 +313,6 @@ export function useSetProxyTakeoverForApp() {
       queryClient.invalidateQueries({
         queryKey: queryKeys.proxy.liveTakeoverActive,
       });
-    },
-  });
-}
-
-/**
- * 代理模式下切换供应商
- */
-export function useSwitchProxyProvider() {
-  const queryClient = useQueryClient();
-  const { t } = useTranslation();
-
-  return useMutation({
-    mutationFn: ({
-      appType,
-      providerId,
-    }: {
-      appType: string;
-      providerId: string;
-    }) => proxyApi.switchProxyProvider(appType, providerId),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.providers.byApp(variables.appType),
-      });
-    },
-    onError: (error: unknown) => {
-      toast.error(
-        t("proxy.switchFailed", { error: extractErrorMessage(error) }),
-      );
     },
   });
 }

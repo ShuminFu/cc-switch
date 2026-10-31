@@ -15,7 +15,6 @@ import type {
   Provider,
   Settings,
   UsageResult,
-  SessionMeta,
   SessionMessage,
 } from "@/types";
 import { usageKeys } from "@/lib/query/usage";
@@ -294,14 +293,6 @@ export const useUsageQuery = (
         : undefined),
     lastQueriedAt,
   };
-};
-
-export const useSessionsQuery = () => {
-  return useQuery<SessionMeta[]>({
-    queryKey: queryKeys.sessions.all,
-    queryFn: async () => sessionsApi.list(),
-    staleTime: 30 * 1000,
-  });
 };
 
 export const useSessionMessagesQuery = (

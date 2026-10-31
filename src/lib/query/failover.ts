@@ -35,57 +35,6 @@ export function useProviderHealth(
   });
 }
 
-/**
- * 重置熔断器
- *
- * 重置后后端会检查是否应该切回优先级更高的供应商，
- * 因此需要同时刷新供应商列表和代理状态。
- */
-export function useResetCircuitBreaker() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({
-      providerId,
-      appType,
-    }: {
-      providerId: string;
-      appType: string;
-    }) => failoverApi.resetCircuitBreaker(providerId, appType),
-    onSuccess: (_, variables) => {
-      // 刷新健康状态
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.failover.providerHealth(
-          variables.providerId,
-          variables.appType,
-        ),
-      });
-      // 刷新供应商列表（因为可能发生了自动恢复切换）
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.providers.byApp(variables.appType),
-      });
-      // 刷新代理状态（更新 active_targets）
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.proxy.status,
-      });
-    },
-  });
-}
-
-/**
- * 获取熔断器统计信息
- */
-export function useCircuitBreakerStats(providerId: string, appType: string) {
-  const proxyRunning = useCachedProxyRunning();
-  return useQuery({
-    queryKey: queryKeys.failover.circuitBreakerStats(providerId, appType),
-    queryFn: () => failoverApi.getCircuitBreakerStats(providerId, appType),
-    enabled: !!providerId && !!appType,
-    refetchInterval: proxyRunning ? HEALTH_REFETCH_MS : false,
-    refetchIntervalInBackground: false,
-  });
-}
-
 // ========== 故障转移队列 Hooks（新） ==========
 
 /**

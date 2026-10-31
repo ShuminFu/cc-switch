@@ -60,36 +60,6 @@ function normalizeScopeFilters(filters?: UsageScopeFilters): UsageScopeFilters {
   };
 }
 
-// Hooks
-export function useUsageSummary(
-  range: UsageRangeSelection,
-  filters?: UsageScopeFilters,
-  options?: UsageQueryOptions,
-) {
-  const effective = normalizeScopeFilters(filters);
-  return useQuery({
-    queryKey: usageKeys.summary(
-      range.preset,
-      range.customStartDate,
-      range.customEndDate,
-      effective,
-      range.liveEndTime,
-    ),
-    queryFn: () => {
-      const { startDate, endDate } = resolveUsageRange(range);
-      return usageApi.getUsageSummary(
-        startDate,
-        endDate,
-        effective.appType,
-        effective.providerName,
-        effective.model,
-      );
-    },
-    refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
-    refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
-  });
-}
-
 export function useUsageSummaryByApp(
   range: UsageRangeSelection,
   filters?: Pick<UsageScopeFilters, "providerName" | "model">,
