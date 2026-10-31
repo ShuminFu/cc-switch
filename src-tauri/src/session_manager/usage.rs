@@ -3,7 +3,7 @@
 //! Session syncs (Claude/Codex/Gemini/OpenCode) and the proxy store the
 //! session id on every `proxy_request_logs` row, so a session's usage is one
 //! `GROUP BY session_id`. Costs are summed the way the Usage Dashboard sums
-//! them (`CAST(total_cost_usd AS REAL)`, skipping `dedup_hidden` duplicates of
+//! them (exact integer `total_cost_nanos` sums, DB-14; skipping `dedup_hidden` duplicates of
 //! proxy rows), so the two agree. Rows already
 //! folded into daily rollups by log retention carry no session id and are not
 //! counted.
@@ -57,7 +57,7 @@ pub fn summaries(
             "SELECT session_id, COUNT(*),
                     COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
                     COALESCE(SUM(cache_read_tokens), 0), COALESCE(SUM(cache_creation_tokens), 0),
-                    COALESCE(SUM(CAST(total_cost_usd AS REAL)), 0),
+                    (COALESCE(SUM(total_cost_nanos), 0) / 1e9),
                     GROUP_CONCAT(DISTINCT model), MIN(created_at), MAX(created_at)
              FROM proxy_request_logs
              WHERE session_id IN ({placeholders}) AND dedup_hidden = 0

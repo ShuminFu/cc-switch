@@ -47,7 +47,7 @@ impl UsageTotals {
 const SELECT_TOTALS: &str =
     "COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), \
      COALESCE(SUM(cache_read_tokens), 0), COALESCE(SUM(cache_creation_tokens), 0), \
-     COALESCE(SUM(CAST(total_cost_usd AS REAL)), 0)";
+     (COALESCE(SUM(total_cost_nanos), 0) / 1e9)";
 
 fn row_totals(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<UsageTotals> {
     Ok(UsageTotals {

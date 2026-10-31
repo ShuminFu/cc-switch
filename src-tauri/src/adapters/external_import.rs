@@ -244,7 +244,7 @@ pub fn scan() -> Vec<ExternalImportPreview> {
     let mut out = Vec::new();
     let path = claude_code_router_path();
     if let Ok(text) = std::fs::read_to_string(&path) {
-        match json5::from_str::<Value>(&text) {
+        match json_five::from_str::<Value>(&text) {
             Ok(config) => out.push(preview_claude_code_router(&config, &path)),
             Err(e) => out.push(ExternalImportPreview {
                 source: CLAUDE_CODE_ROUTER.to_string(),
