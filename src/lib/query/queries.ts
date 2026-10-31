@@ -11,39 +11,22 @@ import {
   sessionsApi,
   type AppId,
 } from "@/lib/api";
-import type {
-  Provider,
-  Settings,
-  UsageResult,
-  SessionMeta,
-  SessionMessage,
-} from "@/types";
+import type { Provider, Settings, UsageResult, SessionMessage } from "@/types";
 import { usageKeys } from "@/lib/query/usage";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { queryKeys } from "./keys";
+import { appHas } from "@/config/apps";
+import { providerSortLocale, sortProviders } from "@/utils/providerSort";
+import i18n from "i18next";
 
-const sortProviders = (
+const sortProviderMap = (
   providers: Record<string, Provider>,
-): Record<string, Provider> => {
-  const sortedEntries = Object.values(providers)
-    .sort((a, b) => {
-      const indexA = a.sortIndex ?? Number.MAX_SAFE_INTEGER;
-      const indexB = b.sortIndex ?? Number.MAX_SAFE_INTEGER;
-      if (indexA !== indexB) {
-        return indexA - indexB;
-      }
-
-      const timeA = a.createdAt ?? 0;
-      const timeB = b.createdAt ?? 0;
-      if (timeA === timeB) {
-        return a.name.localeCompare(b.name, "zh-CN");
-      }
-      return timeA - timeB;
-    })
-    .map((provider) => [provider.id, provider] as const);
-
-  return Object.fromEntries(sortedEntries);
-};
+): Record<string, Provider> =>
+  Object.fromEntries(
+    sortProviders(providers, providerSortLocale(i18n.language)).map(
+      (provider) => [provider.id, provider] as const,
+    ),
+  );
 
 export interface ProvidersQueryData {
   providers: Record<string, Provider>;
@@ -83,7 +66,7 @@ export const useProvidersQuery = (
       }
 
       return {
-        providers: sortProviders(providers),
+        providers: sortProviderMap(providers),
         currentProviderId,
       };
     },
@@ -265,7 +248,9 @@ export const useUsageQuery = (
       autoQueryInterval > 0
         ? Math.max(autoQueryInterval, 1) * 60 * 1000 // 最小1分钟
         : false,
-    refetchIntervalInBackground: true, // 后台也继续定时查询
+    // Hidden window (tray): stop polling usage scripts; the backend tray
+    // refresh covers that case with its own throttle (PERF-47).
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     // 用量查询面向跨境/第三方端点，单次网络抖动或瞬时 5xx 不应直接判失败。
     // 后端已把瞬时传输失败（网络/超时/读体中断）转成 Err → invoke reject，
@@ -305,14 +290,6 @@ export const useUsageQuery = (
   };
 };
 
-export const useSessionsQuery = () => {
-  return useQuery<SessionMeta[]>({
-    queryKey: queryKeys.sessions.all,
-    queryFn: async () => sessionsApi.list(),
-    staleTime: 30 * 1000,
-  });
-};
-
 export const useSessionMessagesQuery = (
   providerId?: string,
   sourcePath?: string,
@@ -322,5 +299,31 @@ export const useSessionMessagesQuery = (
     queryFn: async () => sessionsApi.getMessages(providerId!, sourcePath!),
     enabled: Boolean(providerId && sourcePath),
     staleTime: 30 * 1000,
+  });
+};
+
+export type UsageQueryResult = ReturnType<typeof useUsageQuery>;
+
+/**
+ * The single usage-script query of a provider card (PERF-47). The card owns
+ * it and passes the result to `UsageFooter`, so there is one observer per
+ * card with one auto-refresh rule: additive apps (OpenCode / OpenClaw /
+ * Hermes) refresh providers that are in the live config, the others only
+ * the current provider.
+ */
+export const useProviderUsage = (
+  provider: Provider,
+  appId: AppId,
+  options: { isCurrent: boolean; isInConfig: boolean; enabled: boolean },
+): UsageQueryResult => {
+  const shouldAutoQuery = appHas(appId, "additiveLiveConfig")
+    ? options.isInConfig
+    : options.isCurrent;
+  const autoQueryInterval = shouldAutoQuery
+    ? provider.meta?.usage_script?.autoQueryInterval || 0
+    : 0;
+  return useUsageQuery(provider.id, appId, {
+    enabled: options.enabled,
+    autoQueryInterval,
   });
 };

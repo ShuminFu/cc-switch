@@ -180,7 +180,7 @@ function ClaudeAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
           issues.push(
             t("providerForm.fillParameter", {
               label: validation.missingField.label,
-              defaultValue: `请填写 ${validation.missingField.label}`,
+              defaultValue: "Please fill in {{label}}",
             }),
           );
         }
@@ -190,14 +190,14 @@ function ClaudeAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
       if (isCopilotProvider && !isCopilotAuthenticated) {
         return {
           error: t("copilot.loginRequired", {
-            defaultValue: "请先登录 GitHub Copilot",
+            defaultValue: "Please login to GitHub Copilot first",
           }),
         };
       }
       if (isCodexOauthProvider && !isCodexOauthAuthenticated) {
         return {
           error: t("codexOauth.loginRequired", {
-            defaultValue: "请先登录 ChatGPT 账号",
+            defaultValue: "Please sign in to ChatGPT first",
           }),
         };
       }

@@ -5,7 +5,7 @@ import {
   OMO_SLIM_BUILTIN_AGENTS,
   OMO_SLIM_DISABLEABLE_AGENTS,
   parseOmoOtherFieldsObject,
-} from "@/types/omo";
+} from "@/config/omo";
 
 describe("parseOmoOtherFieldsObject", () => {
   it("解析对象 JSON", () => {

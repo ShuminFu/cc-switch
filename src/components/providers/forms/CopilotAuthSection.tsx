@@ -121,7 +121,7 @@ export const CopilotAuthSection: React.FC<CopilotAuthSectionProps> = ({
           {hasAnyAccount
             ? t("copilot.accountCount", {
                 count: accounts.length,
-                defaultValue: `${accounts.length} 个账号`,
+                defaultValue: "{{count}} account(s)",
               })
             : t("copilot.notAuthenticated", "未认证")}
         </Badge>
@@ -166,7 +166,7 @@ export const CopilotAuthSection: React.FC<CopilotAuthSectionProps> = ({
         <p className="text-sm text-amber-600 dark:text-amber-400">
           {t("copilot.migrationFailed", {
             error: migrationError,
-            defaultValue: `旧认证数据迁移失败：${migrationError}`,
+            defaultValue: "Legacy auth migration failed: {{error}}",
           })}
         </p>
       )}

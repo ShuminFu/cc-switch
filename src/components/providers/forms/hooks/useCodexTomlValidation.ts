@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import TOML from "smol-toml";
+import i18n from "i18next";
+import { normalizeTomlText } from "@/utils/textNormalization";
 
 /**
  * Codex config.toml 格式校验 Hook
@@ -7,6 +9,10 @@ import TOML from "smol-toml";
  */
 export function useCodexTomlValidation() {
   const [configError, setConfigError] = useState("");
+  // True when the text only fails because smart quotes are used as string
+  // delimiters; the editor offers a one-click fix instead of rewriting the
+  // buffer while the user types (FE-ARCH-37).
+  const [smartQuoteFixAvailable, setSmartQuoteFixAvailable] = useState(false);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   /**
@@ -18,17 +24,34 @@ export function useCodexTomlValidation() {
     // 空字符串视为合法（允许为空）
     if (!tomlText.trim()) {
       setConfigError("");
+      setSmartQuoteFixAvailable(false);
       return true;
     }
 
     try {
       TOML.parse(tomlText);
       setConfigError("");
+      setSmartQuoteFixAvailable(false);
       return true;
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : "TOML 格式错误";
+        error instanceof Error
+          ? error.message
+          : i18n.t("codexConfig.tomlInvalid", {
+              defaultValue: "Invalid TOML",
+            });
+      let fixable = false;
+      const fixed = normalizeTomlText(tomlText);
+      if (fixed !== tomlText) {
+        try {
+          TOML.parse(fixed);
+          fixable = true;
+        } catch {
+          fixable = false;
+        }
+      }
       setConfigError(errorMessage);
+      setSmartQuoteFixAvailable(fixable);
       return false;
     }
   }, []);
@@ -57,6 +80,7 @@ export function useCodexTomlValidation() {
    */
   const clearError = useCallback(() => {
     setConfigError("");
+    setSmartQuoteFixAvailable(false);
   }, []);
 
   // 清理定时器
@@ -70,6 +94,7 @@ export function useCodexTomlValidation() {
 
   return {
     configError,
+    smartQuoteFixAvailable,
     validateToml,
     debouncedValidate,
     clearError,

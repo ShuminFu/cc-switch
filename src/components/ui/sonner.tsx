@@ -1,15 +1,56 @@
-import { Toaster as SonnerToaster, toast } from "sonner";
+import { Toaster as SonnerToaster, toast, type ExternalToast } from "sonner";
+import i18n from "i18next";
 import { useTheme } from "@/components/theme-provider";
+import { copyText } from "@/lib/clipboard";
+import { redactSecrets } from "@/utils/redact";
 
 /** Error toasts often carry a description; give users time to read it. */
 export const ERROR_TOAST_DURATION_MS = 6000;
+/** At most this many toasts are stacked at once (FE-ARCH-36). */
+export const MAX_VISIBLE_TOASTS = 4;
 
-// Raise the default duration of every `toast.error` call app-wide (FE-UI-13)
-// without touching each call site; an explicit `duration` still wins.
+const redactNode = <T,>(value: T): T =>
+  (typeof value === "string" ? redactSecrets(value) : value) as T;
+
+/**
+ * Defaults for every `toast.error` (FE-UI-13, FE-ARCH-36, FE-PROV-23):
+ * - stays 6 s and has a close button;
+ * - secrets in the title/description are masked before display;
+ * - a "Copy" action puts the (redacted) text on the clipboard unless the
+ *   caller supplied its own action.
+ * An explicit option from the caller always wins.
+ */
+export function errorToastOptions(
+  message: unknown,
+  data?: ExternalToast,
+): ExternalToast {
+  const description = redactNode(data?.description);
+  const parts = [message, description].filter(
+    (part): part is string => typeof part === "string" && part.length > 0,
+  );
+  const options: ExternalToast = {
+    duration: ERROR_TOAST_DURATION_MS,
+    closeButton: true,
+    ...data,
+    description,
+  };
+  if (!data?.action && parts.length > 0) {
+    options.action = {
+      label: i18n.t("common.copy", { defaultValue: "Copy" }),
+      onClick: () => {
+        void copyText(parts.join("\n")).catch(() => undefined);
+      },
+    };
+  }
+  return options;
+}
+
 const baseError = toast.error;
 if (!(baseError as { __ccSwitchPatched?: boolean }).__ccSwitchPatched) {
-  const patched: typeof toast.error = (message, data) =>
-    baseError(message, { duration: ERROR_TOAST_DURATION_MS, ...data });
+  const patched: typeof toast.error = (message, data) => {
+    const safeMessage = redactNode(message);
+    return baseError(safeMessage, errorToastOptions(safeMessage, data));
+  };
   (patched as { __ccSwitchPatched?: boolean }).__ccSwitchPatched = true;
   toast.error = patched;
 }
@@ -26,6 +67,7 @@ export function Toaster() {
       position="top-center"
       richColors
       theme={sonnerTheme}
+      visibleToasts={MAX_VISIBLE_TOASTS}
       toastOptions={{
         duration: 2000,
         classNames: {

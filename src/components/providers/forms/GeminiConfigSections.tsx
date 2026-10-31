@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import { useDarkMode } from "@/hooks/useDarkMode";
+import React from "react";
 import { useTranslation } from "react-i18next";
 import JsonEditor from "@/components/JsonEditor";
 
@@ -27,22 +28,7 @@ export const GeminiEnvSection: React.FC<GeminiEnvSectionProps> = ({
   commonConfigError,
 }) => {
   const { t } = useTranslation();
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
+  const isDarkMode = useDarkMode();
 
   const handleChange = (newValue: string) => {
     onChange(newValue);
@@ -58,7 +44,9 @@ export const GeminiEnvSection: React.FC<GeminiEnvSectionProps> = ({
           htmlFor="geminiEnv"
           className="block text-sm font-medium text-foreground"
         >
-          {t("geminiConfig.envFile", { defaultValue: "环境变量 (.env)" })}
+          {t("geminiConfig.envFile", {
+            defaultValue: "Environment Variables (.env)",
+          })}
         </label>
 
         <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
@@ -69,7 +57,7 @@ export const GeminiEnvSection: React.FC<GeminiEnvSectionProps> = ({
             className="w-4 h-4 text-blue-500 bg-white dark:bg-gray-800 border-border-default rounded focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2"
           />
           {t("geminiConfig.writeCommonConfig", {
-            defaultValue: "应用通用配置",
+            defaultValue: "Apply Common Config",
           })}
         </label>
       </div>
@@ -81,7 +69,7 @@ export const GeminiEnvSection: React.FC<GeminiEnvSectionProps> = ({
           className="text-xs text-blue-500 dark:text-blue-400 hover:underline"
         >
           {t("geminiConfig.editCommonConfig", {
-            defaultValue: "编辑通用配置",
+            defaultValue: "Edit Common Config",
           })}
         </button>
       </div>
@@ -111,7 +99,8 @@ GEMINI_MODEL=gemini-3.5-flash`}
       {!error && (
         <p className="text-xs text-muted-foreground">
           {t("geminiConfig.envFileHint", {
-            defaultValue: "使用 .env 格式配置 Gemini 环境变量",
+            defaultValue:
+              "Configure Gemini environment variables in .env format",
           })}
         </p>
       )}
@@ -134,22 +123,7 @@ export const GeminiConfigSection: React.FC<GeminiConfigSectionProps> = ({
   configError,
 }) => {
   const { t } = useTranslation();
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
+  const isDarkMode = useDarkMode();
 
   return (
     <div className="space-y-2">
@@ -158,7 +132,7 @@ export const GeminiConfigSection: React.FC<GeminiConfigSectionProps> = ({
         className="block text-sm font-medium text-foreground"
       >
         {t("geminiConfig.configJson", {
-          defaultValue: "配置文件 (config.json)",
+          defaultValue: "Configuration File (config.json)",
         })}
       </label>
 
@@ -182,7 +156,8 @@ export const GeminiConfigSection: React.FC<GeminiConfigSectionProps> = ({
       {!configError && (
         <p className="text-xs text-muted-foreground">
           {t("geminiConfig.configJsonHint", {
-            defaultValue: "使用 JSON 格式配置 Gemini 扩展参数（可选）",
+            defaultValue:
+              "Configure Gemini extended parameters in JSON format (optional)",
           })}
         </p>
       )}

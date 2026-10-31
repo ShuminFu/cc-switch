@@ -1,3 +1,4 @@
+import i18n from "i18next";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   extractCodexBaseUrl,
@@ -7,7 +8,6 @@ import {
   setCodexModelName as setCodexModelNameInConfig,
   updateCodexExperimentalBearerToken,
 } from "@/utils/providerConfigUtils";
-import { normalizeTomlText } from "@/utils/textNormalization";
 import type { CodexCatalogModel } from "@/types";
 
 interface UseCodexConfigStateProps {
@@ -164,11 +164,17 @@ export function useCodexConfigState({ initialData }: UseCodexConfigStateProps) {
     try {
       const parsed = JSON.parse(value);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return "Auth JSON must be an object";
+        return i18n.t("providerForm.validation.fieldMustBeObject", {
+          field: "auth.json",
+          defaultValue: "{{field}} must be a JSON object",
+        });
       }
       return "";
     } catch {
-      return "Invalid JSON format";
+      return i18n.t("providerForm.validation.fieldJsonSyntaxError", {
+        field: "auth.json",
+        defaultValue: "{{field}}: JSON format error, please check the syntax",
+      });
     }
   }, []);
 
@@ -248,12 +254,13 @@ export function useCodexConfigState({ initialData }: UseCodexConfigStateProps) {
   // 处理 config 变化（同步 Base URL）
   const handleCodexConfigChange = useCallback(
     (value: string) => {
-      // 归一化中文/全角/弯引号，避免 TOML 解析报错
-      const normalized = normalizeTomlText(value);
-      setCodexConfig(normalized);
+      // Keep the buffer as typed: quotes inside strings and comments are user
+      // content (FE-ARCH-37). Smart-quote delimiters are offered as a fix by
+      // the TOML validation instead.
+      setCodexConfig(value);
 
       if (!isUpdatingCodexBaseUrlRef.current) {
-        const extracted = extractCodexBaseUrl(normalized) || "";
+        const extracted = extractCodexBaseUrl(value) || "";
         if (extracted !== codexBaseUrl) {
           setCodexBaseUrl(extracted);
         }

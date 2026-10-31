@@ -1,9 +1,9 @@
+import { readLegacyString, removeStoredKey } from "@/lib/storage";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { parse as parseToml } from "smol-toml";
 import { hasTomlCommonConfigSnippet } from "@/utils/providerConfigUtils";
 import { configApi } from "@/lib/api";
-import { normalizeTomlText } from "@/utils/textNormalization";
+import { parseTomlLenient } from "@/utils/textNormalization";
 
 /**
  * 合并/剥离通用配置片段（走后端 toml_edit，保注释、保键序）。
@@ -102,10 +102,7 @@ export function useCodexCommonConfig({
     }
 
     try {
-      const parsed = parseToml(normalizeTomlText(snippetString)) as Record<
-        string,
-        unknown
-      >;
+      const parsed = parseTomlLenient(snippetString) as Record<string, unknown>;
       return {
         hasContent: Object.keys(parsed).length > 0,
       };
@@ -134,8 +131,7 @@ export function useCodexCommonConfig({
           // 如果 config.json 中没有，尝试从 localStorage 迁移
           if (typeof window !== "undefined") {
             try {
-              const legacySnippet =
-                window.localStorage.getItem(LEGACY_STORAGE_KEY);
+              const legacySnippet = readLegacyString(LEGACY_STORAGE_KEY);
               if (legacySnippet && legacySnippet.trim()) {
                 // 迁移到 config.json
                 await configApi.setCommonConfigSnippet("codex", legacySnippet);
@@ -143,7 +139,7 @@ export function useCodexCommonConfig({
                   setCommonConfigSnippetState(legacySnippet);
                 }
                 // 清理 localStorage
-                window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+                removeStoredKey(LEGACY_STORAGE_KEY);
                 console.log(
                   "[迁移] Codex 通用配置已从 localStorage 迁移到 config.json",
                 );

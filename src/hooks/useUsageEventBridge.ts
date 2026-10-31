@@ -1,6 +1,6 @@
-import { useEffect } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { isUsageDashboardQueryKey } from "@/lib/query/usage";
 
 /**
@@ -26,41 +26,27 @@ export function useUsageEventBridge(
   coalesceMs: number = USAGE_EVENT_COALESCE_MS,
 ) {
   const queryClient = useQueryClient();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
-    let disposed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+  // Drop a pending flush on unmount.
+  useEffect(
+    () => () => {
+      if (timerRef.current !== undefined) clearTimeout(timerRef.current);
+      timerRef.current = undefined;
+    },
+    [],
+  );
 
-    const flush = () => {
-      timer = undefined;
-      if (disposed) return;
+  useTauriEvent("usage-log-recorded", () => {
+    if (timerRef.current !== undefined) return;
+    timerRef.current = setTimeout(() => {
+      timerRef.current = undefined;
       void queryClient.invalidateQueries(
         { predicate: (query) => isUsageDashboardQueryKey(query.queryKey) },
         // Don't cancel in-flight fetches: the Rust command keeps running anyway,
         // cancelling would only waste its result.
         { cancelRefetch: false },
       );
-    };
-
-    (async () => {
-      const off = await listen("usage-log-recorded", () => {
-        if (timer === undefined) {
-          timer = setTimeout(flush, coalesceMs);
-        }
-      });
-
-      if (disposed) {
-        off();
-      } else {
-        unlisten = off;
-      }
-    })();
-
-    return () => {
-      disposed = true;
-      if (timer !== undefined) clearTimeout(timer);
-      unlisten?.();
-    };
-  }, [queryClient, coalesceMs]);
+    }, coalesceMs);
+  });
 }

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { proxyApi } from "@/lib/api/proxy";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
-import { useTauriEvent } from "@/hooks/useTauriEvent";
+import { useTauriEvent } from "@/lib/useTauriEvent";
 import type {
   GlobalProxyConfig,
   AppProxyConfig,
@@ -99,20 +99,20 @@ export function useProxyStatus() {
         t("proxy.server.started", {
           address: info.address,
           port: info.port,
-          defaultValue: `代理服务已启动 - ${info.address}:${info.port}`,
+          defaultValue: "Routing service started - {{address}}:{{port}}",
         }),
         { closeButton: true },
       );
       queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail =
         extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
+        t("common.unknown", { defaultValue: "Unknown" });
       toast.error(
         t("proxy.server.startFailed", {
           detail,
-          defaultValue: `启动代理服务失败: ${detail}`,
+          defaultValue: "Failed to start routing service: {{detail}}",
         }),
       );
     },
@@ -130,10 +130,10 @@ export function useProxyStatus() {
       );
       queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail =
         extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
+        t("common.unknown", { defaultValue: "Unknown" });
       toast.error(
         t("proxy.server.stopFailed", {
           detail,
@@ -149,7 +149,7 @@ export function useProxyStatus() {
     onSuccess: () => {
       toast.success(
         t("proxy.stoppedWithRestore", {
-          defaultValue: "代理服务已关闭，已恢复所有接管配置",
+          defaultValue: "Routing service stopped, all routing configs restored",
         }),
         { closeButton: true },
       );
@@ -167,14 +167,14 @@ export function useProxyStatus() {
       });
       // 注意：故障转移队列和开关状态会保留，不需要刷新
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail =
         extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
+        t("common.unknown", { defaultValue: "Unknown" });
       toast.error(
         t("proxy.stopWithRestoreFailed", {
           detail,
-          defaultValue: `停止失败: ${detail}`,
+          defaultValue: "Stop failed: {{detail}}",
         }),
       );
     },
@@ -191,11 +191,11 @@ export function useProxyStatus() {
         variables.enabled
           ? t("proxy.takeover.enabled", {
               app: appLabel,
-              defaultValue: `已接管 ${appLabel} 配置（请求将走本地代理）`,
+              defaultValue: "{{app}} routing enabled",
             })
           : t("proxy.takeover.disabled", {
               app: appLabel,
-              defaultValue: `已恢复 ${appLabel} 配置`,
+              defaultValue: "{{app}} routing disabled",
             }),
         { closeButton: true },
       );
@@ -205,14 +205,14 @@ export function useProxyStatus() {
         queryKey: queryKeys.proxy.takeoverStatus,
       });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail =
         extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
+        t("common.unknown", { defaultValue: "Unknown" });
       toast.error(
         t("proxy.takeover.failed", {
           detail,
-          defaultValue: `操作失败: ${detail}`,
+          defaultValue: "Failed to toggle routing: {{detail}}",
         }),
       );
     },
@@ -230,14 +230,14 @@ export function useProxyStatus() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail =
         extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
+        t("common.unknown", { defaultValue: "Unknown" });
       toast.error(
         t("proxy.switchFailed", {
           error: detail,
-          defaultValue: `切换失败: ${detail}`,
+          defaultValue: "Switch failed: {{error}}",
         }),
       );
     },
@@ -298,48 +298,6 @@ export function useProxyStatus() {
 // ========== 代理服务器控制 Hooks ==========
 
 /**
- * 启动代理服务器
- */
-export function useStartProxyServer() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: () => proxyApi.startProxyServer(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
-      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.running });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.proxy.liveTakeoverActive,
-      });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.proxy.takeoverStatus,
-      });
-    },
-  });
-}
-
-/**
- * 停止代理服务器
- */
-export function useStopProxyServer() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: () => proxyApi.stopProxyWithRestore(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
-      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.running });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.proxy.liveTakeoverActive,
-      });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.proxy.takeoverStatus,
-      });
-    },
-  });
-}
-
-/**
  * 设置应用接管状态
  */
 export function useSetProxyTakeoverForApp() {
@@ -355,35 +313,6 @@ export function useSetProxyTakeoverForApp() {
       queryClient.invalidateQueries({
         queryKey: queryKeys.proxy.liveTakeoverActive,
       });
-    },
-  });
-}
-
-/**
- * 代理模式下切换供应商
- */
-export function useSwitchProxyProvider() {
-  const queryClient = useQueryClient();
-  const { t } = useTranslation();
-
-  return useMutation({
-    mutationFn: ({
-      appType,
-      providerId,
-    }: {
-      appType: string;
-      providerId: string;
-    }) => proxyApi.switchProxyProvider(appType, providerId),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.providers.byApp(variables.appType),
-      });
-    },
-    onError: (error: Error) => {
-      toast.error(
-        t("proxy.switchFailed", { error: extractErrorMessage(error) }),
-      );
     },
   });
 }

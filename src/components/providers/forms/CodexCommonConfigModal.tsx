@@ -1,3 +1,4 @@
+import { useDarkMode } from "@/hooks/useDarkMode";
 import React, { useEffect, useState } from "react";
 import { Save, Download, Loader2, Package } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -29,23 +30,8 @@ export const CodexCommonConfigModal: React.FC<CodexCommonConfigModalProps> = ({
   isExtracting,
 }) => {
   const { t } = useTranslation();
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const isDarkMode = useDarkMode();
   const [draftValue, setDraftValue] = useState(value);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -85,7 +71,7 @@ export const CodexCommonConfigModal: React.FC<CodexCommonConfigModalProps> = ({
                 <Download className="w-4 h-4" />
               )}
               {t("codexConfig.extractFromCurrent", {
-                defaultValue: "从编辑内容提取",
+                defaultValue: "Extract from Editor",
               })}
             </Button>
           )}

@@ -41,13 +41,12 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useReadOmoLocalFile, useReadOmoSlimLocalFile } from "@/lib/query/omo";
+import { type OmoAgentDef, type OmoCategoryDef } from "@/types/omo";
 import {
   OMO_BUILTIN_AGENTS,
   OMO_BUILTIN_CATEGORIES,
   OMO_SLIM_BUILTIN_AGENTS,
-  type OmoAgentDef,
-  type OmoCategoryDef,
-} from "@/types/omo";
+} from "@/config/omo";
 
 const ADVANCED_PLACEHOLDER = `{
   "temperature": 0.5,
@@ -1124,6 +1123,7 @@ export function OmoFormFields({
             type="button"
             variant="ghost"
             size="icon"
+            aria-label={t("common.delete", { defaultValue: "Delete" })}
             className="h-7 w-7 shrink-0 text-destructive"
             onClick={() => {
               const next = customs.filter((_, idx) => idx !== index);

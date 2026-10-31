@@ -7,6 +7,7 @@ import {
   Loader2,
   Minus,
   Play,
+  Link2,
   Plus,
   Terminal,
   Trash2,
@@ -37,6 +38,8 @@ interface ProviderActionsProps {
   onRemoveFromConfig?: () => void;
   onDisableOmo?: () => void;
   onOpenTerminal?: () => void;
+  /** Copy a ccswitch:// share link (without the API key). */
+  onShare?: () => void;
   isAutoFailoverEnabled?: boolean;
   isInFailoverQueue?: boolean;
   onToggleFailover?: (enabled: boolean) => void;
@@ -78,6 +81,7 @@ export function ProviderActions({
   onRemoveFromConfig,
   onDisableOmo,
   onOpenTerminal,
+  onShare,
   isAutoFailoverEnabled = false,
   isInFailoverQueue = false,
   onToggleFailover,
@@ -170,7 +174,7 @@ export function ProviderActions({
             isDefaultModel && "opacity-40 cursor-not-allowed",
           ),
           icon: <Minus className="h-4 w-4" />,
-          text: t("provider.removeFromConfig", { defaultValue: "移除" }),
+          text: t("provider.removeFromConfig", { defaultValue: "Remove" }),
         };
       }
       return {
@@ -179,7 +183,7 @@ export function ProviderActions({
         className:
           "bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-700",
         icon: <Plus className="h-4 w-4" />,
-        text: t("provider.addToConfig", { defaultValue: "添加" }),
+        text: t("provider.addToConfig", { defaultValue: "Add" }),
       };
     }
 
@@ -191,7 +195,7 @@ export function ProviderActions({
           className:
             "bg-blue-100 text-blue-600 hover:bg-blue-200 dark:bg-blue-900/50 dark:text-blue-400 dark:hover:bg-blue-900/70",
           icon: <Check className="h-4 w-4" />,
-          text: t("failover.inQueue", { defaultValue: "已加入" }),
+          text: t("failover.inQueue", { defaultValue: "In queue" }),
         };
       }
       return {
@@ -200,7 +204,7 @@ export function ProviderActions({
         className:
           "bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700",
         icon: <Plus className="h-4 w-4" />,
-        text: t("failover.addQueue", { defaultValue: "加入" }),
+        text: t("failover.addQueue", { defaultValue: "Add" }),
       };
     }
 
@@ -242,7 +246,8 @@ export function ProviderActions({
   const canDelete =
     !isReadOnly && (isOmo || isAdditiveMode ? true : !isCurrent);
   const readOnlyHint = t("provider.managedByHermesHint", {
-    defaultValue: "由 Hermes 管理，请在 Hermes Web UI 中编辑",
+    defaultValue:
+      "Defined in Hermes' providers: dict. Edit or remove it via Hermes Web UI.",
   });
 
   return (
@@ -254,12 +259,12 @@ export function ProviderActions({
         (() => {
           const activeLabel =
             appId === "hermes"
-              ? t("provider.inUse", { defaultValue: "已在用" })
-              : t("provider.isDefault", { defaultValue: "当前默认" });
+              ? t("provider.inUse", { defaultValue: "In Use" })
+              : t("provider.isDefault", { defaultValue: "Current Default" });
           const inactiveLabel =
             appId === "hermes"
-              ? t("provider.enable", { defaultValue: "启用" })
-              : t("provider.setAsDefault", { defaultValue: "设为默认" });
+              ? t("provider.enable", { defaultValue: "Enable" })
+              : t("provider.setAsDefault", { defaultValue: "Set Default" });
           return (
             <Button
               size="sm"
@@ -338,8 +343,10 @@ export function ProviderActions({
           size="icon"
           variant="ghost"
           onClick={onTest || undefined}
-          disabled={isTesting}
-          title={t("provider.connectivityCheck", "检测连通")}
+          disabled={isTesting || !onTest}
+          title={t("provider.connectivityCheck", {
+            defaultValue: "Check connectivity",
+          })}
           className={cn(
             iconButtonClass,
             !onTest && "opacity-40 cursor-not-allowed text-muted-foreground",
@@ -356,6 +363,7 @@ export function ProviderActions({
           size="icon"
           variant="ghost"
           onClick={onConfigureUsage || undefined}
+          disabled={!onConfigureUsage}
           title={t("provider.configureUsage")}
           className={cn(
             iconButtonClass,
@@ -366,12 +374,28 @@ export function ProviderActions({
           <BarChart3 className="h-4 w-4" />
         </Button>
 
+        {onShare && (
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onShare}
+            title={t("provider.copyShareLink", {
+              defaultValue: "Copy share link (without API key)",
+            })}
+            className={iconButtonClass}
+          >
+            <Link2 className="h-4 w-4" />
+          </Button>
+        )}
+
         {onOpenTerminal && (
           <Button
             size="icon"
             variant="ghost"
             onClick={onOpenTerminal}
-            title={t("provider.openTerminal", "打开终端")}
+            title={t("provider.openTerminal", {
+              defaultValue: "Open terminal",
+            })}
             className={cn(
               iconButtonClass,
               "hover:text-emerald-600 dark:hover:text-emerald-400",
@@ -385,6 +409,7 @@ export function ProviderActions({
           size="icon"
           variant="ghost"
           onClick={canDelete ? onDelete : undefined}
+          disabled={!canDelete}
           title={isReadOnly ? readOnlyHint : t("common.delete")}
           className={cn(
             iconButtonClass,

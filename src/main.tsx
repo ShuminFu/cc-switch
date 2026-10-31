@@ -13,7 +13,6 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { queryClient } from "@/lib/query";
 import { Toaster } from "@/components/ui/sonner";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
-import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { message } from "@tauri-apps/plugin-dialog";
 import { exit } from "@tauri-apps/plugin-process";
@@ -53,11 +52,11 @@ async function handleConfigLoadError(
       path,
       detail,
       defaultValue:
-        "无法读取配置文件：\n{{path}}\n\n错误详情：\n{{detail}}\n\n请手动检查 JSON 是否有效，或从同目录的备份文件（如 config.json.bak）恢复。\n\n应用将退出以便您进行修复。",
+        "Unable to read configuration file:\n{{path}}\n\nError details:\n{{detail}}\n\nPlease check if the JSON is valid, or restore from a backup file (e.g., config.json.bak) in the same directory.\n\nThe app will exit so you can fix this.",
     }),
     {
       title: i18n.t("errors.configLoadFailedTitle", {
-        defaultValue: "配置加载失败",
+        defaultValue: "Configuration Load Failed",
       }),
       kind: "error",
     },
@@ -66,15 +65,8 @@ async function handleConfigLoadError(
   await exit(1);
 }
 
-// 监听后端的配置加载错误事件：仅提醒用户并强制退出，不修改任何配置文件
-try {
-  void listen("configLoadError", async (evt) => {
-    await handleConfigLoadError(evt.payload as ConfigLoadErrorPayload | null);
-  });
-} catch (e) {
-  // 忽略事件订阅异常（例如在非 Tauri 环境下）
-  console.error("订阅 configLoadError 事件失败", e);
-}
+// The backend never emits a `configLoadError` event: init failures are pulled
+// once via `get_init_error` in bootstrap() below (FE-ARCH-19 event contract).
 
 async function bootstrap() {
   // One root for the whole lifetime; paint a loading screen right away so the

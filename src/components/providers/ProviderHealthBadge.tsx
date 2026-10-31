@@ -67,7 +67,7 @@ export function ProviderHealthBadge({
       )}
       title={t("health.consecutiveFailures", {
         count: consecutiveFailures,
-        defaultValue: `连续失败 ${consecutiveFailures} 次`,
+        defaultValue: "{{count}} consecutive failures",
       })}
     >
       <div className={cn("w-2 h-2 rounded-full", statusConfig.color)} />

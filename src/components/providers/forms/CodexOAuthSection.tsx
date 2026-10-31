@@ -104,7 +104,7 @@ export const CodexOAuthSection: React.FC<CodexOAuthSectionProps> = ({
           {hasAnyAccount
             ? t("codexOauth.accountCount", {
                 count: accounts.length,
-                defaultValue: `${accounts.length} 个账号`,
+                defaultValue: "{{count}} account(s)",
               })
             : t("codexOauth.notAuthenticated", "未认证")}
         </Badge>

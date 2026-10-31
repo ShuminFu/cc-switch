@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { memo, useMemo, useState, useEffect } from "react";
 import { GripVertical, ChevronDown, ChevronUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type {
@@ -20,6 +20,7 @@ import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge"
 import { FailoverPriorityBadge } from "@/components/providers/FailoverPriorityBadge";
 import { BudgetLimitBadge } from "@/components/usage/BudgetLimitBadge";
 import {
+  getConfigTomlText,
   getProviderCodec,
   getProviderEndpoint,
   getProviderModels,
@@ -31,8 +32,12 @@ import {
 } from "@/utils/providerConfigUtils";
 import { supportsOfficialProxyTakeover } from "@/utils/providerCapabilities";
 import { useProviderHealth } from "@/lib/query/failover";
-import { useUsageQuery } from "@/lib/query/queries";
+import { useProviderUsage } from "@/lib/query/queries";
 import { resolveProviderIcon } from "@/utils/providerIcon";
+import { buildProviderDeeplink } from "@/lib/deeplinkBuilder";
+import { copyText } from "@/lib/clipboard";
+import { extractErrorMessage } from "@/utils/errorUtils";
+import { toast } from "sonner";
 
 interface DragHandleProps {
   attributes: DraggableAttributes;
@@ -97,7 +102,7 @@ export const getProviderCardUrl = (
   getProviderEndpoint(appId, provider) ||
   undefined;
 
-export function ProviderCard({
+function ProviderCardImpl({
   provider,
   isCurrent,
   appId,
@@ -146,7 +151,7 @@ export function ProviderCard({
   );
 
   const fallbackUrlText = t("provider.notConfigured", {
-    defaultValue: "未配置接口地址",
+    defaultValue: "Not configured for official website",
   });
 
   const providerUrl = useMemo(
@@ -203,32 +208,23 @@ export function ProviderCard({
       provider.meta?.apiFormat === "anthropic"
     )
       return true;
-    const config = (provider.settingsConfig as Record<string, any>)?.config;
-    return (
-      typeof config === "string" &&
-      (isCodexChatWireApi(extractCodexWireApi(config)) ||
-        isCodexAnthropicWireApi(extractCodexWireApi(config)))
-    );
+    const config = getConfigTomlText(provider.settingsConfig);
+    if (config === undefined) return false;
+    const wireApi = extractCodexWireApi(config);
+    return isCodexChatWireApi(wireApi) || isCodexAnthropicWireApi(wireApi);
   }, [
     appId,
     provider.category,
     provider.meta?.apiFormat,
-    (provider.settingsConfig as Record<string, any>)?.config,
+    provider.settingsConfig,
   ]);
-  // 获取用量数据以判断是否有多套餐
-  // 累加模式应用（OpenCode/OpenClaw/Hermes）：使用 isInConfig 代替 isCurrent
-  const shouldAutoQuery =
-    appId === "opencode" || appId === "openclaw" || appId === "hermes"
-      ? isInConfig
-      : isCurrent;
-  const autoQueryInterval = shouldAutoQuery
-    ? provider.meta?.usage_script?.autoQueryInterval || 0
-    : 0;
-
-  const { data: usage } = useUsageQuery(provider.id, appId, {
+  // One usage observer per card, shared with UsageFooter (PERF-47).
+  const usageQuery = useProviderUsage(provider, appId, {
+    isCurrent,
+    isInConfig,
     enabled: usageEnabled && !isOfficial && !isOfficialSubscriptionUsage,
-    autoQueryInterval,
   });
+  const usage = usageQuery.data;
 
   const isTokenPlan =
     provider.meta?.usage_script?.templateType === "token_plan";
@@ -242,6 +238,29 @@ export function ProviderCard({
       setIsExpanded(true);
     }
   }, [hasMultiplePlans]);
+
+  // Share links go through the deep-link importer, which creates Claude,
+  // Codex and Gemini providers (FE-PROV-55).
+  const canShare =
+    !isAnyOmo &&
+    (appId === "claude" || appId === "codex" || appId === "gemini");
+  const handleShare = async () => {
+    try {
+      await copyText(buildProviderDeeplink(provider, appId));
+      toast.success(
+        t("provider.shareLinkCopied", {
+          defaultValue: "Share link copied (API key not included)",
+        }),
+      );
+    } catch (error) {
+      toast.error(
+        t("provider.shareLinkCopyFailed", {
+          defaultValue: "Failed to copy the share link: {{error}}",
+          error: extractErrorMessage(error),
+        }),
+      );
+    }
+  };
 
   const handleOpenWebsite = () => {
     if (!isClickableUrl) {
@@ -354,7 +373,7 @@ export function ProviderCard({
                 provider.meta?.claudeDesktopMode === "proxy" && (
                   <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
                     {t("claudeDesktop.modeProxy", {
-                      defaultValue: "需要路由",
+                      defaultValue: "Requires routing",
                     })}
                   </span>
                 )}
@@ -365,7 +384,7 @@ export function ProviderCard({
                 provider.meta.apiFormat !== "anthropic" && (
                   <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
                     {t("claudeCode.needsRouting", {
-                      defaultValue: "需要路由",
+                      defaultValue: "Needs Routing",
                     })}
                   </span>
                 )}
@@ -373,7 +392,7 @@ export function ProviderCard({
               {codexNeedsRouting && (
                 <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
                   {t("codex.needsRouting", {
-                    defaultValue: "需要路由",
+                    defaultValue: "Needs Routing",
                   })}
                 </span>
               )}
@@ -381,7 +400,7 @@ export function ProviderCard({
               {appId === "claude" && provider.category === "official" && (
                 <span className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200">
                   {t("claudeCode.noRoutingSupport", {
-                    defaultValue: "不支持路由",
+                    defaultValue: "No Routing Support",
                   })}
                 </span>
               )}
@@ -390,10 +409,10 @@ export function ProviderCard({
                 <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
                   {isProxyTakeover
                     ? t("codex.officialRouting", {
-                        defaultValue: "官方账号路由",
+                        defaultValue: "Official Account Routing",
                       })
                     : t("codex.nativeLogin", {
-                        defaultValue: "Codex 登录",
+                        defaultValue: "Codex Sign-in",
                       })}
                 </span>
               )}
@@ -403,7 +422,7 @@ export function ProviderCard({
                 !supportsOfficialRouting && (
                   <span className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200">
                     {t("codex.noRoutingSupport", {
-                      defaultValue: "不支持路由",
+                      defaultValue: "No Routing Support",
                     })}
                   </span>
                 )}
@@ -428,7 +447,7 @@ export function ProviderCard({
                   <span
                     className="text-yellow-500 dark:text-yellow-400"
                     title={t("provider.officialPartner", {
-                      defaultValue: "官方合作伙伴",
+                      defaultValue: "Official Partner",
                     })}
                   >
                     ⭐
@@ -439,7 +458,8 @@ export function ProviderCard({
                 <span
                   className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200"
                   title={t("provider.managedByHermesHint", {
-                    defaultValue: "由 Hermes 管理，请在 Hermes Web UI 中编辑",
+                    defaultValue:
+                      "Defined in Hermes' providers: dict. Edit or remove it via Hermes Web UI.",
                   })}
                 >
                   {t("provider.managedByHermes", {
@@ -517,23 +537,27 @@ export function ProviderCard({
                   <span className="font-medium">
                     {t("usage.multiplePlans", {
                       count: usage?.data?.length || 0,
-                      defaultValue: `${usage?.data?.length || 0} 个套餐`,
+                      defaultValue: "{{count}} plans",
                     })}
                   </span>
                 </div>
               ) : (
                 <UsageFooter
                   provider={provider}
-                  providerId={provider.id}
-                  appId={appId}
                   usageEnabled={usageEnabled}
-                  isCurrent={isCurrent}
-                  isInConfig={isInConfig}
+                  usageQuery={usageQuery}
                   inline={true}
                 />
               )}
               {hasMultiplePlans && (
                 <button
+                  type="button"
+                  aria-expanded={isExpanded}
+                  aria-label={
+                    isExpanded
+                      ? t("usage.collapse", { defaultValue: "Collapse" })
+                      : t("usage.expand", { defaultValue: "Expand" })
+                  }
                   onClick={(e) => {
                     e.stopPropagation();
                     setIsExpanded(!isExpanded);
@@ -541,8 +565,8 @@ export function ProviderCard({
                   className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400 flex-shrink-0"
                   title={
                     isExpanded
-                      ? t("usage.collapse", { defaultValue: "收起" })
-                      : t("usage.expand", { defaultValue: "展开" })
+                      ? t("usage.collapse", { defaultValue: "Collapse" })
+                      : t("usage.expand", { defaultValue: "Expand" })
                   }
                 >
                   {isExpanded ? (
@@ -597,6 +621,7 @@ export function ProviderCard({
               onOpenTerminal={
                 onOpenTerminal ? () => onOpenTerminal(provider) : undefined
               }
+              onShare={canShare ? handleShare : undefined}
               isAutoFailoverEnabled={isAutoFailoverEnabled}
               isInFailoverQueue={isInFailoverQueue}
               onToggleFailover={onToggleFailover}
@@ -612,11 +637,8 @@ export function ProviderCard({
         <div className="mt-4 pt-4 border-t border-border-default">
           <UsageFooter
             provider={provider}
-            providerId={provider.id}
-            appId={appId}
             usageEnabled={usageEnabled}
-            isCurrent={isCurrent}
-            isInConfig={isInConfig}
+            usageQuery={usageQuery}
             inline={false}
           />
         </div>
@@ -624,3 +646,6 @@ export function ProviderCard({
     </div>
   );
 }
+
+/** Memoised: re-renders only when its own props change (PERF-20). */
+export const ProviderCard = memo(ProviderCardImpl);

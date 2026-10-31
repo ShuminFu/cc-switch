@@ -29,11 +29,11 @@ import {
 } from "@/lib/query/omo";
 import { APP_REGISTRY, appHas, type AppToolbarFeature } from "@/config/apps";
 import { useProviderActions } from "@/hooks/useProviderActions";
+import { useDuplicateProvider } from "@/hooks/useDuplicateProvider";
 import { useOpenHermesWebUI } from "@/hooks/useHermes";
 import { useProxyStatus } from "@/hooks/useProxyStatus";
 import { useLastValidValue } from "@/hooks/useLastValidValue";
 import { extractErrorMessage } from "@/utils/errorUtils";
-import { deepClone } from "@/utils/deepClone";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { McpIcon } from "@/components/BrandIcons";
@@ -125,36 +125,6 @@ const TOOLBAR_ITEMS: Record<AppToolbarFeature, ToolbarItem> = {
   },
 };
 
-const generateUniqueProviderCopyKey = (
-  originalKey: string,
-  existingKeys: string[],
-): string => {
-  const baseKey = `${originalKey}-copy`;
-
-  if (!existingKeys.includes(baseKey)) {
-    return baseKey;
-  }
-
-  let counter = 2;
-  while (existingKeys.includes(`${baseKey}-${counter}`)) {
-    counter++;
-  }
-  return `${baseKey}-${counter}`;
-};
-
-const liveProviderIdsFetcher = (appId: AppId) => {
-  switch (appId) {
-    case "opencode":
-      return () => providersApi.getOpenCodeLiveProviderIds();
-    case "openclaw":
-      return () => providersApi.getOpenClawLiveProviderIds();
-    case "hermes":
-      return () => providersApi.getHermesLiveProviderIds();
-    default:
-      return null;
-  }
-};
-
 /** Root page: the provider list of the active app. */
 export default function ProvidersPage() {
   const { t } = useTranslation();
@@ -227,7 +197,7 @@ export default function ProvidersPage() {
     onSuccess: () => {
       toast.success(t("omo.disabled", { defaultValue: "OMO 已停用" }));
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       toast.error(
         t("omo.disableFailed", {
           defaultValue: "停用 OMO 失败: {{error}}",
@@ -294,87 +264,11 @@ export default function ProvidersPage() {
     setConfirmAction(null);
   };
 
-  const handleDuplicateProvider = async (provider: Provider) => {
-    const newSortIndex =
-      provider.sortIndex !== undefined ? provider.sortIndex + 1 : undefined;
-
-    const duplicatedProvider: Omit<Provider, "id" | "createdAt"> & {
-      providerKey?: string;
-      addToLive?: boolean;
-    } = {
-      name: `${provider.name} copy`,
-      settingsConfig: deepClone(provider.settingsConfig),
-      websiteUrl: provider.websiteUrl,
-      category: provider.category,
-      sortIndex: newSortIndex, // 复制原 sortIndex + 1
-      meta: provider.meta ? deepClone(provider.meta) : undefined,
-      icon: provider.icon,
-      iconColor: provider.iconColor,
-    };
-
-    const liveKey = liveProviderIdsKey(activeApp);
-    const liveFetcher = liveProviderIdsFetcher(activeApp);
-    if (appHas(activeApp, "additiveLiveConfig") && liveKey && liveFetcher) {
-      let liveProviderIds: string[] = [];
-      try {
-        liveProviderIds = await queryClient.ensureQueryData({
-          queryKey: liveKey,
-          queryFn: liveFetcher,
-        });
-      } catch (error) {
-        console.error(
-          "[App] Failed to load live provider IDs for duplication",
-          error,
-        );
-        const errorMessage = extractErrorMessage(error);
-        toast.error(
-          t("provider.duplicateLiveIdsLoadFailed", {
-            defaultValue:
-              "Failed to read provider keys from the config. Fix the config and try again",
-          }) + (errorMessage ? `: ${errorMessage}` : ""),
-        );
-        return;
-      }
-      const existingKeys = Array.from(
-        new Set([...Object.keys(providers), ...liveProviderIds]),
-      );
-      duplicatedProvider.providerKey = generateUniqueProviderCopyKey(
-        provider.id,
-        existingKeys,
-      );
-      duplicatedProvider.addToLive = false;
-    }
-
-    if (provider.sortIndex !== undefined) {
-      const updates = Object.values(providers)
-        .filter(
-          (p) =>
-            p.sortIndex !== undefined &&
-            p.sortIndex >= newSortIndex! &&
-            p.id !== provider.id,
-        )
-        .map((p) => ({
-          id: p.id,
-          sortIndex: p.sortIndex! + 1,
-        }));
-
-      if (updates.length > 0) {
-        try {
-          await providersApi.updateSortOrder(updates, activeApp);
-        } catch (error) {
-          console.error("[App] Failed to update sort order", error);
-          toast.error(
-            t("provider.sortUpdateFailed", {
-              defaultValue: "排序更新失败",
-            }),
-          );
-          return; // 如果排序更新失败，不继续添加
-        }
-      }
-    }
-
-    await addProvider(duplicatedProvider);
-  };
+  const handleDuplicateProvider = useDuplicateProvider(
+    activeApp,
+    providers,
+    addProvider,
+  );
 
   const handleOpenTerminal = async (provider: Provider) => {
     try {

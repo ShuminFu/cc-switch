@@ -36,6 +36,9 @@ interface CodexConfigEditorProps {
 
   configError: string; // config.toml 错误提示
 
+  /** Offered when the TOML only fails because of smart-quote delimiters. */
+  onFixSmartQuotes?: () => void;
+
   onExtract?: () => void;
 
   isExtracting?: boolean;
@@ -58,6 +61,7 @@ const CodexConfigEditor: React.FC<CodexConfigEditorProps> = ({
   commonConfigError,
   authError,
   configError,
+  onFixSmartQuotes,
   onExtract,
   isExtracting,
 }) => {
@@ -99,6 +103,7 @@ const CodexConfigEditor: React.FC<CodexConfigEditorProps> = ({
         onEditCommonConfig={() => setIsCommonConfigModalOpen(true)}
         commonConfigError={commonConfigError}
         configError={configError}
+        onFixSmartQuotes={onFixSmartQuotes}
         isProxyTakeover={isProxyTakeover}
       />
 

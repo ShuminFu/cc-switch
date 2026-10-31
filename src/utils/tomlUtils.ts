@@ -1,5 +1,5 @@
-import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
-import { normalizeTomlText } from "@/utils/textNormalization";
+import { stringify as stringifyToml } from "smol-toml";
+import { parseTomlLenient } from "@/utils/textNormalization";
 import { McpServerSpec } from "../types";
 
 /**
@@ -10,8 +10,7 @@ import { McpServerSpec } from "../types";
 export const validateToml = (text: string): string => {
   if (!text.trim()) return "";
   try {
-    const normalized = normalizeTomlText(text);
-    const parsed = parseToml(normalized);
+    const parsed = parseTomlLenient(text);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return "mustBeObject";
     }
@@ -55,7 +54,7 @@ export const tomlToMcpServer = (tomlText: string): McpServerSpec => {
     throw new Error("TOML 内容不能为空");
   }
 
-  const parsed = parseToml(normalizeTomlText(tomlText));
+  const parsed = parseTomlLenient(tomlText) as Record<string, any>;
 
   // 情况 1: 直接是服务器配置（包含 type/command/url 等字段）
   if (
@@ -188,7 +187,7 @@ function normalizeServerConfig(config: any): McpServerSpec {
  */
 export const extractIdFromToml = (tomlText: string): string => {
   try {
-    const parsed = parseToml(normalizeTomlText(tomlText));
+    const parsed = parseTomlLenient(tomlText) as Record<string, any>;
 
     // 尝试从 [mcp_servers.<id>] 或 [mcp.servers.<id>] 中提取 ID
     if (parsed.mcp_servers && typeof parsed.mcp_servers === "object") {

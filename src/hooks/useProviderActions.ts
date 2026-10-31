@@ -18,6 +18,7 @@ import {
   useSwitchProviderMutation,
 } from "@/lib/query";
 import { usageKeys } from "@/lib/query/usage";
+import { getConfigTomlText } from "@/lib/providerCodecs";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { openclawKeys } from "@/hooks/useOpenClaw";
 import {
@@ -64,7 +65,7 @@ export function useProviderActions(
         const detail =
           extractErrorMessage(error) ||
           t("notifications.syncClaudePluginFailed", {
-            defaultValue: "同步 Claude 插件失败",
+            defaultValue: "Sync Claude plugin failed",
           });
         toast.error(detail, { duration: 4200 });
       }
@@ -84,7 +85,7 @@ export function useProviderActions(
       },
     ) => {
       const enhanced = injectCodingPlanUsageScript(activeApp, provider);
-      await addProviderMutation.mutateAsync(enhanced);
+      const created = await addProviderMutation.mutateAsync(enhanced);
 
       // OpenClaw: register models to allowlist after adding provider
       if (activeApp === "openclaw" && provider.suggestedDefaults) {
@@ -120,7 +121,7 @@ export function useProviderActions(
             if (modelsRegistered) {
               toast.success(
                 t("notifications.openclawModelsRegistered", {
-                  defaultValue: "模型已注册到 /model 列表",
+                  defaultValue: "Models have been registered to /model list",
                 }),
                 { closeButton: true },
               );
@@ -151,6 +152,7 @@ export function useProviderActions(
         };
         await register();
       }
+      return created;
     },
     [addProviderMutation, activeApp, queryClient, t],
   );
@@ -179,57 +181,49 @@ export function useProviderActions(
       const isCopilotProvider =
         activeApp === "claude" &&
         provider.meta?.providerType === "github_copilot";
+      const isCodexLike = activeApp === "codex" || activeApp === "grokbuild";
+      const configToml = getConfigTomlText(provider.settingsConfig);
+      const wireApi =
+        configToml !== undefined ? extractCodexWireApi(configToml) : undefined;
       const isCodexChatFormat =
-        (activeApp === "codex" || activeApp === "grokbuild") &&
+        isCodexLike &&
         (provider.meta?.apiFormat === "openai_chat" ||
-          (typeof (provider.settingsConfig as Record<string, any>)?.config ===
-            "string" &&
-            isCodexChatWireApi(
-              extractCodexWireApi(
-                (provider.settingsConfig as Record<string, any>).config,
-              ),
-            )));
+          isCodexChatWireApi(wireApi));
       const isCodexAnthropicFormat =
-        (activeApp === "codex" || activeApp === "grokbuild") &&
+        isCodexLike &&
         (provider.meta?.apiFormat === "anthropic" ||
-          (typeof (provider.settingsConfig as Record<string, any>)?.config ===
-            "string" &&
-            isCodexAnthropicWireApi(
-              extractCodexWireApi(
-                (provider.settingsConfig as Record<string, any>).config,
-              ),
-            )));
+          isCodexAnthropicWireApi(wireApi));
 
       // Determine why this provider requires the proxy
       let proxyRequiredReason: string | null = null;
       if (!isProxyRunning && provider.category !== "official") {
         if (isCopilotProvider) {
           proxyRequiredReason = t("notifications.proxyReasonCopilot", {
-            defaultValue: "使用 GitHub Copilot 作为 Claude 供应商",
+            defaultValue: "uses GitHub Copilot as a Claude provider",
           });
         } else if (
           provider.meta?.apiFormat === "openai_chat" &&
           activeApp === "claude"
         ) {
           proxyRequiredReason = t("notifications.proxyReasonOpenAIChat", {
-            defaultValue: "使用 OpenAI Chat 接口格式",
+            defaultValue: "uses OpenAI Chat API format",
           });
         } else if (
           provider.meta?.apiFormat === "openai_responses" &&
           activeApp === "claude"
         ) {
           proxyRequiredReason = t("notifications.proxyReasonOpenAIResponses", {
-            defaultValue: "使用 OpenAI Responses 接口格式",
+            defaultValue: "uses OpenAI Responses API format",
           });
         } else if (isCodexChatFormat) {
           proxyRequiredReason = t("notifications.proxyReasonOpenAIChat", {
-            defaultValue: "使用 OpenAI Chat 接口格式",
+            defaultValue: "uses OpenAI Chat API format",
           });
         } else if (isCodexAnthropicFormat) {
           proxyRequiredReason = t(
             "notifications.proxyReasonAnthropicMessages",
             {
-              defaultValue: "使用 Anthropic Messages 接口格式",
+              defaultValue: "uses Anthropic Messages API format",
             },
           );
         } else if (
@@ -246,7 +240,7 @@ export function useProviderActions(
             activeApp === "grokbuild")
         ) {
           proxyRequiredReason = t("notifications.proxyReasonFullUrl", {
-            defaultValue: "开启了完整 URL 连接模式",
+            defaultValue: "has full URL connection mode enabled",
           });
         }
       }
@@ -256,7 +250,7 @@ export function useProviderActions(
           t("notifications.proxyRequiredForSwitch", {
             reason: proxyRequiredReason,
             defaultValue:
-              "此供应商{{reason}}，需要代理服务才能正常使用，请先启动代理",
+              "This provider {{reason}}, requires the routing service to work properly. Start routing first.",
           }),
         );
       }
@@ -275,7 +269,7 @@ export function useProviderActions(
         toast.error(
           t("notifications.officialBlockedByProxy", {
             defaultValue:
-              "代理接管模式下不能切换到官方供应商，使用代理访问官方 API 可能导致账号被封禁",
+              "Cannot switch to official provider while local routing is active. Using routing with official APIs may cause account bans.",
           }),
           { duration: 6000 },
         );
@@ -286,15 +280,16 @@ export function useProviderActions(
         const result = await switchProviderMutation.mutateAsync(provider.id);
         await syncClaudePlugin(provider);
 
-        // Show backfill warning if present
-        if (result?.warnings?.length) {
-          toast.warning(
-            t("notifications.backfillWarning", {
+        // A backfill warning is folded into the success toast so one switch
+        // shows one toast (FE-ARCH-36).
+        const backfillWarning = result?.warnings?.length
+          ? t("notifications.backfillWarning", {
               defaultValue:
-                "切换成功，但旧供应商配置回填失败，您手动修改的配置可能未保存",
-            }),
-            { duration: 5000 },
-          );
+                "Switched successfully, but failed to save changes back to the previous provider",
+            })
+          : undefined;
+        if (backfillWarning && proxyRequiredReason) {
+          toast.warning(backfillWarning, { duration: 5000 });
         }
 
         // 若已弹过 proxyRequired 警告则不再弹 success
@@ -320,9 +315,17 @@ export function useProviderActions(
             messageKey = "notifications.addToConfigSuccess";
             defaultMessage = "已添加到配置";
           }
-          toast.success(t(messageKey, { defaultValue: defaultMessage }), {
-            closeButton: true,
-          });
+          if (backfillWarning) {
+            toast.warning(t(messageKey, { defaultValue: defaultMessage }), {
+              description: backfillWarning,
+              duration: 5000,
+              closeButton: true,
+            });
+          } else {
+            toast.success(t(messageKey, { defaultValue: defaultMessage }), {
+              closeButton: true,
+            });
+          }
         }
       } catch {
         // 错误提示由 mutation 处理
@@ -372,7 +375,7 @@ export function useProviderActions(
         });
         toast.success(
           t("provider.usageSaved", {
-            defaultValue: "用量查询配置已保存",
+            defaultValue: "Usage query configuration saved",
           }),
           { closeButton: true },
         );
@@ -380,7 +383,7 @@ export function useProviderActions(
         const detail =
           extractErrorMessage(error) ||
           t("provider.usageSaveFailed", {
-            defaultValue: "用量查询配置保存失败",
+            defaultValue: "Failed to save usage query configuration",
           });
         toast.error(detail);
       }
@@ -395,7 +398,7 @@ export function useProviderActions(
       if (!config.models || config.models.length === 0) {
         toast.error(
           t("notifications.openclawNoModels", {
-            defaultValue: "该供应商没有配置模型",
+            defaultValue: "No models configured",
           }),
         );
         return;
@@ -416,7 +419,7 @@ export function useProviderActions(
         });
         toast.success(
           t("notifications.openclawDefaultModelSet", {
-            defaultValue: "已设为默认模型",
+            defaultValue: "Set as default model",
           }),
           { closeButton: true },
         );
@@ -424,7 +427,7 @@ export function useProviderActions(
         const detail =
           extractErrorMessage(error) ||
           t("notifications.openclawDefaultModelSetFailed", {
-            defaultValue: "设置默认模型失败",
+            defaultValue: "Failed to set default model",
           });
         toast.error(detail);
       }

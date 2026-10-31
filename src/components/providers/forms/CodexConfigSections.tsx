@@ -1,6 +1,7 @@
 // NOTE: Codex 1M 上下文 UI 已暂时隐藏（详见下方 CodexConfigSection 内 JSX 注释）。
 // 如需恢复，请同时：
 //   - 取消下面 `@/utils/providerConfigUtils` import 的注释
+import { useDarkMode } from "@/hooks/useDarkMode";
 import React, {
   useCallback,
   useEffect,
@@ -43,22 +44,7 @@ export const CodexAuthSection: React.FC<CodexAuthSectionProps> = ({
   isProxyTakeover = false,
 }) => {
   const { t } = useTranslation();
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
+  const isDarkMode = useDarkMode();
 
   const handleChange = (newValue: string) => {
     onChange(newValue);
@@ -113,6 +99,7 @@ interface CodexConfigSectionProps {
   onEditCommonConfig: () => void;
   commonConfigError?: string;
   configError?: string;
+  onFixSmartQuotes?: () => void;
   isProxyTakeover?: boolean;
 }
 
@@ -129,25 +116,11 @@ export const CodexConfigSection: React.FC<CodexConfigSectionProps> = ({
   onEditCommonConfig,
   commonConfigError,
   configError,
+  onFixSmartQuotes,
   isProxyTakeover = false,
 }) => {
   const { t } = useTranslation();
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
+  const isDarkMode = useDarkMode();
 
   // Mirror value prop to local state (same pattern as CommonConfigEditor)
   const [localValue, setLocalValue] = useState(value);
@@ -371,6 +344,18 @@ export const CodexConfigSection: React.FC<CodexConfigSectionProps> = ({
 
       {configError && (
         <p className="text-xs text-red-500 dark:text-red-400">{configError}</p>
+      )}
+
+      {configError && onFixSmartQuotes && (
+        <button
+          type="button"
+          onClick={onFixSmartQuotes}
+          className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+        >
+          {t("codexConfig.fixSmartQuotes", {
+            defaultValue: "Replace smart quotes used as string delimiters",
+          })}
+        </button>
       )}
 
       {!configError && (

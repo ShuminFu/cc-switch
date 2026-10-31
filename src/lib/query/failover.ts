@@ -35,11 +35,10 @@ export function useProviderHealth(
   });
 }
 
+// ========== 故障转移队列 Hooks（新） ==========
+
 /**
- * 重置熔断器
- *
- * 重置后后端会检查是否应该切回优先级更高的供应商，
- * 因此需要同时刷新供应商列表和代理状态。
+ * 获取故障转移队列
  */
 export function useResetCircuitBreaker() {
   const queryClient = useQueryClient();
@@ -72,25 +71,6 @@ export function useResetCircuitBreaker() {
   });
 }
 
-/**
- * 获取熔断器统计信息
- */
-export function useCircuitBreakerStats(providerId: string, appType: string) {
-  const proxyRunning = useCachedProxyRunning();
-  return useQuery({
-    queryKey: queryKeys.failover.circuitBreakerStats(providerId, appType),
-    queryFn: () => failoverApi.getCircuitBreakerStats(providerId, appType),
-    enabled: !!providerId && !!appType,
-    refetchInterval: proxyRunning ? HEALTH_REFETCH_MS : false,
-    refetchIntervalInBackground: false,
-  });
-}
-
-// ========== 故障转移队列 Hooks（新） ==========
-
-/**
- * 获取故障转移队列
- */
 export function useFailoverQueue(appType: string) {
   return useQuery({
     queryKey: queryKeys.failover.queue(appType),
@@ -230,11 +210,11 @@ export function useSetAutoFailoverEnabled() {
         variables.enabled
           ? t("failover.enabled", {
               app: appLabel,
-              defaultValue: `${appLabel} 故障转移已启用`,
+              defaultValue: "{{app}} failover enabled",
             })
           : t("failover.disabled", {
               app: appLabel,
-              defaultValue: `${appLabel} 故障转移已关闭`,
+              defaultValue: "{{app}} failover disabled",
             }),
         { closeButton: true },
       );
@@ -251,11 +231,11 @@ export function useSetAutoFailoverEnabled() {
 
       const detail =
         extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
+        t("common.unknown", { defaultValue: "Unknown" });
       toast.error(
         t("failover.toggleFailed", {
           detail,
-          defaultValue: `操作失败: ${detail}`,
+          defaultValue: "Operation failed: {{detail}}",
         }),
       );
     },

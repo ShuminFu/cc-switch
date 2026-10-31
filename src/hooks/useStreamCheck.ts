@@ -33,7 +33,8 @@ export function useStreamCheck(appId: AppId) {
             t("streamCheck.reachable", {
               providerName: providerName,
               responseTimeMs: result.responseTimeMs,
-              defaultValue: `${providerName} 连通正常 (${result.responseTimeMs}ms)`,
+              defaultValue:
+                "{{providerName}} is reachable ({{responseTimeMs}}ms)",
             }),
             { closeButton: true },
           );
@@ -42,7 +43,8 @@ export function useStreamCheck(appId: AppId) {
             t("streamCheck.reachableSlow", {
               providerName: providerName,
               responseTimeMs: result.responseTimeMs,
-              defaultValue: `${providerName} 连通但较慢 (${result.responseTimeMs}ms)`,
+              defaultValue:
+                "{{providerName}} reachable but slow ({{responseTimeMs}}ms)",
             }),
           );
         } else {
@@ -51,12 +53,12 @@ export function useStreamCheck(appId: AppId) {
             t("streamCheck.unreachable", {
               providerName: providerName,
               message: result.message,
-              defaultValue: `${providerName} 无法连通: ${result.message}`,
+              defaultValue: "{{providerName}} unreachable: {{message}}",
             }),
             {
               description: t("streamCheck.unreachableHint", {
                 defaultValue:
-                  "无法建立连接（DNS / 连接 / TLS / 超时）。请检查 base_url 与网络。",
+                  "Could not establish a connection (DNS / connect / TLS / timeout). Check the base_url and your network.",
               }),
               duration: 8000,
               closeButton: true,
@@ -70,7 +72,7 @@ export function useStreamCheck(appId: AppId) {
           t("streamCheck.error", {
             providerName: providerName,
             error: String(e),
-            defaultValue: `${providerName} 检查出错: ${String(e)}`,
+            defaultValue: "{{providerName}} check error: {{error}}",
           }),
         );
         return null;

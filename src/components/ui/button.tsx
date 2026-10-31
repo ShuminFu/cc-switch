@@ -51,11 +51,22 @@ export interface ButtonProps
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
+    // Icon-only buttons need an accessible name (FE-ARCH-20, FE-PROV-14):
+    // fall back to the tooltip text when no explicit aria-label is given.
+    const accessibleName =
+      size === "icon" &&
+      props["aria-label"] === undefined &&
+      props["aria-labelledby"] === undefined &&
+      typeof props.title === "string" &&
+      props.title
+        ? props.title
+        : undefined;
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         {...props}
+        aria-label={props["aria-label"] ?? accessibleName}
       />
     );
   },

@@ -1,7 +1,6 @@
 import { invoke, call } from "./invoke";
-import { commands, type JsonValue } from "@/lib/bindings";
+import { commands } from "@/lib/bindings";
 import type {
-  McpConfigResponse,
   McpServer,
   McpServerSpec,
   McpServersMap,
@@ -31,53 +30,6 @@ export const mcpApi = {
 
   async validateCommand(cmd: string): Promise<boolean> {
     return await call(commands.validateMcpCommand(cmd));
-  },
-
-  /**
-   * @deprecated 使用 getAllServers() 代替（v3.7.0+）
-   */
-  async getConfig(app: AppId = "claude"): Promise<McpConfigResponse> {
-    return await invoke("get_mcp_config", { app });
-  },
-
-  /**
-   * @deprecated 使用 upsertUnifiedServer() 代替（v3.7.0+）
-   */
-  async upsertServerInConfig(
-    app: AppId,
-    id: string,
-    spec: McpServer,
-    options?: { syncOtherSide?: boolean },
-  ): Promise<boolean> {
-    return await call(
-      commands.upsertMcpServerInConfig(
-        app,
-        id,
-        spec as unknown as JsonValue,
-        options?.syncOtherSide ?? null,
-      ),
-    );
-  },
-
-  /**
-   * @deprecated 使用 deleteUnifiedServer() 代替（v3.7.0+）
-   */
-  async deleteServerInConfig(
-    app: AppId,
-    id: string,
-    options?: { syncOtherSide?: boolean },
-  ): Promise<boolean> {
-    // The backend deletes the server from every app; `syncOtherSide` is kept
-    // in the signature for callers but has no effect.
-    void options;
-    return await call(commands.deleteMcpServerInConfig(app, id));
-  },
-
-  /**
-   * @deprecated 使用 toggleApp() 代替（v3.7.0+）
-   */
-  async setEnabled(app: AppId, id: string, enabled: boolean): Promise<boolean> {
-    return await invoke("set_mcp_enabled", { app, id, enabled });
   },
 
   // ========================================================================

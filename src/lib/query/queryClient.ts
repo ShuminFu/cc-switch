@@ -25,3 +25,13 @@ export const createAppQueryClient = () =>
   });
 
 export const queryClient = createAppQueryClient();
+
+// Tauri commands reject with a plain string or a structured `AppError`
+// payload, never necessarily an `Error`. Typing query/mutation errors as
+// `unknown` forces callers through `extractErrorMessage` instead of reading
+// `.message` (which is `undefined` for string rejections, FE-ARCH-39).
+declare module "@tanstack/react-query" {
+  interface Register {
+    defaultError: unknown;
+  }
+}

@@ -63,18 +63,18 @@ export function SoftIssuesDialog({
       isOpen={issues !== null && issues.length > 0}
       variant="info"
       title={t("providerForm.softValidation.title", {
-        defaultValue: "配置存在以下问题",
+        defaultValue: "Configuration has the following issues",
       })}
       message={
         (issues ?? []).map((issue) => `• ${issue}`).join("\n") +
         "\n\n" +
         t("providerForm.softValidation.hint", {
           defaultValue:
-            "仍要保存吗？保存后切换此供应商时可能失败，可以之后再补全。",
+            "Save anyway? Switching to this provider may fail; you can fill these in later.",
         })
       }
       confirmText={t("providerForm.softValidation.saveAnyway", {
-        defaultValue: "仍要保存",
+        defaultValue: "Save anyway",
       })}
       cancelText={t("common.cancel")}
       onConfirm={onConfirm}

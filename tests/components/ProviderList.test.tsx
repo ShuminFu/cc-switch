@@ -264,6 +264,47 @@ describe("ProviderList Component", () => {
     );
   });
 
+  it("does not re-render cards when the parent passes new callback identities (PERF-20)", () => {
+    const providerA = createProvider({ id: "a", name: "A" });
+    const providerB = createProvider({ id: "b", name: "B" });
+    const providers = { a: providerA, b: providerB };
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [providerA, providerB],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const latestSwitch = vi.fn();
+    const renderList = (onSwitch: (p: Provider) => void) => (
+      <QueryClientProvider client={queryClient}>
+        <ProviderList
+          providers={providers}
+          currentProviderId="a"
+          appId="claude"
+          onSwitch={onSwitch}
+          onEdit={() => undefined}
+          onDelete={() => undefined}
+          onDuplicate={() => undefined}
+          onOpenWebsite={() => undefined}
+        />
+      </QueryClientProvider>
+    );
+
+    const { rerender } = render(renderList(() => undefined));
+    expect(providerCardRenderSpy).toHaveBeenCalledTimes(2);
+
+    // Simulates a proxy-status poll re-rendering the page with fresh inline
+    // handlers: the memoised cards must not re-render.
+    rerender(renderList(latestSwitch));
+    expect(providerCardRenderSpy).toHaveBeenCalledTimes(2);
+
+    // The stable handler still calls the latest prop.
+    fireEvent.click(screen.getByTestId("switch-a"));
+    expect(latestSwitch).toHaveBeenCalledWith(providerA);
+  });
+
   it("passes the in-flight mutation state to every card (FE-PROV-49)", () => {
     const providerA = createProvider({ id: "a", name: "A" });
     const providerB = createProvider({ id: "b", name: "B" });

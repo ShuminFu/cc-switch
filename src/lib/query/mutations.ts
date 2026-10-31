@@ -11,8 +11,9 @@ import type { DeleteSessionOptions } from "@/lib/api/sessions";
 import type { SwitchResult } from "@/lib/api/providers";
 import type { Provider, SessionMeta, Settings } from "@/types";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { redactSecrets } from "@/utils/redact";
 import { generateUUID } from "@/utils/uuid";
-import { invalidateHermesProviderCaches } from "@/hooks/useHermes";
+import { invalidateHermesProviderCaches } from "./hermes";
 import { queryKeys } from "./keys";
 import { CODEX_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
 
@@ -133,7 +134,6 @@ export const useAddProviderMutation = (appId: AppId) => {
         id,
         createdAt: Date.now(),
       };
-      delete (newProvider as any).providerKey;
 
       await providersApi.add(newProvider, appId, addToLive);
       return newProvider;
@@ -152,18 +152,18 @@ export const useAddProviderMutation = (appId: AppId) => {
 
       toast.success(
         t("notifications.providerAdded", {
-          defaultValue: "供应商已添加",
+          defaultValue: "Provider added",
         }),
         {
           closeButton: true,
         },
       );
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("notifications.addFailed", {
-          defaultValue: "添加供应商失败: {{error}}",
+          defaultValue: "Failed to add provider: {{error}}",
           error: detail,
         }),
       );
@@ -203,18 +203,18 @@ export const useUpdateProviderMutation = (appId: AppId) => {
       ]);
       toast.success(
         t("notifications.updateSuccess", {
-          defaultValue: "供应商更新成功",
+          defaultValue: "Provider updated successfully",
         }),
         {
           closeButton: true,
         },
       );
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("notifications.updateFailed", {
-          defaultValue: "更新供应商失败: {{error}}",
+          defaultValue: "Failed to update provider: {{error}}",
           error: detail,
         }),
       );
@@ -222,15 +222,43 @@ export const useUpdateProviderMutation = (appId: AppId) => {
   });
 };
 
+interface ProvidersCache {
+  providers: Record<string, Provider>;
+  currentProviderId: string;
+}
+
+/**
+ * Re-create a deleted provider from its snapshot (same id, settingsConfig,
+ * meta and sortIndex). Only offered for apps whose providers live in the
+ * database alone; additive apps also edit their live config on delete.
+ */
+const canUndoDelete = (appId: AppId) => !appHas(appId, "additiveLiveConfig");
+
 export const useDeleteProviderMutation = (appId: AppId) => {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
+  const cacheKey = queryKeys.providers.byApp(appId);
 
   return useMutation({
     mutationFn: async (providerId: string) => {
       await providersApi.delete(providerId, appId);
     },
-    onSuccess: async () => {
+    // Optimistic: drop the card at once, put it back if the delete fails
+    // (FE-ARCH-18).
+    onMutate: async (providerId: string) => {
+      await queryClient.cancelQueries({ queryKey: cacheKey });
+      const previous = queryClient.getQueryData<ProvidersCache>(cacheKey);
+      if (previous?.providers?.[providerId]) {
+        const { [providerId]: _removed, ...rest } = previous.providers;
+        void _removed;
+        queryClient.setQueryData<ProvidersCache>(cacheKey, {
+          ...previous,
+          providers: rest,
+        });
+      }
+      return { previous, deleted: previous?.providers?.[providerId] };
+    },
+    onSuccess: async (_data, _providerId, context) => {
       await invalidateProviderCaches(queryClient, appId, "membership");
 
       try {
@@ -242,20 +270,55 @@ export const useDeleteProviderMutation = (appId: AppId) => {
         );
       }
 
+      const deleted = context?.deleted;
       toast.success(
         t("notifications.deleteSuccess", {
-          defaultValue: "供应商已删除",
+          defaultValue: "Provider deleted",
         }),
         {
           closeButton: true,
+          // Undo re-adds the exact snapshot (FE-ARCH-17, first increment).
+          ...(deleted && canUndoDelete(appId)
+            ? {
+                duration: 8000,
+                action: {
+                  label: t("common.undo", { defaultValue: "Undo" }),
+                  onClick: () => {
+                    void (async () => {
+                      try {
+                        await providersApi.add(deleted, appId, false);
+                        await invalidateProviderCaches(
+                          queryClient,
+                          appId,
+                          "membership",
+                        );
+                        await providersApi.updateTrayMenu().catch(() => false);
+                      } catch (error) {
+                        toast.error(
+                          t("notifications.undoDeleteFailed", {
+                            defaultValue:
+                              "Could not restore the provider: {{error}}",
+                            error: extractErrorMessage(error),
+                          }),
+                        );
+                      }
+                    })();
+                  },
+                },
+              }
+            : {}),
         },
       );
     },
-    onError: (error: Error) => {
+    onError: (error: unknown, _providerId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(cacheKey, context.previous);
+      }
+      void queryClient.invalidateQueries({ queryKey: cacheKey });
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("notifications.deleteFailed", {
-          defaultValue: "删除供应商失败: {{error}}",
+          defaultValue: "Failed to delete provider: {{error}}",
           error: detail,
         }),
       );
@@ -271,6 +334,22 @@ export const useSwitchProviderMutation = (appId: AppId) => {
     mutationFn: async (providerId: string): Promise<SwitchResult> => {
       return await providersApi.switch(providerId, appId);
     },
+    // Optimistic: highlight the new current provider immediately and roll
+    // back on failure (FE-ARCH-18). Additive apps add to the live config
+    // instead of changing a single current provider, so they keep waiting.
+    onMutate: async (providerId: string) => {
+      if (appHas(appId, "additiveLiveConfig")) return { previous: undefined };
+      const cacheKey = queryKeys.providers.byApp(appId);
+      await queryClient.cancelQueries({ queryKey: cacheKey });
+      const previous = queryClient.getQueryData<ProvidersCache>(cacheKey);
+      if (previous) {
+        queryClient.setQueryData<ProvidersCache>(cacheKey, {
+          ...previous,
+          currentProviderId: providerId,
+        });
+      }
+      return { previous };
+    },
     onSuccess: async () => {
       await invalidateProviderCaches(queryClient, appId, "switch");
 
@@ -283,21 +362,29 @@ export const useSwitchProviderMutation = (appId: AppId) => {
         );
       }
     },
-    onError: (error: Error) => {
+    onError: (error: unknown, _providerId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(
+          queryKeys.providers.byApp(appId),
+          context.previous,
+        );
+      }
       const detail = extractErrorMessage(error) || t("common.unknown");
 
       toast.error(
-        t("notifications.switchFailedTitle", { defaultValue: "切换失败" }),
+        t("notifications.switchFailedTitle", { defaultValue: "Switch failed" }),
         {
           description: t("notifications.switchFailed", {
-            defaultValue: "切换失败：{{error}}",
+            defaultValue: "Switch failed: {{error}}",
             error: detail,
           }),
           duration: 6000,
           action: {
-            label: t("common.copy", { defaultValue: "复制" }),
+            label: t("common.copy", { defaultValue: "Copy" }),
             onClick: () => {
-              navigator.clipboard?.writeText(detail).catch(() => undefined);
+              navigator.clipboard
+                ?.writeText(redactSecrets(detail))
+                .catch(() => undefined);
             },
           },
         },
@@ -341,15 +428,15 @@ export const useDeleteSessionMutation = () => {
 
       toast.success(
         t("sessionManager.sessionDeleted", {
-          defaultValue: "会话已删除",
+          defaultValue: "Session deleted",
         }),
       );
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("sessionManager.deleteFailed", {
-          defaultValue: "删除会话失败: {{error}}",
+          defaultValue: "Failed to delete session: {{error}}",
           error: detail,
         }),
       );

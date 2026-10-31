@@ -1,11 +1,12 @@
+import { useRef } from "react";
 import {
   keepPreviousData,
-  useQuery,
   useMutation,
+  useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { usageApi } from "@/lib/api/usage";
-import { resolveUsageRange } from "@/lib/usageRange";
+import { resolveUsageRange, type ResolvedUsageRange } from "@/lib/usageRange";
 import { usageKeys, type RequestLogsKey } from "./keys";
 import type {
   LogFilters,
@@ -63,36 +64,6 @@ function normalizeScopeFilters(filters?: UsageScopeFilters): UsageScopeFilters {
     providerName: filters?.providerName,
     model: filters?.model,
   };
-}
-
-// Hooks
-export function useUsageSummary(
-  range: UsageRangeSelection,
-  filters?: UsageScopeFilters,
-  options?: UsageQueryOptions,
-) {
-  const effective = normalizeScopeFilters(filters);
-  return useQuery({
-    queryKey: usageKeys.summary(
-      range.preset,
-      range.customStartDate,
-      range.customEndDate,
-      effective,
-      range.liveEndTime,
-    ),
-    queryFn: () => {
-      const { startDate, endDate } = resolveUsageRange(range);
-      return usageApi.getUsageSummary(
-        startDate,
-        endDate,
-        effective.appType,
-        effective.providerName,
-        effective.model,
-      );
-    },
-    refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
-    refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
-  });
 }
 
 export function useUsageSummaryByApp(
@@ -216,7 +187,7 @@ export function useRequestLogs({
   pageSize = 20,
   options,
 }: RequestLogsQueryArgs) {
-  const key: RequestLogsKey = {
+  const baseKey: RequestLogsKey = {
     preset: range.preset,
     customStartDate: range.customStartDate,
     customEndDate: range.customEndDate,
@@ -229,10 +200,27 @@ export function useRequestLogs({
     statusMax: filters.statusMax,
   };
 
+  // OFFSET paging against a moving `endDate = now` shifts every later page
+  // while traffic flows (FE-ARCH-41). Page 0 stays live; leaving it freezes
+  // the window until the filters/range change or the user returns to it.
+  const frozenRef = useRef<{ signature: string; range: ResolvedUsageRange }>();
+  const signature = JSON.stringify(baseKey);
+  if (page === 0 || frozenRef.current?.signature !== signature) {
+    frozenRef.current =
+      page === 0 ? undefined : { signature, range: resolveUsageRange(range) };
+  }
+  const frozen = frozenRef.current?.range;
+  const key: RequestLogsKey = frozen
+    ? { ...baseKey, frozenEndDate: frozen.endDate }
+    : baseKey;
+
   return useQuery({
     queryKey: usageKeys.logs(key, page, pageSize),
     queryFn: () => {
-      const effectiveFilters = { ...filters, ...resolveUsageRange(range) };
+      const effectiveFilters = {
+        ...filters,
+        ...(frozen ?? resolveUsageRange(range)),
+      };
       return usageApi.getRequestLogs(effectiveFilters, page, pageSize);
     },
     // Keep the previous page visible while the next one loads (FE-UI-59).

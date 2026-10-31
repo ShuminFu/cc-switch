@@ -1,3 +1,4 @@
+import { useDarkMode } from "@/hooks/useDarkMode";
 import React, { useEffect, useState } from "react";
 import { Save, Download, Loader2, Package } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -23,23 +24,8 @@ export const GeminiCommonConfigModal: React.FC<
   GeminiCommonConfigModalProps
 > = ({ isOpen, onClose, value, onSave, error, onExtract, isExtracting }) => {
   const { t } = useTranslation();
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const isDarkMode = useDarkMode();
   const [draftValue, setDraftValue] = useState(value);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -62,7 +48,7 @@ export const GeminiCommonConfigModal: React.FC<
     <FullScreenPanel
       isOpen={isOpen}
       title={t("geminiConfig.editCommonConfigTitle", {
-        defaultValue: "编辑 Gemini 通用配置片段",
+        defaultValue: "Edit Gemini Common Config Snippet",
       })}
       onClose={handleClose}
       footer={
@@ -81,7 +67,7 @@ export const GeminiCommonConfigModal: React.FC<
                 <Download className="w-4 h-4" />
               )}
               {t("geminiConfig.extractFromCurrent", {
-                defaultValue: "从编辑内容提取",
+                defaultValue: "Extract from Editor",
               })}
             </Button>
           )}
@@ -116,7 +102,7 @@ export const GeminiCommonConfigModal: React.FC<
         <p className="text-xs text-amber-600 dark:text-amber-400">
           {t("geminiConfig.commonConfigHint", {
             defaultValue:
-              "该片段会写入 Gemini 的 .env（不允许包含 GOOGLE_GEMINI_BASE_URL、GEMINI_API_KEY）",
+              "This snippet writes to Gemini .env when 'Apply Common Config' is checked (GOOGLE_GEMINI_BASE_URL and GEMINI_API_KEY are not allowed)",
           })}
         </p>
         {(!draftValue ||

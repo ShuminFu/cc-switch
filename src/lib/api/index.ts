@@ -8,7 +8,7 @@ export { promptsApi } from "./prompts";
 export { skillsApi } from "./skills";
 export { usageApi } from "./usage";
 export { subscriptionApi } from "./subscription";
-export { vscodeApi } from "./vscode";
+export { endpointsApi } from "./endpoints";
 export { proxyApi } from "./proxy";
 export { openclawApi } from "./openclaw";
 export { sessionsApi } from "./sessions";

@@ -217,7 +217,7 @@ describe("ProviderForm partner presets (FE-PROV-43)", () => {
     fireEvent.submit(document.getElementById("provider-form")!);
 
     const saveAnyway = await screen
-      .findByRole("button", { name: "仍要保存" }, { timeout: 500 })
+      .findByRole("button", { name: "Save anyway" }, { timeout: 500 })
       .catch(() => null);
     if (saveAnyway) fireEvent.click(saveAnyway);
 
