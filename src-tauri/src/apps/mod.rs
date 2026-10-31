@@ -202,8 +202,10 @@ mod tests {
     /// CCS-149 前为 56 处（同一统计口径），之后的上限见 [`MATCH_APP_SITE_BUDGET`]，只允许下降。
     /// P4 退出目标是 15 处以内。CCS-153/154/155 收敛接管引擎与按应用状态后实测 28 处
     ///（CCS-232 起不再把 `#[cfg(test)] mod foo;` 声明的测试文件计入）；CCS-233 把 paths 与
-    /// 深链接预览改走注册表 / 适配器后为 25 处。
-    const MATCH_APP_SITE_BUDGET: usize = 25;
+    /// 深链接预览改走注册表 / 适配器后为 25 处；CCS-234 把接管的按应用分派（读写 / 清理 live、
+    /// 凭据回写、当前供应商依赖、代理地址比对、热切换刷新、备份投影、快照文件）收进
+    /// `ProxyTakeover` 后为 15 处，达到 P4 目标。
+    const MATCH_APP_SITE_BUDGET: usize = 15;
 
     #[test]
     fn match_app_sites_outside_apps_stay_within_budget() {
@@ -230,6 +232,11 @@ mod tests {
             "prompt_files.rs",
             "services/skill.rs",
             "commands/config.rs",
+            "services/proxy/takeover/mod.rs",
+            "services/proxy/takeover/engine.rs",
+            "services/proxy/hot_switch.rs",
+            "services/proxy/backup.rs",
+            "services/takeover_snapshot.rs",
         ] {
             assert!(
                 sites.iter().all(|(site_file, _)| site_file != file),
@@ -275,6 +282,115 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// 接管分派走 `ProxyTakeover` 后，各应用的按应用差异与 CCS-234 前的 match 分支一致
+    #[test]
+    fn takeover_dispatch_matches_previous_per_app_arms() {
+        use adapter::TakeoverProviderNeed;
+
+        let takeover = |app: AppType| adapter(&app).takeover().expect("takeover");
+
+        assert_eq!(
+            takeover(AppType::Claude).live_files(),
+            vec![crate::config::get_claude_settings_path()]
+        );
+        assert_eq!(
+            takeover(AppType::Codex).live_files(),
+            vec![
+                crate::codex_config::get_codex_auth_path(),
+                crate::codex_config::get_codex_config_path(),
+            ]
+        );
+        // 接管只改写 .env，settings.json 不进快照
+        assert_eq!(
+            takeover(AppType::Gemini).live_files(),
+            vec![crate::gemini_config::get_gemini_env_path()]
+        );
+        assert_eq!(
+            takeover(AppType::GrokBuild).live_files(),
+            vec![crate::grok_config::get_grok_config_path()]
+        );
+        assert_eq!(
+            takeover(AppType::OpenCode).live_files(),
+            vec![opencode::config::get_opencode_config_path()]
+        );
+        assert_eq!(
+            takeover(AppType::OpenClaw).live_files(),
+            vec![openclaw::config::get_openclaw_config_path()]
+        );
+        assert_eq!(
+            takeover(AppType::Hermes).live_files(),
+            vec![hermes::config::get_hermes_config_path()]
+        );
+
+        assert_eq!(
+            takeover(AppType::Claude).provider_need(),
+            TakeoverProviderNeed::RequiredWhenStrict
+        );
+        assert_eq!(
+            takeover(AppType::Codex).provider_need(),
+            TakeoverProviderNeed::Required
+        );
+        for app in [AppType::Gemini, AppType::GrokBuild, AppType::OpenCode] {
+            assert_eq!(takeover(app).provider_need(), TakeoverProviderNeed::None);
+        }
+
+        for taken_over in [false, true] {
+            assert!(takeover(AppType::Claude).refresh_after_save(taken_over));
+            assert_eq!(
+                takeover(AppType::Codex).refresh_after_save(taken_over),
+                taken_over
+            );
+            assert!(!takeover(AppType::GrokBuild).refresh_after_save(taken_over));
+            assert!(!takeover(AppType::Gemini).refresh_after_save(taken_over));
+        }
+
+        let settings = json!({ "env": { "GEMINI_API_KEY": "k" }, "config": { "a": 1 } });
+        assert_eq!(
+            takeover(AppType::Gemini).backup_projection(settings.clone()),
+            json!({ "env": { "GEMINI_API_KEY": "k" } })
+        );
+        assert_eq!(
+            takeover(AppType::Gemini).backup_projection(json!({})),
+            json!({ "env": {} })
+        );
+        assert_eq!(
+            takeover(AppType::Codex).backup_projection(settings.clone()),
+            settings
+        );
+
+        let proxy = "http://127.0.0.1:15721";
+        assert!(takeover(AppType::Claude).base_url_matches(
+            &json!({ "env": { "ANTHROPIC_BASE_URL": format!("{proxy}/") } }),
+            proxy
+        ));
+        assert!(takeover(AppType::Gemini).base_url_matches(
+            &json!({ "env": { "GOOGLE_GEMINI_BASE_URL": proxy } }),
+            proxy
+        ));
+        assert!(!takeover(AppType::Gemini)
+            .base_url_matches(&json!({ "env": { "ANTHROPIC_BASE_URL": proxy } }), proxy));
+        let codex_live = json!({
+            "config": format!(
+                "model_provider = \"p\"\n[model_providers.p]\nbase_url = \"{proxy}/v1\"\n"
+            )
+        });
+        assert!(takeover(AppType::Codex).base_url_matches(&codex_live, &format!("{proxy}/v1")));
+        assert!(!takeover(AppType::Codex).base_url_matches(&codex_live, proxy));
+        let opencode_live = json!({
+            "provider": {
+                "p": {
+                    "options": {
+                        "baseURL": format!("{proxy}/opencode/v1"),
+                        "apiKey": crate::proxy::inbound_auth::LEGACY_PROXY_TOKEN,
+                    }
+                }
+            }
+        });
+        assert!(takeover(AppType::OpenCode)
+            .base_url_matches(&opencode_live, &format!("{proxy}/opencode/v1")));
+        assert!(!takeover(AppType::OpenCode).base_url_matches(&opencode_live, proxy));
     }
 
     #[test]

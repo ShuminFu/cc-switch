@@ -1,6 +1,7 @@
 //! Grok Build 适配器（`~/.grok/config.toml`）
 
 pub mod config;
+mod takeover;
 
 use std::path::PathBuf;
 
@@ -13,6 +14,7 @@ use self::config::{
 use super::adapter::{AppAdapter, Credentials, McpProjector, ProxyTakeover, SessionSource};
 use crate::app_config::AppType;
 use crate::config::get_home_dir;
+use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
 
@@ -133,6 +135,38 @@ impl ProxyTakeover for GrokAdapter {
             .get("config")
             .and_then(Value::as_str)
             .is_some_and(config::has_proxy_token)
+    }
+
+    fn live_files(&self) -> Vec<PathBuf> {
+        vec![config::get_grok_config_path()]
+    }
+
+    fn read_live(&self) -> Result<Value, String> {
+        takeover::read_live()
+    }
+
+    fn write_live(&self, config: &Value) -> Result<(), String> {
+        takeover::write_live(config)
+    }
+
+    fn strip_placeholders(&self, live: &mut Value) -> Result<bool, String> {
+        takeover::strip_placeholders(live)
+    }
+
+    fn write_stripped_live(&self, live: &Value) -> Result<(), String> {
+        takeover::write_stripped_live(live)
+    }
+
+    fn base_url_matches(&self, live: &Value, expected: &str) -> bool {
+        takeover::base_url_matches(live, expected)
+    }
+
+    fn sync_live_credentials(&self, db: &Database, live: &Value) -> Result<(), String> {
+        takeover::sync_live_credentials(db, live)
+    }
+
+    fn preserves_live_toml_mcp(&self) -> bool {
+        true
     }
 }
 

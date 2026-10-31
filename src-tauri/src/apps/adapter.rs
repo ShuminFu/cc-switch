@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
+use crate::app_config::AppType;
 use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
@@ -237,10 +238,101 @@ pub trait McpProjector {
     fn remove(&self, id: &str) -> Result<(), AppError>;
 }
 
+/// 接管投影对当前供应商的依赖
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TakeoverProviderNeed {
+    /// 投影只改写 live 现有字段，不读取供应商
+    None,
+    /// 必须存在当前供应商
+    Required,
+    /// 严格模式必须存在；尽力模式缺少当前供应商时按现有 live 的凭据字段投影
+    RequiredWhenStrict,
+}
+
+/// 不支持某项接管操作时的错误（与旧实现的提示一致）
+pub(crate) const TAKEOVER_UNSUPPORTED: &str = "该应用不支持代理功能";
+
 /// 本地代理接管 live 配置的应用侧约定
+///
+/// 写入类方法收到的 `config` 已由调用方把 token 哨兵绑定为本安装的代理 token。
+/// 累加模式应用（[`ProxyTakeover::entry_takeover`] 返回 `Some`）的写入与清理走
+/// [`EntryTakeover`]，不经过 [`ProxyTakeover::write_live`] /
+/// [`ProxyTakeover::strip_placeholders`]。
 pub trait ProxyTakeover {
     /// live / 备份配置是否带有代理接管占位符
     fn has_placeholder(&self, settings: &Value) -> bool;
+
+    /// 接管会改写的 live 文件（接管快照逐字节记录这些文件）
+    fn live_files(&self) -> Vec<PathBuf>;
+
+    /// 读取接管使用的 live 配置
+    fn read_live(&self) -> Result<Value, String>;
+
+    /// 把整份 live 配置（接管后的 live 或备份）写回
+    fn write_live(&self, _config: &Value) -> Result<(), String> {
+        Err(TAKEOVER_UNSUPPORTED.to_string())
+    }
+
+    /// 写入接管后的 live；需要按当前供应商决定写法的应用（Codex）覆写
+    fn write_takeover_live(
+        &self,
+        config: &Value,
+        _provider: Option<&Provider>,
+    ) -> Result<(), String> {
+        self.write_live(config)
+    }
+
+    /// 无备份兜底：剥掉 live 中的代理 token 与本地代理地址，返回是否需要写回
+    fn strip_placeholders(&self, _live: &mut Value) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    /// 写回 [`ProxyTakeover::strip_placeholders`] 剥离后的 live
+    fn write_stripped_live(&self, live: &Value) -> Result<(), String> {
+        self.write_live(live)
+    }
+
+    /// live 中写入的代理地址是否与 `expected` 一致。
+    ///
+    /// 默认按条目级接管判断：任一带代理 token 的条目指向 `expected`。
+    fn base_url_matches(&self, live: &Value, expected: &str) -> bool {
+        let Some(entries) = self.entry_takeover() else {
+            return false;
+        };
+        entries.entries(live).iter().any(|(_, entry)| {
+            let endpoint = entries.endpoint(entry);
+            endpoint_has_proxy_token(&endpoint)
+                && endpoint
+                    .base_url
+                    .as_deref()
+                    .is_some_and(|url| proxy_urls_match(url, expected))
+        })
+    }
+
+    /// 接管投影对当前供应商的依赖
+    fn provider_need(&self) -> TakeoverProviderNeed {
+        TakeoverProviderNeed::None
+    }
+
+    /// 接管写入占位符前，把 live 中用户的真实凭据回写到当前供应商
+    fn sync_live_credentials(&self, _db: &Database, _live: &Value) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// 热切换时由供应商有效配置生成的接管备份内容
+    fn backup_projection(&self, settings: Value) -> Value {
+        settings
+    }
+
+    /// 代理运行期间保存当前供应商后是否按供应商重建被接管的 live
+    fn refresh_after_save(&self, _live_taken_over: bool) -> bool {
+        false
+    }
+
+    /// 按供应商重建 live 时是否保留现有 `config.toml` 中的 MCP 服务器（TOML 配置的应用）
+    fn preserves_live_toml_mcp(&self) -> bool {
+        false
+    }
 
     /// 官方供应商在接管期间是否仍可选用（默认拦截）
     fn official_provider_supported(&self, _provider: &Provider) -> bool {
@@ -305,6 +397,65 @@ pub(crate) fn apply_endpoint_field(
         None => {
             object.remove(key);
         }
+    }
+}
+
+/// 是否为指向本机的代理地址（清理接管残留时据此删除）
+pub(crate) fn is_local_proxy_url(url: &str) -> bool {
+    let url = url.trim();
+    if !url.starts_with("http://") {
+        return false;
+    }
+    let rest = &url["http://".len()..];
+    rest.starts_with("127.0.0.1")
+        || rest.starts_with("localhost")
+        || rest.starts_with("0.0.0.0")
+        || rest.starts_with("[::1]")
+        || rest.starts_with("[::]")
+        || rest.starts_with("::1")
+        || rest.starts_with("::")
+}
+
+/// 两个代理地址是否一致（忽略首尾空白与尾部斜杠）
+pub(crate) fn proxy_urls_match(actual: &str, expected: &str) -> bool {
+    actual.trim().trim_end_matches('/') == expected.trim().trim_end_matches('/')
+}
+
+/// `env` 对象中 `key` 的地址是否与 `expected` 一致
+pub(crate) fn env_url_matches(live: &Value, key: &str, expected: &str) -> bool {
+    live.get("env")
+        .and_then(|env| env.get(key))
+        .and_then(Value::as_str)
+        .is_some_and(|url| proxy_urls_match(url, expected))
+}
+
+/// 当前供应商（接管凭据回写的目标）；没有当前供应商或读取失败时返回 `None`
+pub(crate) fn current_provider_for_sync(
+    db: &Database,
+    app: &AppType,
+    display_name: &str,
+) -> Result<Option<Provider>, String> {
+    let provider_id = crate::settings::get_effective_current_provider(db, app)
+        .map_err(|e| format!("获取 {display_name} 当前供应商失败: {e}"))?;
+    Ok(provider_id.and_then(|id| db.get_provider_by_id(&id, app.as_str()).ok().flatten()))
+}
+
+/// 保存回写了凭据的供应商配置；失败只记录警告
+pub(crate) fn save_synced_provider(
+    db: &Database,
+    app: &AppType,
+    display_name: &str,
+    provider: &Provider,
+) {
+    if let Err(e) =
+        db.update_provider_settings_config(app.as_str(), &provider.id, &provider.settings_config)
+    {
+        log::warn!("同步 {display_name} Token 到数据库失败: {e}");
+    } else {
+        log::info!(
+            "已同步 {display_name} Token 到数据库 (provider: {})",
+            provider.id
+        );
     }
 }
 

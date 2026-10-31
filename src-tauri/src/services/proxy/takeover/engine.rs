@@ -7,6 +7,7 @@
 use super::claude::ClaudeTakeoverAuthPolicy;
 use super::*;
 use crate::app_config::AppType;
+use crate::apps::adapter::TakeoverProviderNeed;
 use crate::apps::registry::{self, AppCaps};
 use crate::provider::Provider;
 use serde_json::Value;
@@ -154,30 +155,35 @@ impl ProxyService {
             .ok_or_else(unsupported)
     }
 
-    /// 接管投影需要的当前供应商；Gemini / Grok Build 的投影不依赖供应商
+    /// 接管投影需要的当前供应商（见 [`crate::apps::ProxyTakeover::provider_need`]）
     fn takeover_provider(
         &self,
         app: &AppType,
         mode: TakeoverMode,
     ) -> Result<Option<Provider>, TakeoverError> {
-        let provider_error = |message| TakeoverError::Provider {
-            app: app.clone(),
-            message,
+        let need = crate::apps::adapter(app)
+            .takeover()
+            .map_or(TakeoverProviderNeed::None, |takeover| {
+                takeover.provider_need()
+            });
+        let required = match need {
+            TakeoverProviderNeed::None => return Ok(None),
+            TakeoverProviderNeed::Required => true,
+            TakeoverProviderNeed::RequiredWhenStrict => mode == TakeoverMode::Strict,
         };
-        match app {
-            AppType::Claude if mode == TakeoverMode::BestEffort => {
-                Ok(self.get_current_provider_for_app(app).ok().flatten())
-            }
-            AppType::Claude | AppType::Codex => self
-                .require_current_provider_for_app(app)
-                .map(Some)
-                .map_err(provider_error),
-            _ => Ok(None),
+        if !required {
+            return Ok(self.get_current_provider_for_app(app).ok().flatten());
         }
+        self.require_current_provider_for_app(app)
+            .map(Some)
+            .map_err(|message| TakeoverError::Provider {
+                app: app.clone(),
+                message,
+            })
     }
 
     /// 把接管字段（代理地址、token 占位符、模型映射等）投影到 Live 配置上
-    fn project_takeover_live(
+    pub(in crate::services::proxy) fn project_takeover_live(
         &self,
         app: &AppType,
         live_config: &mut Value,
@@ -213,20 +219,23 @@ impl ProxyService {
         Ok(())
     }
 
-    fn write_takeover_live(
+    pub(in crate::services::proxy) fn write_takeover_live(
         &self,
         app: &AppType,
         live_config: &Value,
         provider: Option<&Provider>,
     ) -> Result<(), TakeoverError> {
-        let written = match app {
-            AppType::Codex => self.write_codex_takeover_live_for_provider(live_config, provider),
-            _ => self.write_live_config_for_app(app, live_config),
-        };
-        written.map_err(|message| TakeoverError::Write {
+        let write_error = |message| TakeoverError::Write {
             app: app.clone(),
             message,
-        })
+        };
+        let takeover = crate::apps::adapter(app)
+            .takeover()
+            .ok_or_else(|| TakeoverError::Unsupported(app.clone()))?;
+        let bound = self.bind_proxy_token(live_config).map_err(write_error)?;
+        takeover
+            .write_takeover_live(&bound, provider)
+            .map_err(write_error)
     }
 
     /// Live 中写入的代理地址是否与 `expected` 一致
@@ -235,28 +244,8 @@ impl ProxyService {
         config: &Value,
         expected: &str,
     ) -> bool {
-        let env_url_matches = |key: &str| {
-            config
-                .get("env")
-                .and_then(|value| value.get(key))
-                .and_then(Value::as_str)
-                .is_some_and(|url| Self::proxy_urls_match(url, expected))
-        };
-        let config_text = config.get("config").and_then(Value::as_str);
-        match app {
-            AppType::Claude => env_url_matches("ANTHROPIC_BASE_URL"),
-            AppType::Gemini => env_url_matches("GOOGLE_GEMINI_BASE_URL"),
-            AppType::Codex => config_text.is_some_and(|text| {
-                Self::codex_config_has_base_url_matching(text, |url| {
-                    Self::proxy_urls_match(url, expected)
-                })
-            }),
-            AppType::GrokBuild => config_text.is_some_and(|text| {
-                crate::grok_config::base_url_matches(text, |url| {
-                    Self::proxy_urls_match(url, expected)
-                })
-            }),
-            _ => Self::entries_base_url_matches(app, config, expected),
-        }
+        crate::apps::adapter(app)
+            .takeover()
+            .is_some_and(|takeover| takeover.base_url_matches(config, expected))
     }
 }

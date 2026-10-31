@@ -4,6 +4,7 @@ pub mod claude_json;
 mod common_config;
 mod live_defaults;
 pub mod plugin;
+mod takeover;
 
 use std::path::PathBuf;
 
@@ -11,13 +12,15 @@ use serde_json::Value;
 
 pub(crate) use self::common_config::{extract_common_config, normalize_models_in_value};
 use super::adapter::{
-    AppAdapter, CommonSnippet, Credentials, McpProjector, ProxyTakeover, SessionSource,
+    env_url_matches, AppAdapter, CommonSnippet, Credentials, McpProjector, ProxyTakeover,
+    SessionSource, TakeoverProviderNeed,
 };
 use super::{json_deep_merge, json_deep_remove, json_is_subset};
 use crate::app_config::AppType;
 use crate::config::{
     get_claude_config_dir, get_claude_settings_path, get_home_dir, read_json_file, write_json_file,
 };
+use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
 
@@ -225,6 +228,39 @@ impl ProxyTakeover for ClaudeAdapter {
                 .and_then(Value::as_str)
                 .is_some_and(crate::proxy::inbound_auth::is_proxy_token)
         })
+    }
+
+    fn live_files(&self) -> Vec<PathBuf> {
+        vec![get_claude_settings_path()]
+    }
+
+    fn read_live(&self) -> Result<Value, String> {
+        takeover::read_live()
+    }
+
+    fn write_live(&self, config: &Value) -> Result<(), String> {
+        takeover::write_live(config)
+    }
+
+    fn strip_placeholders(&self, live: &mut Value) -> Result<bool, String> {
+        Ok(takeover::strip_placeholders(live))
+    }
+
+    fn base_url_matches(&self, live: &Value, expected: &str) -> bool {
+        env_url_matches(live, "ANTHROPIC_BASE_URL", expected)
+    }
+
+    /// 尽力接管可以按现有 live 的凭据字段写入占位符，不依赖当前供应商
+    fn provider_need(&self) -> TakeoverProviderNeed {
+        TakeoverProviderNeed::RequiredWhenStrict
+    }
+
+    fn sync_live_credentials(&self, db: &Database, live: &Value) -> Result<(), String> {
+        takeover::sync_live_credentials(db, live)
+    }
+
+    fn refresh_after_save(&self, _live_taken_over: bool) -> bool {
+        true
     }
 }
 

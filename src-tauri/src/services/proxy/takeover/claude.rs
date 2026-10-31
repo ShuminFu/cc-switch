@@ -1,10 +1,10 @@
-//! Claude Live 配置接管字段与读写
+//! Claude Live 配置接管字段
+//!
+//! Live 的读写、清理与凭据回写位于 [`crate::apps::claude`] 的 `ProxyTakeover` 实现。
 
 use super::*;
 use crate::app_config::AppType;
-use crate::config::{get_claude_settings_path, read_json_file, write_json_file};
 use crate::provider::Provider;
-use crate::proxy::inbound_auth::is_proxy_token;
 use crate::services::provider::build_effective_settings_with_common_config;
 use serde_json::{json, Map, Value};
 
@@ -310,81 +310,14 @@ impl ProxyService {
         Ok(effective_provider)
     }
 
-    pub(in crate::services::proxy) fn cleanup_claude_takeover_placeholders_in_live(
-        &self,
-    ) -> Result<(), String> {
-        let mut config = self.read_claude_live()?;
-
-        let Some(env) = config.get_mut("env").and_then(|v| v.as_object_mut()) else {
-            return Ok(());
-        };
-
-        for key in [
-            "ANTHROPIC_AUTH_TOKEN",
-            "ANTHROPIC_API_KEY",
-            "OPENROUTER_API_KEY",
-            "OPENAI_API_KEY",
-        ] {
-            if env
-                .get(key)
-                .and_then(|v| v.as_str())
-                .is_some_and(is_proxy_token)
-            {
-                env.remove(key);
-            }
-        }
-
-        if env
-            .get("ANTHROPIC_BASE_URL")
-            .and_then(|v| v.as_str())
-            .map(Self::is_local_proxy_url)
-            .unwrap_or(false)
-        {
-            env.remove("ANTHROPIC_BASE_URL");
-        }
-
-        self.write_claude_live(&config)?;
-        Ok(())
-    }
-
     pub(in crate::services::proxy) fn read_claude_live(&self) -> Result<Value, String> {
-        let path = get_claude_settings_path();
-        if !path.exists() {
-            return Err("Claude 配置文件不存在".to_string());
-        }
-
-        let mut value: Value =
-            read_json_file(&path).map_err(|e| format!("读取 Claude 配置失败: {e}"))?;
-
-        if value.is_null() {
-            value = json!({});
-        }
-
-        if !value.is_object() {
-            let kind = match &value {
-                Value::Null => "null",
-                Value::Bool(_) => "boolean",
-                Value::Number(_) => "number",
-                Value::String(_) => "string",
-                Value::Array(_) => "array",
-                Value::Object(_) => "object",
-            };
-            return Err(format!(
-                "Claude 配置文件格式错误：根节点必须是 JSON 对象（当前为 {kind}），路径: {}",
-                path.display()
-            ));
-        }
-
-        Ok(value)
+        self.read_live_for_takeover(&AppType::Claude)
     }
 
     pub(in crate::services::proxy) fn write_claude_live(
         &self,
         config: &Value,
     ) -> Result<(), String> {
-        let path = get_claude_settings_path();
-        let config = self.bind_proxy_token(config)?;
-        let settings = crate::services::provider::sanitize_claude_settings_for_live(&config);
-        write_json_file(&path, &settings).map_err(|e| format!("写入 Claude 配置失败: {e}"))
+        self.write_live_config_for_app(&AppType::Claude, config)
     }
 }

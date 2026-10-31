@@ -12,72 +12,75 @@ impl ProxyService {
         &self,
         provider: &Provider,
     ) -> Result<(), String> {
-        let effective_provider = self.claude_provider_with_effective_settings(provider)?;
-        let mut effective_settings = effective_provider.settings_config.clone();
-        let proxy_url = self.takeover_base_url(&AppType::Claude).await?;
-
-        Self::apply_claude_takeover_fields_for_provider(
-            &mut effective_settings,
-            &proxy_url,
-            &effective_provider,
-        );
-        self.write_claude_live(&effective_settings)?;
-        Ok(())
+        self.rebuild_takeover_live_from_provider(&AppType::Claude, provider)
+            .await
     }
 
     /// 代理运行期间保存当前供应商后，刷新被接管的 Live。
     ///
-    /// Claude 总是刷新；Codex 只在 Live 已被接管时刷新（模型映射投影在生成的
-    /// model_catalog_json 中，不刷新会让旧的目录指针与能力继续生效）。
+    /// 是否刷新由 [`crate::apps::ProxyTakeover::refresh_after_save`] 决定。
     pub async fn refresh_live_after_provider_save(
         &self,
         app_type: &AppType,
         provider: &Provider,
         live_taken_over: bool,
     ) -> Result<(), crate::error::AppError> {
-        match app_type {
-            AppType::Claude => self
-                .sync_claude_live_from_provider_while_proxy_active(provider)
-                .await
-                .map_err(|e| {
-                    crate::error::AppError::Message(format!("同步 Claude Live 配置失败: {e}"))
-                }),
-            AppType::Codex if live_taken_over => self
-                .sync_codex_live_from_provider_while_proxy_active(provider)
-                .await
-                .map_err(|e| {
-                    crate::error::AppError::Message(format!("同步 Codex Live 配置失败: {e}"))
-                }),
-            _ => Ok(()),
+        let refresh = crate::apps::adapter(app_type)
+            .takeover()
+            .is_some_and(|takeover| takeover.refresh_after_save(live_taken_over));
+        if !refresh {
+            return Ok(());
         }
+        self.rebuild_takeover_live_from_provider(app_type, provider)
+            .await
+            .map_err(|e| {
+                crate::error::AppError::Message(format!(
+                    "同步 {} Live 配置失败: {e}",
+                    crate::apps::registry::descriptor(app_type).display_name
+                ))
+            })
     }
 
     pub async fn sync_codex_live_from_provider_while_proxy_active(
         &self,
         provider: &Provider,
     ) -> Result<(), String> {
-        let existing_live = self.read_codex_live().ok();
-        let mut effective_settings = build_effective_settings_with_common_config(
-            self.db.as_ref(),
-            &AppType::Codex,
-            provider,
-        )
-        .map_err(|e| format!("构建 codex 有效配置失败: {e}"))?;
+        self.rebuild_takeover_live_from_provider(&AppType::Codex, provider)
+            .await
+    }
+
+    /// 按供应商有效配置重建被接管的 Live：投影接管字段后写入。
+    ///
+    /// TOML 配置的应用保留现有 Live 中的 MCP 服务器。
+    async fn rebuild_takeover_live_from_provider(
+        &self,
+        app_type: &AppType,
+        provider: &Provider,
+    ) -> Result<(), String> {
+        let preserves_toml_mcp = crate::apps::adapter(app_type)
+            .takeover()
+            .is_some_and(|takeover| takeover.preserves_live_toml_mcp());
+        let existing_live = preserves_toml_mcp
+            .then(|| self.read_live_for_takeover(app_type).ok())
+            .flatten();
+        let mut effective_settings =
+            build_effective_settings_with_common_config(self.db.as_ref(), app_type, provider)
+                .map_err(|e| format!("构建 {} 有效配置失败: {e}", app_type.as_str()))?;
         if let Some(existing_live) = existing_live.as_ref() {
             Self::preserve_toml_mcp_servers_from_existing_config(
                 &mut effective_settings,
                 existing_live,
             )?;
         }
-        let proxy_codex_base_url = self.takeover_base_url(&AppType::Codex).await?;
+        let proxy_url = self.takeover_base_url(app_type).await?;
 
-        Self::apply_codex_takeover_fields_for_provider(
+        self.project_takeover_live(
+            app_type,
             &mut effective_settings,
-            &proxy_codex_base_url,
-            provider,
+            &proxy_url,
+            Some(provider),
         )?;
-
-        self.write_codex_takeover_live_for_provider(&effective_settings, Some(provider))?;
+        self.write_takeover_live(app_type, &effective_settings, Some(provider))?;
         Ok(())
     }
 

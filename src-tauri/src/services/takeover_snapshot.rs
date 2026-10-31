@@ -98,21 +98,12 @@ pub(crate) struct RawLiveSnapshot {
     pub files: Vec<SnapshotFile>,
 }
 
-/// 接管会改写的 live 文件（与 `ProxyService` 的 read_*_live / write_*_live 一致）
+/// 接管会改写的 live 文件（见 [`crate::apps::adapter::ProxyTakeover::live_files`]）
 pub(crate) fn takeover_live_files(app_type: &AppType) -> Vec<PathBuf> {
-    match app_type {
-        AppType::Claude => vec![crate::config::get_claude_settings_path()],
-        AppType::Codex => vec![
-            crate::codex_config::get_codex_auth_path(),
-            crate::codex_config::get_codex_config_path(),
-        ],
-        AppType::Gemini => vec![crate::gemini_config::get_gemini_env_path()],
-        AppType::GrokBuild => vec![crate::grok_config::get_grok_config_path()],
-        AppType::OpenCode => vec![crate::apps::opencode::config::get_opencode_config_path()],
-        AppType::OpenClaw => vec![crate::apps::openclaw::config::get_openclaw_config_path()],
-        AppType::Hermes => vec![crate::apps::hermes::config::get_hermes_config_path()],
-        _ => Vec::new(),
-    }
+    crate::apps::adapter(app_type)
+        .takeover()
+        .map(|takeover| takeover.live_files())
+        .unwrap_or_default()
 }
 
 impl RawLiveSnapshot {

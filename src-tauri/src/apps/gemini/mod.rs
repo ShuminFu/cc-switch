@@ -2,6 +2,7 @@
 
 pub(crate) mod auth;
 pub mod config;
+mod takeover;
 
 use std::path::PathBuf;
 
@@ -14,12 +15,13 @@ use self::config::{
     write_gemini_env_atomic,
 };
 use super::adapter::{
-    first_non_empty_str, str_or_empty, AppAdapter, CommonSnippet, Credentials, McpProjector,
-    ProxyTakeover, SessionSource,
+    env_url_matches, first_non_empty_str, str_or_empty, AppAdapter, CommonSnippet, Credentials,
+    McpProjector, ProxyTakeover, SessionSource,
 };
 use super::{json_deep_merge, json_deep_remove, json_is_subset};
 use crate::app_config::AppType;
 use crate::config::{get_home_dir, read_json_file, write_json_file};
+use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
 
@@ -225,6 +227,34 @@ impl ProxyTakeover for GeminiAdapter {
             .and_then(|env| env.get("GEMINI_API_KEY"))
             .and_then(Value::as_str)
             .is_some_and(crate::proxy::inbound_auth::is_proxy_token)
+    }
+
+    fn live_files(&self) -> Vec<PathBuf> {
+        vec![get_gemini_env_path()]
+    }
+
+    fn read_live(&self) -> Result<Value, String> {
+        takeover::read_live()
+    }
+
+    fn write_live(&self, config: &Value) -> Result<(), String> {
+        takeover::write_live(config)
+    }
+
+    fn strip_placeholders(&self, live: &mut Value) -> Result<bool, String> {
+        Ok(takeover::strip_placeholders(live))
+    }
+
+    fn base_url_matches(&self, live: &Value, expected: &str) -> bool {
+        env_url_matches(live, "GOOGLE_GEMINI_BASE_URL", expected)
+    }
+
+    fn sync_live_credentials(&self, db: &Database, live: &Value) -> Result<(), String> {
+        takeover::sync_live_credentials(db, live)
+    }
+
+    fn backup_projection(&self, settings: Value) -> Value {
+        takeover::backup_projection(settings)
     }
 }
 

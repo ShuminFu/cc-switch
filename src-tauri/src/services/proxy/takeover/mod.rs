@@ -4,8 +4,8 @@
 
 use super::*;
 use crate::app_config::AppType;
-use crate::proxy::inbound_auth::is_proxy_token;
-use serde_json::{json, Value};
+use crate::apps::adapter::TAKEOVER_UNSUPPORTED;
+use serde_json::Value;
 use std::str::FromStr;
 use tauri::Emitter;
 
@@ -298,274 +298,24 @@ impl ProxyService {
         &self,
         app_type: &AppType,
     ) -> Result<Value, String> {
-        match app_type {
-            AppType::Claude => self.read_claude_live(),
-            AppType::Codex => self.read_codex_live(),
-            AppType::Gemini => self.read_gemini_live(),
-            AppType::GrokBuild => self.read_grok_live(),
-            _ if additive::entry_takeover(app_type).is_some() => self.read_entries_live(app_type),
-            _ => Err("该应用不支持代理功能".to_string()),
-        }
+        crate::apps::adapter(app_type)
+            .takeover()
+            .ok_or_else(|| TAKEOVER_UNSUPPORTED.to_string())?
+            .read_live()
     }
 
+    /// 把 live 中用户的真实凭据回写到当前供应商（条目级接管的应用不清空凭据，无需回写）
     pub(in crate::services::proxy) async fn sync_live_config_to_provider(
         &self,
         app_type: &AppType,
         live_config: &Value,
     ) -> Result<(), String> {
-        match app_type {
-            AppType::Claude => {
-                let provider_id =
-                    crate::settings::get_effective_current_provider(&self.db, &AppType::Claude)
-                        .map_err(|e| format!("获取 Claude 当前供应商失败: {e}"))?;
-
-                if let Some(provider_id) = provider_id {
-                    if let Ok(Some(mut provider)) =
-                        self.db.get_provider_by_id(&provider_id, "claude")
-                    {
-                        if let Some(env) = live_config.get("env").and_then(|v| v.as_object()) {
-                            let token_pair = [
-                                "ANTHROPIC_AUTH_TOKEN",
-                                "ANTHROPIC_API_KEY",
-                                "OPENROUTER_API_KEY",
-                                "OPENAI_API_KEY",
-                            ]
-                            .into_iter()
-                            .find_map(|key| {
-                                env.get(key)
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| (key, s.trim()))
-                            })
-                            .filter(|(_, token)| !token.is_empty() && !is_proxy_token(token));
-
-                            if let Some((token_key, token)) = token_pair {
-                                let env_obj = provider
-                                    .settings_config
-                                    .get_mut("env")
-                                    .and_then(|v| v.as_object_mut());
-
-                                match env_obj {
-                                    Some(obj) => {
-                                        if token_key == "ANTHROPIC_AUTH_TOKEN"
-                                            || token_key == "ANTHROPIC_API_KEY"
-                                        {
-                                            let mut updated = false;
-                                            if obj.contains_key("ANTHROPIC_AUTH_TOKEN") {
-                                                obj.insert(
-                                                    "ANTHROPIC_AUTH_TOKEN".to_string(),
-                                                    json!(token),
-                                                );
-                                                updated = true;
-                                            }
-                                            if obj.contains_key("ANTHROPIC_API_KEY") {
-                                                obj.insert(
-                                                    "ANTHROPIC_API_KEY".to_string(),
-                                                    json!(token),
-                                                );
-                                                updated = true;
-                                            }
-                                            if !updated {
-                                                obj.insert(token_key.to_string(), json!(token));
-                                            }
-                                        } else {
-                                            obj.insert(token_key.to_string(), json!(token));
-                                        }
-                                    }
-                                    None => {
-                                        // 至少写入一份可用的 Token
-                                        if provider.settings_config.is_null() {
-                                            provider.settings_config = json!({});
-                                        }
-
-                                        if let Some(root) = provider.settings_config.as_object_mut()
-                                        {
-                                            root.insert(
-                                                "env".to_string(),
-                                                json!({ token_key: token }),
-                                            );
-                                        } else {
-                                            log::warn!(
-                                                "Claude provider settings_config 格式异常（非对象），跳过写入 Token (provider: {provider_id})"
-                                            );
-                                        }
-                                    }
-                                }
-
-                                if let Err(e) = self.db.update_provider_settings_config(
-                                    "claude",
-                                    &provider_id,
-                                    &provider.settings_config,
-                                ) {
-                                    log::warn!("同步 Claude Token 到数据库失败: {e}");
-                                } else {
-                                    log::info!(
-                                        "已同步 Claude Token 到数据库 (provider: {provider_id})"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
+        match crate::apps::adapter(app_type).takeover() {
+            Some(takeover) if takeover.entry_takeover().is_none() => {
+                takeover.sync_live_credentials(&self.db, live_config)
             }
-            AppType::Codex => {
-                let provider_id =
-                    crate::settings::get_effective_current_provider(&self.db, &AppType::Codex)
-                        .map_err(|e| format!("获取 Codex 当前供应商失败: {e}"))?;
-
-                if let Some(provider_id) = provider_id {
-                    if let Ok(Some(mut provider)) =
-                        self.db.get_provider_by_id(&provider_id, "codex")
-                    {
-                        // The built-in official row is a routing capability, not
-                        // a credential store. Its auth must remain empty even
-                        // when the live Codex login uses OPENAI_API_KEY mode.
-                        if crate::proxy::providers::is_codex_official_provider(&provider) {
-                            return Ok(());
-                        }
-                        if let Some(token) = live_config
-                            .get("auth")
-                            .and_then(|v| v.get("OPENAI_API_KEY"))
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.trim())
-                            .filter(|s| !s.is_empty() && !is_proxy_token(s))
-                        {
-                            if let Some(auth_obj) = provider
-                                .settings_config
-                                .get_mut("auth")
-                                .and_then(|v| v.as_object_mut())
-                            {
-                                auth_obj.insert("OPENAI_API_KEY".to_string(), json!(token));
-                            } else {
-                                if provider.settings_config.is_null() {
-                                    provider.settings_config = json!({});
-                                }
-
-                                if let Some(root) = provider.settings_config.as_object_mut() {
-                                    root.insert(
-                                        "auth".to_string(),
-                                        json!({ "OPENAI_API_KEY": token }),
-                                    );
-                                } else {
-                                    log::warn!(
-                                        "Codex provider settings_config 格式异常（非对象），跳过写入 Token (provider: {provider_id})"
-                                    );
-                                }
-                            }
-
-                            if let Err(e) = self.db.update_provider_settings_config(
-                                "codex",
-                                &provider_id,
-                                &provider.settings_config,
-                            ) {
-                                log::warn!("同步 Codex Token 到数据库失败: {e}");
-                            } else {
-                                log::info!("已同步 Codex Token 到数据库 (provider: {provider_id})");
-                            }
-                        }
-                    }
-                }
-            }
-            AppType::Gemini => {
-                let provider_id =
-                    crate::settings::get_effective_current_provider(&self.db, &AppType::Gemini)
-                        .map_err(|e| format!("获取 Gemini 当前供应商失败: {e}"))?;
-
-                if let Some(provider_id) = provider_id {
-                    if let Ok(Some(mut provider)) =
-                        self.db.get_provider_by_id(&provider_id, "gemini")
-                    {
-                        if let Some(token) = live_config
-                            .get("env")
-                            .and_then(|v| v.get("GEMINI_API_KEY"))
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.trim())
-                            .filter(|s| !s.is_empty() && !is_proxy_token(s))
-                        {
-                            if let Some(env_obj) = provider
-                                .settings_config
-                                .get_mut("env")
-                                .and_then(|v| v.as_object_mut())
-                            {
-                                env_obj.insert("GEMINI_API_KEY".to_string(), json!(token));
-                            } else {
-                                if provider.settings_config.is_null() {
-                                    provider.settings_config = json!({});
-                                }
-
-                                if let Some(root) = provider.settings_config.as_object_mut() {
-                                    root.insert(
-                                        "env".to_string(),
-                                        json!({ "GEMINI_API_KEY": token }),
-                                    );
-                                } else {
-                                    log::warn!(
-                                        "Gemini provider settings_config 格式异常（非对象），跳过写入 Token (provider: {provider_id})"
-                                    );
-                                }
-                            }
-
-                            if let Err(e) = self.db.update_provider_settings_config(
-                                "gemini",
-                                &provider_id,
-                                &provider.settings_config,
-                            ) {
-                                log::warn!("同步 Gemini Token 到数据库失败: {e}");
-                            } else {
-                                log::info!(
-                                    "已同步 Gemini Token 到数据库 (provider: {provider_id})"
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-            AppType::GrokBuild => {
-                let provider_id =
-                    crate::settings::get_effective_current_provider(&self.db, &AppType::GrokBuild)
-                        .map_err(|e| format!("获取 Grok Build 当前供应商失败: {e}"))?;
-
-                if let Some(provider_id) = provider_id {
-                    if let Ok(Some(mut provider)) =
-                        self.db.get_provider_by_id(&provider_id, "grokbuild")
-                    {
-                        let live_config_toml = live_config
-                            .get("config")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default();
-                        if let Some(token) =
-                            crate::grok_config::extract_inline_api_key(live_config_toml)
-                        {
-                            if !token.is_empty() && !is_proxy_token(&token) {
-                                if let Some(provider_config) = provider
-                                    .settings_config
-                                    .get("config")
-                                    .and_then(Value::as_str)
-                                {
-                                    let updated =
-                                        crate::grok_config::update_api_key(provider_config, &token)
-                                            .map_err(|e| {
-                                                format!("更新 Grok Build API Key 失败: {e}")
-                                            })?;
-                                    provider.settings_config["config"] = json!(updated);
-                                    self.db
-                                        .update_provider_settings_config(
-                                            "grokbuild",
-                                            &provider_id,
-                                            &provider.settings_config,
-                                        )
-                                        .map_err(|e| {
-                                            format!("同步 Grok Build Token 到数据库失败: {e}")
-                                        })?;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
+            _ => Ok(()),
         }
-
-        Ok(())
     }
 
     pub(in crate::services::proxy) async fn sync_live_to_providers(&self) -> Result<(), String> {
@@ -587,16 +337,13 @@ impl ProxyService {
         app_type: &AppType,
         config: &Value,
     ) -> Result<(), String> {
-        match app_type {
-            AppType::Claude => self.write_claude_live(config),
-            AppType::Codex => self.write_codex_live(config),
-            AppType::Gemini => self.write_gemini_live(config),
-            AppType::GrokBuild => self.write_grok_live(config),
-            _ if additive::entry_takeover(app_type).is_some() => {
-                self.write_entries_live(app_type, config)
-            }
-            _ => Err("该应用不支持代理功能".to_string()),
+        if additive::entry_takeover(app_type).is_some() {
+            return self.write_entries_live(app_type, config);
         }
+        let takeover = crate::apps::adapter(app_type)
+            .takeover()
+            .ok_or_else(|| TAKEOVER_UNSUPPORTED.to_string())?;
+        takeover.write_live(&self.bind_proxy_token(config)?)
     }
 
     pub fn detect_takeover_in_live_config_for_app(&self, app_type: &AppType) -> bool {
@@ -608,32 +355,21 @@ impl ProxyService {
         &self,
         app_type: &AppType,
     ) -> Result<(), String> {
-        match app_type {
-            AppType::Claude => self.cleanup_claude_takeover_placeholders_in_live(),
-            AppType::Codex => self.cleanup_codex_takeover_placeholders_in_live(),
-            AppType::Gemini => self.cleanup_gemini_takeover_placeholders_in_live(),
-            AppType::GrokBuild => self.cleanup_grok_takeover_placeholders_in_live(),
-            _ => self.cleanup_entry_placeholders_in_live(app_type),
+        if additive::entry_takeover(app_type).is_some() {
+            return self.cleanup_entry_placeholders_in_live(app_type);
         }
+        let Some(takeover) = crate::apps::adapter(app_type).takeover() else {
+            return Ok(());
+        };
+        let mut live = takeover.read_live()?;
+        if takeover.strip_placeholders(&mut live)? {
+            takeover.write_stripped_live(&self.bind_proxy_token(&live)?)?;
+        }
+        Ok(())
     }
 
     pub(in crate::services::proxy) fn is_local_proxy_url(url: &str) -> bool {
-        let url = url.trim();
-        if !url.starts_with("http://") {
-            return false;
-        }
-        let rest = &url["http://".len()..];
-        rest.starts_with("127.0.0.1")
-            || rest.starts_with("localhost")
-            || rest.starts_with("0.0.0.0")
-            || rest.starts_with("[::1]")
-            || rest.starts_with("[::]")
-            || rest.starts_with("::1")
-            || rest.starts_with("::")
-    }
-
-    pub(in crate::services::proxy) fn proxy_urls_match(actual: &str, expected: &str) -> bool {
-        actual.trim().trim_end_matches('/') == expected.trim().trim_end_matches('/')
+        crate::apps::adapter::is_local_proxy_url(url)
     }
 
     pub(in crate::services::proxy) async fn live_takeover_matches_current_proxy(

@@ -1857,7 +1857,7 @@ experimental_bearer_token = "PROXY_MANAGED"
     );
 
     service
-        .cleanup_codex_takeover_placeholders_in_live()
+        .cleanup_takeover_placeholders_in_live_for_app(&AppType::Codex)
         .expect("cleanup Codex takeover placeholders");
 
     let live_auth: Value =

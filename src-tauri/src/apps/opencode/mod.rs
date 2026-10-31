@@ -219,6 +219,14 @@ impl ProxyTakeover for OpenCodeAdapter {
         entries_have_placeholder(self, settings)
     }
 
+    fn live_files(&self) -> Vec<PathBuf> {
+        AppAdapter::live_files(self)
+    }
+
+    fn read_live(&self) -> Result<Value, String> {
+        AppAdapter::read_live(self).map_err(|e| format!("读取 OpenCode 配置失败: {e}"))
+    }
+
     fn entry_takeover(&self) -> Option<&dyn EntryTakeover> {
         Some(self)
     }

@@ -32,12 +32,7 @@ impl ProxyService {
         &self,
         app_type: &AppType,
     ) -> Result<Value, String> {
-        crate::apps::adapter(app_type).read_live().map_err(|e| {
-            format!(
-                "读取 {} 配置失败: {e}",
-                registry::descriptor(app_type).display_name
-            )
-        })
+        self.read_live_for_takeover(app_type)
     }
 
     /// 应用当前使用的供应商条目：默认模型引用的条目 → 当前供应商 → 唯一条目
@@ -225,25 +220,6 @@ impl ProxyService {
                 .map_err(|e| format!("清理 {display_name} 接管占位符失败: {e}"))?;
         }
         Ok(())
-    }
-
-    /// live 中被接管的条目是否指向 `expected`
-    pub(in crate::services::proxy) fn entries_base_url_matches(
-        app_type: &AppType,
-        config: &Value,
-        expected: &str,
-    ) -> bool {
-        let Some(entries) = entry_takeover(app_type) else {
-            return false;
-        };
-        entries.entries(config).iter().any(|(_, entry)| {
-            let endpoint = entries.endpoint(entry);
-            endpoint_has_proxy_token(&endpoint)
-                && endpoint
-                    .base_url
-                    .as_deref()
-                    .is_some_and(|url| Self::proxy_urls_match(url, expected))
-        })
     }
 
     /// 累加模式应用的接管快照只在恢复后的 live 与备份完全一致时才逐字节还原：

@@ -9,6 +9,7 @@ mod common_config;
 pub mod config;
 pub mod history_migration;
 pub mod state_db;
+pub(crate) mod takeover;
 
 use std::path::PathBuf;
 
@@ -26,9 +27,11 @@ use self::config::{
 };
 use super::adapter::{
     AppAdapter, CommonSnippet, Credentials, McpProjector, ProxyTakeover, SessionSource,
+    TakeoverProviderNeed,
 };
 use crate::app_config::AppType;
 use crate::config::get_home_dir;
+use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
 use crate::proxy::inbound_auth::is_proxy_token;
@@ -374,6 +377,55 @@ impl ProxyTakeover for CodexAdapter {
     /// 内置 Codex 官方供应商在接管期间可选：Codex 自己持有 ChatGPT 登录，代理只转发
     fn official_provider_supported(&self, provider: &Provider) -> bool {
         crate::proxy::providers::is_codex_official_provider(provider)
+    }
+
+    fn live_files(&self) -> Vec<PathBuf> {
+        vec![
+            crate::codex_config::get_codex_auth_path(),
+            crate::codex_config::get_codex_config_path(),
+        ]
+    }
+
+    fn read_live(&self) -> Result<Value, String> {
+        takeover::read_live()
+    }
+
+    fn write_live(&self, config: &Value) -> Result<(), String> {
+        takeover::write_live(config)
+    }
+
+    fn write_takeover_live(
+        &self,
+        config: &Value,
+        provider: Option<&Provider>,
+    ) -> Result<(), String> {
+        takeover::write_takeover_live(config, provider)
+    }
+
+    fn strip_placeholders(&self, live: &mut Value) -> Result<bool, String> {
+        takeover::strip_placeholders(live)
+    }
+
+    fn base_url_matches(&self, live: &Value, expected: &str) -> bool {
+        takeover::base_url_matches(live, expected)
+    }
+
+    fn provider_need(&self) -> TakeoverProviderNeed {
+        TakeoverProviderNeed::Required
+    }
+
+    fn sync_live_credentials(&self, db: &Database, live: &Value) -> Result<(), String> {
+        takeover::sync_live_credentials(db, live)
+    }
+
+    /// 只在 live 已被接管时刷新：模型映射投影在生成的 model_catalog_json 中，
+    /// 不刷新会让旧的目录指针与能力继续生效
+    fn refresh_after_save(&self, live_taken_over: bool) -> bool {
+        live_taken_over
+    }
+
+    fn preserves_live_toml_mcp(&self) -> bool {
+        true
     }
 }
 

@@ -411,25 +411,16 @@ impl ProxyService {
             }
         }
 
-        let backup_json = match app_type_enum {
-            AppType::Claude => serde_json::to_string(&effective_settings)
-                .map_err(|e| format!("序列化 Claude 配置失败: {e}"))?,
-            AppType::Codex => serde_json::to_string(&effective_settings)
-                .map_err(|e| format!("序列化 Codex 配置失败: {e}"))?,
-            AppType::GrokBuild => serde_json::to_string(&effective_settings)
-                .map_err(|e| format!("序列化 Grok Build 配置失败: {e}"))?,
-            AppType::Gemini => {
-                // Gemini takeover 仅修改 .env；settings.json（含 mcpServers）保持原样。
-                let env_backup = if let Some(env) = effective_settings.get("env") {
-                    json!({ "env": env })
-                } else {
-                    json!({ "env": {} })
-                };
-                serde_json::to_string(&env_backup)
-                    .map_err(|e| format!("序列化 Gemini 配置失败: {e}"))?
-            }
-            _ => return Err(format!("未知的应用类型: {app_type}")),
-        };
+        let takeover = crate::apps::adapter(&app_type_enum)
+            .takeover()
+            .ok_or_else(|| format!("未知的应用类型: {app_type}"))?;
+        let backup_json = serde_json::to_string(&takeover.backup_projection(effective_settings))
+            .map_err(|e| {
+                format!(
+                    "序列化 {} 配置失败: {e}",
+                    crate::apps::registry::descriptor(&app_type_enum).display_name
+                )
+            })?;
 
         self.db
             .save_live_backup(app_type, &backup_json)
