@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getConfigTomlText,
   getProviderCodec,
   getProviderEndpoint,
   getProviderModels,
@@ -181,5 +182,13 @@ describe("provider codecs (FE-PROV-22)", () => {
       npm: "x",
       options: { apiKey: "k" },
     });
+  });
+});
+
+describe("getConfigTomlText (FE-ARCH-28)", () => {
+  it("returns the config.toml text only when it is a string", () => {
+    expect(getConfigTomlText({ auth: {}, config: "a = 1" })).toBe("a = 1");
+    expect(getConfigTomlText({ config: { nested: true } })).toBeUndefined();
+    expect(getConfigTomlText(null)).toBeUndefined();
   });
 });

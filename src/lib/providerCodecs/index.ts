@@ -379,3 +379,12 @@ export const parseSettingsConfig = (json: string): Rec | undefined => {
     return undefined;
   }
 };
+
+/**
+ * The `config.toml` text of a Codex / Grok Build `settingsConfig`
+ * (`{ auth, config: "<toml>" }`), or `undefined` (FE-ARCH-28).
+ */
+export function getConfigTomlText(settingsConfig: unknown): string | undefined {
+  const config = asRecord(settingsConfig)?.config;
+  return typeof config === "string" ? config : undefined;
+}

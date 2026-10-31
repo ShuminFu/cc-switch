@@ -20,6 +20,7 @@ import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge"
 import { FailoverPriorityBadge } from "@/components/providers/FailoverPriorityBadge";
 import { BudgetLimitBadge } from "@/components/usage/BudgetLimitBadge";
 import {
+  getConfigTomlText,
   getProviderCodec,
   getProviderEndpoint,
   getProviderModels,
@@ -207,17 +208,15 @@ function ProviderCardImpl({
       provider.meta?.apiFormat === "anthropic"
     )
       return true;
-    const config = (provider.settingsConfig as Record<string, any>)?.config;
-    return (
-      typeof config === "string" &&
-      (isCodexChatWireApi(extractCodexWireApi(config)) ||
-        isCodexAnthropicWireApi(extractCodexWireApi(config)))
-    );
+    const config = getConfigTomlText(provider.settingsConfig);
+    if (config === undefined) return false;
+    const wireApi = extractCodexWireApi(config);
+    return isCodexChatWireApi(wireApi) || isCodexAnthropicWireApi(wireApi);
   }, [
     appId,
     provider.category,
     provider.meta?.apiFormat,
-    (provider.settingsConfig as Record<string, any>)?.config,
+    provider.settingsConfig,
   ]);
   // One usage observer per card, shared with UsageFooter (PERF-47).
   const usageQuery = useProviderUsage(provider, appId, {

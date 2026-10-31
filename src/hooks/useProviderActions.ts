@@ -18,6 +18,7 @@ import {
   useSwitchProviderMutation,
 } from "@/lib/query";
 import { usageKeys } from "@/lib/query/usage";
+import { getConfigTomlText } from "@/lib/providerCodecs";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { openclawKeys } from "@/hooks/useOpenClaw";
 import {
@@ -180,26 +181,18 @@ export function useProviderActions(
       const isCopilotProvider =
         activeApp === "claude" &&
         provider.meta?.providerType === "github_copilot";
+      const isCodexLike = activeApp === "codex" || activeApp === "grokbuild";
+      const configToml = getConfigTomlText(provider.settingsConfig);
+      const wireApi =
+        configToml !== undefined ? extractCodexWireApi(configToml) : undefined;
       const isCodexChatFormat =
-        (activeApp === "codex" || activeApp === "grokbuild") &&
+        isCodexLike &&
         (provider.meta?.apiFormat === "openai_chat" ||
-          (typeof (provider.settingsConfig as Record<string, any>)?.config ===
-            "string" &&
-            isCodexChatWireApi(
-              extractCodexWireApi(
-                (provider.settingsConfig as Record<string, any>).config,
-              ),
-            )));
+          isCodexChatWireApi(wireApi));
       const isCodexAnthropicFormat =
-        (activeApp === "codex" || activeApp === "grokbuild") &&
+        isCodexLike &&
         (provider.meta?.apiFormat === "anthropic" ||
-          (typeof (provider.settingsConfig as Record<string, any>)?.config ===
-            "string" &&
-            isCodexAnthropicWireApi(
-              extractCodexWireApi(
-                (provider.settingsConfig as Record<string, any>).config,
-              ),
-            )));
+          isCodexAnthropicWireApi(wireApi));
 
       // Determine why this provider requires the proxy
       let proxyRequiredReason: string | null = null;
