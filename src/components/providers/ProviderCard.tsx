@@ -33,6 +33,10 @@ import { supportsOfficialProxyTakeover } from "@/utils/providerCapabilities";
 import { useProviderHealth } from "@/lib/query/failover";
 import { useProviderUsage } from "@/lib/query/queries";
 import { resolveProviderIcon } from "@/utils/providerIcon";
+import { buildProviderDeeplink } from "@/lib/deeplinkBuilder";
+import { copyText } from "@/lib/clipboard";
+import { extractErrorMessage } from "@/utils/errorUtils";
+import { toast } from "sonner";
 
 interface DragHandleProps {
   attributes: DraggableAttributes;
@@ -236,6 +240,29 @@ function ProviderCardImpl({
     }
   }, [hasMultiplePlans]);
 
+  // Share links go through the deep-link importer, which creates Claude,
+  // Codex and Gemini providers (FE-PROV-55).
+  const canShare =
+    !isAnyOmo &&
+    (appId === "claude" || appId === "codex" || appId === "gemini");
+  const handleShare = async () => {
+    try {
+      await copyText(buildProviderDeeplink(provider, appId));
+      toast.success(
+        t("provider.shareLinkCopied", {
+          defaultValue: "Share link copied (API key not included)",
+        }),
+      );
+    } catch (error) {
+      toast.error(
+        t("provider.shareLinkCopyFailed", {
+          defaultValue: "Failed to copy the share link: {{error}}",
+          error: extractErrorMessage(error),
+        }),
+      );
+    }
+  };
+
   const handleOpenWebsite = () => {
     if (!isClickableUrl) {
       return;
@@ -432,7 +459,8 @@ function ProviderCardImpl({
                 <span
                   className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200"
                   title={t("provider.managedByHermesHint", {
-                    defaultValue: "Defined in Hermes' providers: dict. Edit or remove it via Hermes Web UI.",
+                    defaultValue:
+                      "Defined in Hermes' providers: dict. Edit or remove it via Hermes Web UI.",
                   })}
                 >
                   {t("provider.managedByHermes", {
@@ -594,6 +622,7 @@ function ProviderCardImpl({
               onOpenTerminal={
                 onOpenTerminal ? () => onOpenTerminal(provider) : undefined
               }
+              onShare={canShare ? handleShare : undefined}
               isAutoFailoverEnabled={isAutoFailoverEnabled}
               isInFailoverQueue={isInFailoverQueue}
               onToggleFailover={onToggleFailover}

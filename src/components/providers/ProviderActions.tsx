@@ -7,6 +7,7 @@ import {
   Loader2,
   Minus,
   Play,
+  Link2,
   Plus,
   Terminal,
   Trash2,
@@ -37,6 +38,8 @@ interface ProviderActionsProps {
   onRemoveFromConfig?: () => void;
   onDisableOmo?: () => void;
   onOpenTerminal?: () => void;
+  /** Copy a ccswitch:// share link (without the API key). */
+  onShare?: () => void;
   isAutoFailoverEnabled?: boolean;
   isInFailoverQueue?: boolean;
   onToggleFailover?: (enabled: boolean) => void;
@@ -78,6 +81,7 @@ export function ProviderActions({
   onRemoveFromConfig,
   onDisableOmo,
   onOpenTerminal,
+  onShare,
   isAutoFailoverEnabled = false,
   isInFailoverQueue = false,
   onToggleFailover,
@@ -242,7 +246,8 @@ export function ProviderActions({
   const canDelete =
     !isReadOnly && (isOmo || isAdditiveMode ? true : !isCurrent);
   const readOnlyHint = t("provider.managedByHermesHint", {
-    defaultValue: "Defined in Hermes' providers: dict. Edit or remove it via Hermes Web UI.",
+    defaultValue:
+      "Defined in Hermes' providers: dict. Edit or remove it via Hermes Web UI.",
   });
 
   return (
@@ -368,6 +373,20 @@ export function ProviderActions({
         >
           <BarChart3 className="h-4 w-4" />
         </Button>
+
+        {onShare && (
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onShare}
+            title={t("provider.copyShareLink", {
+              defaultValue: "Copy share link (without API key)",
+            })}
+            className={iconButtonClass}
+          >
+            <Link2 className="h-4 w-4" />
+          </Button>
+        )}
 
         {onOpenTerminal && (
           <Button
