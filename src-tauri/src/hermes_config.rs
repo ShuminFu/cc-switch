@@ -30,7 +30,7 @@
 //!     args: ["-y", "@modelcontextprotocol/server-filesystem"]
 //! ```
 
-use crate::config::{atomic_write, get_app_config_dir};
+use crate::config::{atomic_write, atomic_write_secret, get_app_config_dir};
 use crate::error::AppError;
 use crate::settings::{effective_backup_retain_count, get_hermes_override_dir};
 use chrono::Local;
@@ -673,7 +673,7 @@ fn create_hermes_backup(source: &str) -> Result<PathBuf, AppError> {
         counter += 1;
     }
 
-    atomic_write(&backup_path, source.as_bytes())?;
+    atomic_write_secret(&backup_path, source.as_bytes())?;
     cleanup_hermes_backups(&backup_dir)?;
     Ok(backup_path)
 }
@@ -754,7 +754,7 @@ fn write_yaml_section_to_config_locked(
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
 
-    atomic_write(&config_path, new_raw.as_bytes())?;
+    atomic_write_secret(&config_path, new_raw.as_bytes())?;
 
     log::debug!(
         "Hermes config section '{}' written to {:?}",
@@ -2100,6 +2100,25 @@ custom_providers:
             assert_eq!(provider["api_key"], "sk-new");
             assert_eq!(provider["request_timeout_seconds"], 300);
             assert_eq!(provider["key_env"], "ACME_API_KEY");
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn new_hermes_config_is_created_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        with_test_home(|| {
+            set_provider(
+                "acme",
+                serde_json::json!({"base_url": "https://x.example.com", "api_key": "sk"}),
+            )
+            .unwrap();
+            let mode = fs::metadata(get_hermes_config_path())
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
         });
     }
 

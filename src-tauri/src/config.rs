@@ -375,6 +375,9 @@ fn write_json_file_with_mode<T: Serialize>(
         )?
     };
 
+    if mode == NewFileMode::Secret {
+        crate::adapters::live_file::ensure_no_vault_placeholder(path, &json)?;
+    }
     atomic_write_with_mode(path, json.as_bytes(), mode)
 }
 
@@ -388,6 +391,7 @@ pub fn write_text_file(path: &Path, data: &str) -> Result<(), AppError> {
 
 /// 原子写入携带密钥的文本文件：新建文件权限为 0600（已有文件保留原权限）
 pub fn write_text_file_secret(path: &Path, data: &str) -> Result<(), AppError> {
+    crate::adapters::live_file::ensure_no_vault_placeholder(path, data)?;
     atomic_write_secret(path, data.as_bytes())
 }
 

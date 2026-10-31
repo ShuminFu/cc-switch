@@ -4,7 +4,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::{atomic_write, get_claude_mcp_path};
+use crate::config::{atomic_write_secret, get_claude_mcp_path};
 use crate::error::AppError;
 
 /// 需要在 Windows 上用 cmd /c 包装的命令
@@ -52,11 +52,81 @@ fn wrap_command_for_windows(obj: &mut Map<String, Value>) {
         .cloned()
         .unwrap_or_default();
 
+    // cmd.exe 会重新解释 & | < > ^：逐个转义，无法安全转义时不包装（CFG-05）
+    let Some(escaped) = cmd_c_escape_args(&original_args) else {
+        log::warn!(
+            "MCP command '{cmd}' has arguments cmd.exe cannot pass through safely; written without the cmd /c wrapper"
+        );
+        return;
+    };
+
     let mut new_args = vec![Value::String("/c".into()), Value::String(cmd.into())];
-    new_args.extend(original_args);
+    new_args.extend(escaped);
 
     obj.insert("command".into(), Value::String("cmd".into()));
     obj.insert("args".into(), Value::Array(new_args));
+}
+
+/// Characters `cmd.exe /c` interprets outside double quotes.
+const CMD_METACHARS: &[char] = &['&', '|', '<', '>', '^'];
+
+/// Escape arguments for `cmd /c <cmd> args…` (CFG-05).
+///
+/// Claude Code spawns `cmd` with an argv that Node/libuv joins into one
+/// command line, quoting an argument only when it is empty or contains a
+/// space, tab or `"`. cmd.exe then re-parses that line, so a bare `&`, `|`,
+/// `<`, `>` or `^` would split or redirect the command. Unquoted arguments
+/// get each metacharacter caret-escaped; quoted ones are already literal for
+/// cmd unless they also contain `"` (libuv's `\"` toggles cmd's quote state),
+/// which cannot be escaped reliably, so `None` is returned and the caller
+/// must not wrap. `%VAR%` expansion is kept on purpose: Windows configs rely
+/// on it.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn cmd_c_escape_args(args: &[Value]) -> Option<Vec<Value>> {
+    args.iter()
+        .map(|arg| {
+            let Some(s) = arg.as_str() else {
+                return Some(arg.clone());
+            };
+            if !s.contains(CMD_METACHARS) {
+                return Some(arg.clone());
+            }
+            let quoted = s.is_empty() || s.contains([' ', '\t', '"']);
+            if quoted {
+                return (!s.contains('"')).then(|| arg.clone());
+            }
+            let mut out = String::with_capacity(s.len() + 4);
+            for c in s.chars() {
+                if CMD_METACHARS.contains(&c) {
+                    out.push('^');
+                }
+                out.push(c);
+            }
+            Some(Value::String(out))
+        })
+        .collect()
+}
+
+/// Inverse of [`cmd_c_escape_args`] for one unquoted argument.
+fn cmd_c_unescape_arg(arg: &str) -> String {
+    if arg.contains([' ', '\t', '"']) || !arg.contains('^') {
+        return arg.to_string();
+    }
+    let mut out = String::with_capacity(arg.len());
+    let mut chars = arg.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '^' {
+            if let Some(&next) = chars.peek() {
+                if CMD_METACHARS.contains(&next) {
+                    out.push(next);
+                    chars.next();
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// 非 Windows 平台无需处理
@@ -125,7 +195,13 @@ pub fn unwrap_windows_command(spec: &Value) -> Value {
         return out;
     }
     obj.insert("command".into(), Value::String(inner.to_string()));
-    let rest: Vec<Value> = args[2..].to_vec();
+    let rest: Vec<Value> = args[2..]
+        .iter()
+        .map(|arg| match arg.as_str() {
+            Some(s) => Value::String(cmd_c_unescape_arg(s)),
+            None => arg.clone(),
+        })
+        .collect();
     if rest.is_empty() {
         obj.remove("args");
     } else {
@@ -239,7 +315,7 @@ fn write_json_value(path: &Path, value: &Value) -> Result<(), AppError> {
     }
     let json =
         serde_json::to_string_pretty(value).map_err(|e| AppError::JsonSerialize { source: e })?;
-    atomic_write(path, json.as_bytes())
+    atomic_write_secret(path, json.as_bytes())
 }
 
 pub fn get_mcp_status() -> Result<McpStatus, AppError> {
@@ -506,6 +582,43 @@ pub fn set_mcp_servers_map(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn cmd_c_escape_neutralises_shell_metacharacters() {
+        let args = vec![
+            json!("-y"),
+            json!("a&calc"),
+            json!("x|y"),
+            json!("%APPDATA%"),
+        ];
+        assert_eq!(
+            cmd_c_escape_args(&args).unwrap(),
+            vec![
+                json!("-y"),
+                json!("a^&calc"),
+                json!("x^|y"),
+                json!("%APPDATA%")
+            ]
+        );
+        // quoted by libuv (contains a space): already literal for cmd
+        assert_eq!(
+            cmd_c_escape_args(&[json!("a & b")]).unwrap(),
+            vec![json!("a & b")]
+        );
+        // an embedded quote plus a metacharacter cannot be passed safely
+        assert!(cmd_c_escape_args(&[json!("a\"&calc")]).is_none());
+    }
+
+    #[test]
+    fn unwrap_reverses_cmd_c_escaping() {
+        let wrapped = json!({
+            "command": "cmd",
+            "args": ["/c", "npx", "-y", "a^&calc", "a & b"]
+        });
+        let spec = unwrap_windows_command(&wrapped);
+        assert_eq!(spec["command"], json!("npx"));
+        assert_eq!(spec["args"], json!(["-y", "a&calc", "a & b"]));
+    }
 
     #[test]
     fn unwrap_windows_command_restores_portable_spec() {

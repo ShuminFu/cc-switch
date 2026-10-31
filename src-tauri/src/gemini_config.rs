@@ -554,10 +554,14 @@ fn update_selected_type_at(
         }
     }
 
-    if backup {
-        crate::config::backup_live_file("gemini", settings_path);
-    }
-    crate::config::write_json_file(settings_path, &settings_content)?;
+    // Gemini CLI allows comments in settings.json: patch the document in
+    // place instead of re-serialising it (comments and key order survive).
+    let opts = if backup {
+        crate::adapters::live_file::WriteOptions::backup("gemini")
+    } else {
+        crate::adapters::live_file::WriteOptions::default()
+    };
+    crate::adapters::live_file::write_json_preserving(settings_path, &settings_content, opts)?;
 
     Ok(())
 }
@@ -650,7 +654,10 @@ mod tests {
         .unwrap();
 
         update_selected_type_at(&path, "gemini-api-key", false).unwrap();
-        let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        // the JSONC comment survives the in-place edit
+        assert!(written.starts_with("// keep\n"), "{written}");
+        let value: Value = json5::from_str(&written).unwrap();
         assert_eq!(value["theme"], "dark");
         assert_eq!(value["mcpServers"]["x"]["command"], "x");
         assert_eq!(value["security"]["auth"]["selectedType"], "gemini-api-key");
