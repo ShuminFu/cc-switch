@@ -277,5 +277,85 @@
   "TEST-33": {
     "status": "PARTIAL",
     "note": "umbrella theme; its child findings are tracked individually in this table"
+  },
+  "PRODUCT-18": {
+    "status": "SKIPPED",
+    "note": "rewriting OpenCode/OpenClaw/Hermes base URLs is only safe once per-provider proxy routes and usage attribution exist"
+  },
+  "DB-17": {
+    "status": "SKIPPED",
+    "note": "junction tables would drop the enabled_* columns older clients read from synced rows; needs a coordinated sync-format break"
+  },
+  "SVC-28": {
+    "status": "SKIPPED",
+    "note": "needs a typed SwitchResult change, bindings regen, UI text and a per-app live-ownership record"
+  },
+  "SVC-36": {
+    "status": "SKIPPED",
+    "note": "needs streaming WebDAV/S3 transports; acceptance is a manual memory measurement"
+  },
+  "PRODUCT-16": {
+    "status": "SKIPPED",
+    "note": "universal providers for five more apps need per-app settings-format conversion in services and forms"
+  },
+  "PRODUCT-49": {
+    "status": "SKIPPED",
+    "note": "depends on PRODUCT-16"
+  },
+  "PRODUCT-41": {
+    "status": "SKIPPED",
+    "note": "provider tags/archive need new ProviderMeta fields plus tray and failover exclusion"
+  },
+  "FE-ARCH-26": {
+    "status": "SKIPPED",
+    "note": "a transport layer replacing the IPC mocks is a cross-cutting rewrite; the e2e harness already runs on mocked IPC"
+  },
+  "PERF-27": {
+    "status": "SKIPPED",
+    "note": "preserve_order is required to keep live-config key order (AGENTS rule 2); typed RawValue parsing is a large handler refactor"
+  },
+  "PRODUCT-58": {
+    "status": "SKIPPED",
+    "note": "the terminal launcher is Claude-only and lives in services/cli_tools/terminal.rs"
+  },
+  "PRODUCT-56": {
+    "status": "SKIPPED",
+    "note": "quota refresh, quota-based failover and reminders span proxy, services and the notifications UI"
+  },
+  "CFG-19": {
+    "status": "SKIPPED",
+    "note": "model-capability lists span five files and a preset-coverage test"
+  },
+  "CFG-36": {
+    "status": "SKIPPED",
+    "note": "Hermes providers: dict writes need a CST splice"
+  },
+  "CMD-27": {
+    "status": "SKIPPED",
+    "note": "unifying the WebDAV/S3 command stacks changes payloads the frontend parses"
+  },
+  "PERF-50": {
+    "status": "SKIPPED",
+    "note": "recreating the webview from the tray needs a settings toggle and per-OS memory measurements"
+  },
+  "CFG-12": {
+    "status": "PARTIAL",
+    "note": "CODEX_HOME, CLAUDE_CONFIG_DIR, GEMINI_CLI_HOME, XDG_CONFIG_HOME and HERMES_HOME honoured (01b4f40); get_app_config_dirs shows each dir and its source in Settings (b1f8fef); login-shell env capture not done",
+    "commits": ["01b4f40", "b1f8fef"]
+  },
+  "FE-ARCH-30": {
+    "status": "PARTIAL",
+    "note": "ccswitch://v1/open?view=&tab=&app= links open pages (0895d04); opening pages from the tray needs Rust tray changes",
+    "commits": ["0895d04"]
+  },
+  "PERF-26": {
+    "status": "PARTIAL",
+    "note": "one shared TLS config and root store for both client paths (deb6142); hyper feature trimming and per-crate opt-level need throughput measurements",
+    "commits": ["deb6142"]
+  },
+  "PRODUCT-37": {
+    "status": "PARTIAL",
+    "note": "CSP connect-src limited to self/ipc/models.dev and img-src narrowed (c98de14); asset protocol removed (CI-43); the models.dev fetch still runs in the webview",
+    "commits": ["c98de14"]
   }
 }
