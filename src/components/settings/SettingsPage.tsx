@@ -229,17 +229,14 @@ export function SettingsPage({
         await autoSaveSettings(updates);
         return true;
       } catch (error) {
+        // The save hook already reported the failure (with its reason);
+        // only roll the optimistic change back here (FE-UI-09).
         console.error("[SettingsPage] Failed to autosave settings", error);
         updateSettings(previousValues);
-        toast.error(
-          t("settings.saveFailedGeneric", {
-            defaultValue: "保存失败，请重试",
-          }),
-        );
         return false;
       }
     },
-    [autoSaveSettings, settings, t, updateSettings],
+    [autoSaveSettings, settings, updateSettings],
   );
 
   const isBusy = useMemo(() => isLoading && !settings, [isLoading, settings]);

@@ -362,6 +362,22 @@ describe("SettingsPage Component", () => {
     expect(importExportMock.clearSelection).toHaveBeenCalled();
   });
 
+  it("rolls back a failed autosave without adding a second toast (FE-UI-09)", async () => {
+    settingsMock = createSettingsMock();
+    settingsMock.autoSaveSettings.mockRejectedValue(new Error("disk full"));
+    renderSettingsPage();
+
+    fireEvent.click(screen.getByText("change-language"));
+
+    await waitFor(() =>
+      expect(settingsMock.updateSettings).toHaveBeenLastCalledWith({
+        language: "zh",
+      }),
+    );
+    // useSettings (mocked here) owns the failure toast; the page adds none.
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
   it("should reset tab content scroll position when switching settings tabs", () => {
     const { container } = renderSettingsPage();
     const scrollContainer = container.querySelector(
