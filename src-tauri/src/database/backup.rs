@@ -86,6 +86,8 @@ const PROXY_CONFIG_TAKEOVER_FLAGS: &[&str] = &["enabled", "proxy_enabled", "live
 
 /// Device-local `settings` keys (exact match).
 const DEVICE_SETTINGS_KEYS: &[&str] = &[
+    // Per-device Claude Desktop gateway credential (SEC-20): never shared.
+    "claude_desktop_gateway_token",
     "global_proxy_url",
     "project_bindings",
     "skills_ssot_migration_pending",
@@ -1499,6 +1501,7 @@ mod tests {
             conn.execute_batch(
                 "INSERT OR REPLACE INTO settings (key, value) VALUES ('current_profile_id_claude', 'p1');
                  INSERT OR REPLACE INTO settings (key, value) VALUES ('global_proxy_url', 'http://user:secret@a-proxy:8080');
+                 INSERT OR REPLACE INTO settings (key, value) VALUES ('claude_desktop_gateway_token', 'gw-token-remote');
                  INSERT OR REPLACE INTO settings (key, value) VALUES ('shared_pref', 'remote');
                  INSERT INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at)
                      VALUES ('/home/a/.claude/projects/x.jsonl', 1, 999, 1);",
@@ -1512,6 +1515,10 @@ mod tests {
         assert!(
             !remote_sql.contains("a-proxy"),
             "outbound proxy URL must not be exported"
+        );
+        assert!(
+            !remote_sql.contains("gw-token-remote"),
+            "Claude Desktop gateway token must not be exported"
         );
         assert!(
             !remote_sql.contains("x.jsonl"),

@@ -8,7 +8,7 @@
 //! the hyper-based HTTP client, producing wire-level header casing identical to
 //! a direct (non-proxied) CLI request.
 
-mod access_guard;
+pub(crate) mod access_guard;
 mod header_capture;
 
 use super::{
