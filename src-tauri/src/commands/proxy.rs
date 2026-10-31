@@ -21,13 +21,7 @@ pub async fn start_proxy_server(
 #[specta::specta]
 pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let takeover = state.proxy_service.get_takeover_status().await?;
-    if takeover.claude
-        || takeover.codex
-        || takeover.gemini
-        || takeover.grokbuild
-        || takeover.opencode
-        || takeover.openclaw
-    {
+    if takeover.any_active() {
         return Err(
             "仍有应用处于代理接管状态，请先在设置中关闭对应应用接管后再停止本地路由。".to_string(),
         );

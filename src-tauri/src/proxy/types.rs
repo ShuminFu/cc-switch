@@ -111,11 +111,35 @@ pub struct ProxyServerInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProxyTakeoverStatus {
     pub claude: bool,
+    /// Claude Desktop's applied profile points at this proxy's gateway (PROXY-30).
+    #[serde(rename = "claude-desktop", default)]
+    pub claude_desktop: bool,
     pub codex: bool,
     pub gemini: bool,
     pub grokbuild: bool,
     pub opencode: bool,
     pub openclaw: bool,
+    /// Hermes has no proxy takeover yet; reported so the UI shape is complete.
+    #[serde(default)]
+    pub hermes: bool,
+}
+
+impl ProxyTakeoverStatus {
+    /// True when any app still routes through the proxy (PROXY-30: the stop
+    /// guard must not forget an app, so every field is listed here).
+    pub fn any_active(&self) -> bool {
+        let Self {
+            claude,
+            claude_desktop,
+            codex,
+            gemini,
+            grokbuild,
+            opencode,
+            openclaw,
+            hermes,
+        } = *self;
+        claude || claude_desktop || codex || gemini || grokbuild || opencode || openclaw || hermes
+    }
 }
 
 /// Provider健康状态
@@ -384,6 +408,29 @@ impl LogConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn takeover_any_active_covers_every_app_including_claude_desktop() {
+        assert!(!ProxyTakeoverStatus::default().any_active());
+        let value = serde_json::to_value(ProxyTakeoverStatus::default()).unwrap();
+        let fields: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+        assert!(fields.iter().any(|f| f == "claude-desktop"), "{fields:?}");
+        assert!(fields.iter().any(|f| f == "hermes"), "{fields:?}");
+        // Each single flag must keep the proxy from being stopped (PROXY-30).
+        for field in &fields {
+            let mut object = value.clone();
+            object[field.as_str()] = serde_json::Value::Bool(true);
+            let status: ProxyTakeoverStatus = serde_json::from_value(object).unwrap();
+            assert!(status.any_active(), "{field} not counted by any_active");
+        }
+        // Older payloads without the new fields still parse.
+        let legacy: ProxyTakeoverStatus = serde_json::from_value(serde_json::json!({
+            "claude": false, "codex": false, "gemini": false,
+            "grokbuild": false, "opencode": false, "openclaw": false
+        }))
+        .unwrap();
+        assert!(!legacy.any_active());
+    }
 
     #[test]
     fn test_rectifier_config_default_enabled() {
