@@ -596,7 +596,7 @@ mod tests {
         command.output().expect("wine should be installed")
     }
 
-    /// 在 Wine 的 cmd 中真正执行生成的 `.bat`（CCS-249）：会话目录含空格、括号、`&` 与 `%`，
+    /// 在 Wine 的 cmd 中真正执行生成的 `.bat`（CCS-249）：会话目录含空格、括号、`&`、`^` 与 `%`，
     /// 假的 `claude.cmd` shim 记录 `%CD%` 与 `%*`。断言 `cd /d` 进入了带引号的目录、shim 恰好收到
     /// `--resume <id>`、`call` 返回后继续执行、`del "%~f0"` 删除了批处理自身；`/c` 与 `/K`（stdin 关闭）各跑一次。
     /// 只覆盖批处理内容本身，不覆盖 cmd / Windows Terminal / PowerShell 如何启动它。
@@ -616,7 +616,7 @@ mod tests {
         for mode in ["/c", "/K"] {
             let temp = tempfile::tempdir().expect("temp dir should be created");
             let bin_dir = temp.path().join("bin");
-            let project_dir = temp.path().join("proj (1)&x").join("100%");
+            let project_dir = temp.path().join("proj (1)&x^y").join("100%");
             std::fs::create_dir_all(&bin_dir).expect("bin dir should be created");
             std::fs::create_dir_all(&project_dir).expect("project dir should be created");
 

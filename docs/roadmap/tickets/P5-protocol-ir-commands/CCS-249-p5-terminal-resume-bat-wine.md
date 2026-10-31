@@ -23,7 +23,7 @@ None.
 
 ## Implementation notes
 
-**Change.** The ignored test `platform::terminal::resume::tests::windows_resume_batch_runs_under_wine_cmd` in `src-tauri/src/platform/terminal/resume.rs` builds the resume batch on Linux. It uses argv `claude --resume 0199a1b2-c3d4.e5_f6` and the cwd `Z:\tmp\.tmpXXXX\proj (1)&x\100%`, which has a space, parentheses, `&` and `%`. The batch is written next to a fake `claude.cmd` shim, which is on `WINEPATH`. The shim uses delayed expansion to write `CD=[!CD!]` and `ARGS=[%*]` to a marker file. The test runs `wine cmd /c <bat>` and then `wine cmd /K <bat>` with stdin closed, each in a fresh temp dir, and asserts the following:
+**Change.** The ignored test `platform::terminal::resume::tests::windows_resume_batch_runs_under_wine_cmd` in `src-tauri/src/platform/terminal/resume.rs` builds the resume batch on Linux. It uses argv `claude --resume 0199a1b2-c3d4.e5_f6` and the cwd `Z:\tmp\.tmpXXXX\proj (1)&x^y\100%`, which has a space, parentheses, `&`, `^` and `%`. The batch is written next to a fake `claude.cmd` shim, which is on `WINEPATH`. The shim uses delayed expansion to write `CD=[!CD!]` and `ARGS=[%*]` to a marker file. The test runs `wine cmd /c <bat>` and then `wine cmd /K <bat>` with stdin closed, each in a fresh temp dir, and asserts the following:
 1. `cd /d` entered the quoted dir (the marker CD matches the session dir exactly);
 2. the shim got exactly `--resume <id>`;
 3. the batch kept going after `call`;
@@ -45,3 +45,5 @@ For `/K`, it also asserts that cmd stays on a prompt in the session dir.
 - `cargo test --manifest-path src-tauri/Cargo.toml --lib platform::terminal`: 36 passed, 0 failed, 3 ignored.
 - `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 2869 passed, 0 failed, 12 ignored.
 - `cargo fmt --check`, `cargo clippy -- -D warnings` and `cargo clippy --tests -- -D warnings` are clean.
+
+**Review follow-up.** The review added `^` to the test cwd (`proj (1)&x^y`), because an earlier bug caret-escaped characters inside the quoted `cd /d` path, and a literal `^` in the path now guards against that coming back. The review's mutation probe (dropping `call`) was confirmed to fail the test ("batch should continue after `call` and delete itself under /c") and was then reverted, so the production batch is unchanged. Re-verified after the follow-up: the wine test passes (1 passed); `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo clippy --tests -- -D warnings` are clean, and `cargo test --manifest-path src-tauri/Cargo.toml --lib` gives 2869 passed, 0 failed, 12 ignored.
