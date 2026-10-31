@@ -168,6 +168,11 @@ describe("app feature nav", () => {
           healthCheck: false,
           setDefault: false,
           defaultIsSwitch: false,
+          defaultModel: false,
+          universalProviders: false,
+          omo: false,
+          configStatus: false,
+          pluginSync: false,
         }}
         onNavigate={onNavigate}
       />,

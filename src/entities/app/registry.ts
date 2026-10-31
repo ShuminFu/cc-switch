@@ -33,6 +33,16 @@ export interface AppCaps {
   setDefault: boolean;
   /** 「设为默认」即切换当前供应商，显示为「启用 / 使用中」 */
   defaultIsSwitch: boolean;
+  /** 默认供应商由 live 配置的默认模型决定；预设附带的建议模型会注册到模型目录（OpenClaw） */
+  defaultModel: boolean;
+  /** 可添加统一供应商（一份配置同步到多个应用） */
+  universalProviders: boolean;
+  /** 支持 OMO / OMO Slim 插件供应商 */
+  omo: boolean;
+  /** 供应商列表上方显示 live 配置状态检查（Claude Desktop 路由映射 / 网关令牌等） */
+  configStatus: boolean;
+  /** 切换供应商后按设置同步 Claude 插件配置 */
+  pluginSync: boolean;
 }
 
 export interface AppDescriptor {
@@ -54,12 +64,21 @@ const caps = (overrides: Partial<AppCaps> = {}): AppCaps => ({
   healthCheck: false,
   setDefault: false,
   defaultIsSwitch: false,
+  defaultModel: false,
+  universalProviders: false,
+  omo: false,
+  configStatus: false,
+  pluginSync: false,
   ...overrides,
 });
 
 /** 注册表顺序即界面中的应用顺序 */
 export const APP_REGISTRY: readonly AppDescriptor[] = [
-  { id: "claude", label: "Claude", caps: caps() },
+  {
+    id: "claude",
+    label: "Claude",
+    caps: caps({ universalProviders: true, pluginSync: true }),
+  },
   {
     id: "claude-desktop",
     label: "Claude Desktop",
@@ -68,12 +87,13 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
       skills: false,
       mcp: false,
       proxyTakeover: false,
+      configStatus: true,
     }),
     featureHost: "claude",
     aliases: ["claude_desktop", "claudedesktop"],
   },
-  { id: "codex", label: "Codex", caps: caps() },
-  { id: "gemini", label: "Gemini", caps: caps() },
+  { id: "codex", label: "Codex", caps: caps({ universalProviders: true }) },
+  { id: "gemini", label: "Gemini", caps: caps({ universalProviders: true }) },
   {
     id: "grokbuild",
     label: "Grok Build",
@@ -83,7 +103,7 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
   {
     id: "opencode",
     label: "OpenCode",
-    caps: caps({ additive: true }),
+    caps: caps({ additive: true, omo: true }),
   },
   {
     id: "openclaw",
@@ -94,6 +114,7 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
       additive: true,
       healthCheck: true,
       setDefault: true,
+      defaultModel: true,
     }),
   },
   {
@@ -120,6 +141,11 @@ const NO_CAPS: AppCaps = {
   healthCheck: false,
   setDefault: false,
   defaultIsSwitch: false,
+  defaultModel: false,
+  universalProviders: false,
+  omo: false,
+  configStatus: false,
+  pluginSync: false,
 };
 
 /** 全部应用 ID（按注册表顺序） */

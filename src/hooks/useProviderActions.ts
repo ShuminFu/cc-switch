@@ -29,6 +29,71 @@ import {
 import { supportsOfficialProxyTakeover } from "@/utils/providerCapabilities";
 import { providerKeys } from "@/entities/provider/keys";
 import { invalidateProviderGraph } from "@/entities/provider/invalidate";
+import { appCaps } from "@/entities/app/registry";
+
+/** Codex 兼容配置（TOML config + wire_api）的供应商需要本地代理的原因 */
+function codexProxyReason(provider: Provider): TranslationKey | null {
+  const config = (provider.settingsConfig as Record<string, any>)?.config;
+  const wireApi =
+    typeof config === "string" ? extractCodexWireApi(config) : undefined;
+  if (
+    provider.meta?.apiFormat === "openai_chat" ||
+    isCodexChatWireApi(wireApi)
+  ) {
+    return "notifications.proxyReasonOpenAIChat";
+  }
+  if (
+    provider.meta?.apiFormat === "anthropic" ||
+    isCodexAnthropicWireApi(wireApi)
+  ) {
+    return "notifications.proxyReasonAnthropicMessages";
+  }
+  if (provider.meta?.isFullUrl) {
+    return "notifications.proxyReasonFullUrl";
+  }
+  return null;
+}
+
+/** 非官方供应商在代理未运行时无法直接使用的原因（按应用判定，按优先级排列） */
+const PROXY_REQUIRED_REASONS: Partial<
+  Record<AppId, (provider: Provider) => TranslationKey | null>
+> = {
+  claude: (provider) => {
+    if (provider.meta?.providerType === "github_copilot") {
+      return "notifications.proxyReasonCopilot";
+    }
+    if (provider.meta?.apiFormat === "openai_chat") {
+      return "notifications.proxyReasonOpenAIChat";
+    }
+    if (provider.meta?.apiFormat === "openai_responses") {
+      return "notifications.proxyReasonOpenAIResponses";
+    }
+    if (provider.meta?.isFullUrl) {
+      return "notifications.proxyReasonFullUrl";
+    }
+    return null;
+  },
+  codex: codexProxyReason,
+  grokbuild: codexProxyReason,
+  "claude-desktop": (provider) =>
+    provider.meta?.claudeDesktopMode === "proxy"
+      ? "notifications.proxyReasonClaudeDesktop"
+      : null,
+};
+
+/** 切换成功后的提示（需要重启应用 / 已加入配置）；缺省为通用切换成功 */
+const SWITCH_SUCCESS_MESSAGES: Partial<
+  Record<AppId, (provider: Provider) => TranslationKey>
+> = {
+  codex: () => "notifications.codexRestartRequired",
+  grokbuild: () => "notifications.grokBuildRestartRequired",
+  "claude-desktop": (provider) =>
+    provider.meta?.claudeDesktopMode === "proxy"
+      ? "notifications.claudeDesktopProxyRestartRequired"
+      : "notifications.claudeDesktopRestartRequired",
+  opencode: () => "notifications.addToConfigSuccess",
+  openclaw: () => "notifications.addToConfigSuccess",
+};
 
 /**
  * Hook for managing provider actions (add, update, delete, switch)
@@ -62,7 +127,7 @@ export function useProviderActions(
       appId: AppId,
       resolveProvider: () => Promise<Provider | undefined>,
     ) => {
-      if (appId !== "claude") return;
+      if (!appCaps(appId).pluginSync) return;
 
       try {
         const settings = await settingsApi.get();
@@ -147,7 +212,7 @@ export function useProviderActions(
       });
 
       // OpenClaw: register models to allowlist after adding provider
-      if (activeApp === "openclaw" && provider.suggestedDefaults) {
+      if (appCaps(activeApp).defaultModel && provider.suggestedDefaults) {
         const { model, modelCatalog } = provider.suggestedDefaults;
         let modelsRegistered = false;
 
@@ -220,63 +285,14 @@ export function useProviderActions(
       // 同一应用已有切换在途时忽略重复触发（UI 也会禁用其余按钮）
       if (switchingProviderId !== undefined) return;
 
-      const isCopilotProvider =
-        activeApp === "claude" &&
-        provider.meta?.providerType === "github_copilot";
-      const isCodexChatFormat =
-        (activeApp === "codex" || activeApp === "grokbuild") &&
-        (provider.meta?.apiFormat === "openai_chat" ||
-          (typeof (provider.settingsConfig as Record<string, any>)?.config ===
-            "string" &&
-            isCodexChatWireApi(
-              extractCodexWireApi(
-                (provider.settingsConfig as Record<string, any>).config,
-              ),
-            )));
-      const isCodexAnthropicFormat =
-        (activeApp === "codex" || activeApp === "grokbuild") &&
-        (provider.meta?.apiFormat === "anthropic" ||
-          (typeof (provider.settingsConfig as Record<string, any>)?.config ===
-            "string" &&
-            isCodexAnthropicWireApi(
-              extractCodexWireApi(
-                (provider.settingsConfig as Record<string, any>).config,
-              ),
-            )));
-
       // Determine why this provider requires the proxy
-      let proxyRequiredReason: string | null = null;
-      if (!isProxyRunning && provider.category !== "official") {
-        if (isCopilotProvider) {
-          proxyRequiredReason = t("notifications.proxyReasonCopilot");
-        } else if (
-          provider.meta?.apiFormat === "openai_chat" &&
-          activeApp === "claude"
-        ) {
-          proxyRequiredReason = t("notifications.proxyReasonOpenAIChat");
-        } else if (
-          provider.meta?.apiFormat === "openai_responses" &&
-          activeApp === "claude"
-        ) {
-          proxyRequiredReason = t("notifications.proxyReasonOpenAIResponses");
-        } else if (isCodexChatFormat) {
-          proxyRequiredReason = t("notifications.proxyReasonOpenAIChat");
-        } else if (isCodexAnthropicFormat) {
-          proxyRequiredReason = t("notifications.proxyReasonAnthropicMessages");
-        } else if (
-          activeApp === "claude-desktop" &&
-          provider.meta?.claudeDesktopMode === "proxy"
-        ) {
-          proxyRequiredReason = t("notifications.proxyReasonClaudeDesktop");
-        } else if (
-          provider.meta?.isFullUrl &&
-          (activeApp === "claude" ||
-            activeApp === "codex" ||
-            activeApp === "grokbuild")
-        ) {
-          proxyRequiredReason = t("notifications.proxyReasonFullUrl");
-        }
-      }
+      const proxyRequiredReasonKey =
+        !isProxyRunning && provider.category !== "official"
+          ? (PROXY_REQUIRED_REASONS[activeApp]?.(provider) ?? null)
+          : null;
+      const proxyRequiredReason = proxyRequiredReasonKey
+        ? t(proxyRequiredReasonKey)
+        : null;
 
       if (proxyRequiredReason) {
         toast.warning(
@@ -317,20 +333,9 @@ export function useProviderActions(
 
         // 若已弹过 proxyRequired 警告则不再弹 success
         if (!proxyRequiredReason) {
-          let messageKey: TranslationKey = "notifications.switchSuccess";
-          if (activeApp === "codex") {
-            messageKey = "notifications.codexRestartRequired";
-          } else if (activeApp === "grokbuild") {
-            messageKey = "notifications.grokBuildRestartRequired";
-          } else if (activeApp === "claude-desktop") {
-            if (provider.meta?.claudeDesktopMode === "proxy") {
-              messageKey = "notifications.claudeDesktopProxyRestartRequired";
-            } else {
-              messageKey = "notifications.claudeDesktopRestartRequired";
-            }
-          } else if (activeApp === "opencode" || activeApp === "openclaw") {
-            messageKey = "notifications.addToConfigSuccess";
-          }
+          const messageKey: TranslationKey =
+            SWITCH_SUCCESS_MESSAGES[activeApp]?.(provider) ??
+            "notifications.switchSuccess";
           const appId = activeApp;
           toast.success(t(messageKey), {
             closeButton: true,

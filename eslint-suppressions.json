@@ -21,10 +21,7 @@
   },
   "src/components/UsageScriptModal.tsx": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 15
-    },
-    "cc-switch/no-app-literal-comparison": {
-      "count": 11
+      "count": 4
     }
   },
   "src/components/agents/AgentsPanel.tsx": {
@@ -62,14 +59,6 @@
       "count": 4
     }
   },
-  "src/components/providers/AddProviderDialog.tsx": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 4
-    },
-    "cc-switch/no-app-literal-comparison": {
-      "count": 20
-    }
-  },
   "src/components/providers/EditProviderDialog.tsx": {
     "cc-switch/no-app-literal-comparison": {
       "count": 5
@@ -80,23 +69,12 @@
   },
   "src/components/providers/ProviderCard.tsx": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 6
-    },
-    "cc-switch/no-app-literal-comparison": {
-      "count": 13
-    },
-    "react-hooks/exhaustive-deps": {
-      "count": 2
+      "count": 4
     }
   },
   "src/components/providers/ProviderEmptyState.tsx": {
     "cc-switch/no-app-literal-comparison": {
       "count": 4
-    }
-  },
-  "src/components/providers/ProviderList.tsx": {
-    "cc-switch/no-app-literal-comparison": {
-      "count": 20
     }
   },
   "src/components/providers/forms/OmoFormFields.tsx": {
@@ -242,10 +220,7 @@
   },
   "src/hooks/useProviderActions.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 4
-    },
-    "cc-switch/no-app-literal-comparison": {
-      "count": 18
+      "count": 1
     }
   },
   "src/hooks/useProxyConfig.ts": {

@@ -153,6 +153,19 @@ describe("app registry", () => {
     }
   });
 
+  // 这些能力取代了供应商列表 / 表单中的 app-id 字面量判断，保持原先的应用集合
+  it.each([
+    ["universalProviders", ["claude", "codex", "gemini"]],
+    ["defaultModel", ["openclaw"]],
+    ["omo", ["opencode"]],
+    ["configStatus", ["claude-desktop"]],
+    ["pluginSync", ["claude"]],
+    ["setDefault", ["openclaw", "hermes"]],
+    ["defaultIsSwitch", ["hermes"]],
+  ] as const)("only %s apps have that capability", (cap, apps) => {
+    expect(appsWithCap(cap)).toEqual(apps);
+  });
+
   it("treats unknown apps as having no capabilities", () => {
     expect(appCaps("unknown")).toEqual({
       sessions: false,
@@ -163,6 +176,11 @@ describe("app registry", () => {
       healthCheck: false,
       setDefault: false,
       defaultIsSwitch: false,
+      defaultModel: false,
+      universalProviders: false,
+      omo: false,
+      configStatus: false,
+      pluginSync: false,
     });
   });
 

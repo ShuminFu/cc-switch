@@ -1,9 +1,12 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactElement } from "react";
 import type { Provider } from "@/types";
 import { ProviderList } from "@/components/providers/ProviderList";
+import type { AppId } from "@/lib/api";
+import { command } from "../msw/handlers";
+import { server } from "../msw/server";
 
 const useDragSortMock = vi.fn();
 const useSortableMock = vi.fn();
@@ -303,5 +306,85 @@ describe("ProviderList Component", () => {
     expect(screen.queryByTestId("provider-card-alpha")).not.toBeInTheDocument();
     expect(screen.queryByTestId("provider-card-beta")).not.toBeInTheDocument();
     expect(screen.getByText("provider.noSearchResults")).toBeInTheDocument();
+  });
+});
+
+describe("ProviderList additive apps", () => {
+  const providerA = createProvider({ id: "a", name: "A" });
+  const providerB = createProvider({ id: "b", name: "B" });
+
+  const renderAdditive = (appId: AppId) => {
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [providerA, providerB],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+    renderWithQueryClient(
+      <ProviderList
+        providers={{ a: providerA, b: providerB }}
+        currentProviderId="a"
+        appId={appId}
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+      />,
+    );
+  };
+
+  const lastCardProps = (id: string) =>
+    providerCardRenderSpy.mock.calls
+      .map(([props]) => props)
+      .filter((props) => props.provider.id === id)
+      .at(-1);
+
+  it("marks Hermes providers by live ids and model.provider", async () => {
+    server.use(
+      command("get_hermes_live_provider_ids", () => ["b"]),
+      command("get_hermes_model_config", () => ({ provider: "b" })),
+    );
+    renderAdditive("hermes");
+
+    await waitFor(() => expect(lastCardProps("b").isCurrent).toBe(true));
+    expect(lastCardProps("b")).toMatchObject({
+      isInConfig: true,
+      isDefaultModel: true,
+    });
+    // currentProviderId is ignored: Hermes' current provider is model.provider
+    expect(lastCardProps("a")).toMatchObject({
+      isCurrent: false,
+      isInConfig: false,
+      isDefaultModel: false,
+    });
+  });
+
+  it("marks the OpenClaw default-model provider as default", async () => {
+    server.use(
+      command("get_openclaw_live_provider_ids", () => ["a", "b"]),
+      command("get_openclaw_default_model", () => ({
+        primary: "b/some-model",
+        fallback: [],
+      })),
+    );
+    renderAdditive("openclaw");
+
+    await waitFor(() => expect(lastCardProps("b").isDefaultModel).toBe(true));
+    expect(lastCardProps("a")).toMatchObject({
+      isCurrent: true,
+      isInConfig: true,
+      isDefaultModel: false,
+    });
+  });
+
+  it("treats every provider of a switch-mode app as in config", () => {
+    renderAdditive("codex");
+
+    expect(lastCardProps("a")).toMatchObject({
+      isCurrent: true,
+      isInConfig: true,
+      isDefaultModel: false,
+    });
+    expect(lastCardProps("b").isInConfig).toBe(true);
   });
 });

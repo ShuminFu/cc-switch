@@ -12,10 +12,10 @@ import { resolveManagedAccountId } from "@/lib/authBinding";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import {
-  extractCodexBaseUrl,
-  extractCodexExperimentalBearerToken,
-} from "@/utils/providerConfigUtils";
-import { parseGrokBuildConfig } from "@/utils/grokBuildConfig";
+  extractProviderCredentials,
+  isOfficialLoginConfig,
+  supportsOfficialLogin,
+} from "@/entities/provider/settingsConfig";
 import JsonEditor from "./JsonEditor";
 import * as prettier from "prettier/standalone";
 import * as parserBabel from "prettier/parser-babel";
@@ -160,35 +160,9 @@ function detectBalanceProvider(baseUrl: string | undefined): boolean {
 }
 
 function isOfficialSubscriptionProvider(provider: Provider, appId: AppId) {
-  if (!["claude", "codex", "gemini"].includes(appId)) return false;
+  if (!supportsOfficialLogin(appId)) return false;
   if (provider.category === "official") return true;
-
-  const config = provider.settingsConfig as Record<string, any>;
-  if (appId === "claude") {
-    const baseUrl = config?.env?.ANTHROPIC_BASE_URL;
-    return !baseUrl || (typeof baseUrl === "string" && baseUrl.trim() === "");
-  }
-  if (appId === "codex") {
-    const apiKey = config?.auth?.OPENAI_API_KEY;
-    const bearerToken =
-      typeof config?.config === "string"
-        ? extractCodexExperimentalBearerToken(config.config)
-        : undefined;
-    return (
-      !bearerToken &&
-      (!apiKey || (typeof apiKey === "string" && apiKey.trim() === ""))
-    );
-  }
-  if (appId === "gemini") {
-    const env = config?.env || {};
-    const apiKey = env.GEMINI_API_KEY;
-    const baseUrl = env.GOOGLE_GEMINI_BASE_URL;
-    return (
-      (!apiKey || (typeof apiKey === "string" && apiKey.trim() === "")) &&
-      (!baseUrl || (typeof baseUrl === "string" && baseUrl.trim() === ""))
-    );
-  }
-  return false;
+  return isOfficialLoginConfig(appId, provider.settingsConfig);
 }
 
 const NATIVE_USAGE_TEMPLATES = new Set<string>([
@@ -230,69 +204,7 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
         if (!config) return { apiKey: undefined, baseUrl: undefined };
 
         // 处理不同应用的配置格式
-        if (appId === "claude" || appId === "claude-desktop") {
-          // Claude / Claude Desktop: { env: { ANTHROPIC_AUTH_TOKEN | ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL } }
-          // Key fallbacks mirror the backend resolver (Provider::resolve_usage_credentials).
-          const env = (config as any).env || {};
-          return {
-            apiKey:
-              env.ANTHROPIC_AUTH_TOKEN ||
-              env.ANTHROPIC_API_KEY ||
-              env.OPENROUTER_API_KEY ||
-              env.GOOGLE_API_KEY,
-            baseUrl: env.ANTHROPIC_BASE_URL,
-          };
-        } else if (appId === "codex") {
-          // Codex: { auth: { OPENAI_API_KEY }, config: TOML string with base_url }
-          const auth = (config as any).auth || {};
-          const configToml = (config as any).config || "";
-          const apiKey =
-            typeof auth.OPENAI_API_KEY === "string" &&
-            auth.OPENAI_API_KEY.trim()
-              ? auth.OPENAI_API_KEY
-              : extractCodexExperimentalBearerToken(configToml);
-          return {
-            apiKey,
-            baseUrl: extractCodexBaseUrl(configToml),
-          };
-        } else if (appId === "gemini") {
-          // Gemini: { env: { GEMINI_API_KEY, GOOGLE_GEMINI_BASE_URL } }
-          // Key fallback mirrors the backend resolver (Provider::resolve_usage_credentials).
-          const env = (config as any).env || {};
-          return {
-            apiKey: env.GEMINI_API_KEY || env.GOOGLE_API_KEY,
-            baseUrl: env.GOOGLE_GEMINI_BASE_URL,
-          };
-        } else if (appId === "grokbuild") {
-          const grokConfig = parseGrokBuildConfig(
-            (config as any).config,
-            provider.name,
-          );
-          return {
-            apiKey: grokConfig.apiKey,
-            baseUrl: grokConfig.baseUrl,
-          };
-        } else if (appId === "hermes") {
-          // Hermes: settingsConfig 顶层扁平（snake_case，对应 config.yaml）
-          return {
-            apiKey: (config as any).api_key,
-            baseUrl: (config as any).base_url,
-          };
-        } else if (appId === "openclaw") {
-          // OpenClaw: settingsConfig 顶层扁平（camelCase，对应 openclaw.json）
-          return {
-            apiKey: (config as any).apiKey,
-            baseUrl: (config as any).baseUrl,
-          };
-        } else if (appId === "opencode") {
-          // OpenCode (OMO): 凭据嵌在 options.{baseURL, apiKey}（SDK options 对象）
-          const options = (config as any).options || {};
-          return {
-            apiKey: options.apiKey,
-            baseUrl: options.baseURL,
-          };
-        }
-        return { apiKey: undefined, baseUrl: undefined };
+        return extractProviderCredentials(appId, config);
       } catch (error) {
         console.error("Failed to extract provider credentials:", error);
         return { apiKey: undefined, baseUrl: undefined };

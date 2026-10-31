@@ -15,20 +15,19 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  skipToken,
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Provider } from "@/types";
 import type { AppId } from "@/lib/api";
 import { providersApi } from "@/lib/api/providers";
 import { useDragSort } from "@/hooks/useDragSort";
-import {
-  useOpenClawLiveProviderIds,
-  useOpenClawDefaultModel,
-} from "@/hooks/useOpenClaw";
-import {
-  useHermesLiveProviderIds,
-  useHermesModelConfig,
-} from "@/hooks/useHermes";
+import { useOpenClawDefaultModel } from "@/hooks/useOpenClaw";
+import { useHermesModelConfig } from "@/hooks/useHermes";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
@@ -48,7 +47,17 @@ import { Button } from "@/components/ui/button";
 import { isTextEditableTarget } from "@/utils/domUtils";
 import { providerKeys } from "@/entities/provider/keys";
 import { invalidateProviderGraph } from "@/entities/provider/invalidate";
+import { liveProviderIdsQuery } from "@/entities/provider/liveIds";
+import { appCaps } from "@/entities/app/registry";
 import { STALE_TIME } from "@/lib/query/queryClient";
+
+/** 从 live 配置导入供应商的方式；缺省为导入当前 live 配置为默认供应商 */
+const IMPORT_FROM_LIVE: Partial<Record<AppId, () => Promise<number>>> = {
+  opencode: () => providersApi.importOpenCodeFromLive(),
+  openclaw: () => providersApi.importOpenClawFromLive(),
+  hermes: () => providersApi.importHermesFromLive(),
+  "claude-desktop": () => providersApi.importClaudeDesktopFromClaude(),
+};
 
 interface ProviderListProps {
   providers: Record<string, Provider>;
@@ -102,54 +111,47 @@ export function ProviderList({
     appId,
   );
 
-  const { data: opencodeLiveIds } = useQuery({
-    queryKey: providerKeys.opencodeLiveIds,
-    queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
-    // 直接读取 OpenCode live 配置文件，可能被外部修改
+  const caps = appCaps(appId);
+
+  // 累加模式应用（OpenCode/OpenClaw/Hermes）：查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
+  const liveIdsQuery = liveProviderIdsQuery(appId);
+  const { data: liveProviderIds } = useQuery({
+    queryKey: liveIdsQuery?.queryKey ?? ["liveProviderIds", appId],
+    queryFn: liveIdsQuery?.queryFn ?? skipToken,
+    // 直接读取 live 配置文件，可能被外部修改
     staleTime: STALE_TIME.live,
-    enabled: appId === "opencode",
   });
 
-  // OpenClaw: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
-  const { data: openclawLiveIds } = useOpenClawLiveProviderIds(
-    appId === "openclaw",
+  // 「设为默认」即切换的应用（Hermes）：读取当前 model.provider，用于判断哪个供应商是"当前激活"（高亮）
+  const { data: hermesModelConfig } = useHermesModelConfig(
+    caps.defaultIsSwitch,
   );
-
-  // Hermes: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
-  const { data: hermesLiveIds } = useHermesLiveProviderIds(appId === "hermes");
-
-  // Hermes: 读取当前 model.provider，用于判断哪个供应商是"当前激活"（高亮）
-  const { data: hermesModelConfig } = useHermesModelConfig(appId === "hermes");
-  const hermesCurrentProviderId = hermesModelConfig?.provider;
+  const switchedDefaultProviderId = caps.defaultIsSwitch
+    ? hermesModelConfig?.provider
+    : undefined;
 
   // 判断供应商是否已添加到配置（累加模式应用：OpenCode/OpenClaw/Hermes）
   const isProviderInConfig = useCallback(
     (providerId: string): boolean => {
-      if (appId === "opencode") {
-        return opencodeLiveIds?.includes(providerId) ?? false;
-      }
-      if (appId === "openclaw") {
-        return openclawLiveIds?.includes(providerId) ?? false;
-      }
-      if (appId === "hermes") {
-        return hermesLiveIds?.includes(providerId) ?? false;
+      if (liveIdsQuery) {
+        return liveProviderIds?.includes(providerId) ?? false;
       }
       return true; // 其他应用始终返回 true
     },
-    [appId, opencodeLiveIds, openclawLiveIds, hermesLiveIds],
+    [liveIdsQuery, liveProviderIds],
   );
 
   // OpenClaw: query default model to determine which provider is default
   const { data: openclawDefaultModel } = useOpenClawDefaultModel(
-    appId === "openclaw",
+    caps.defaultModel,
   );
 
   const isProviderDefaultModel = useCallback(
     (providerId: string): boolean => {
-      if (appId !== "openclaw" || !openclawDefaultModel?.primary) return false;
+      if (!caps.defaultModel || !openclawDefaultModel?.primary) return false;
       return openclawDefaultModel.primary.startsWith(providerId + "/");
     },
-    [appId, openclawDefaultModel],
+    [caps.defaultModel, openclawDefaultModel],
   );
 
   // 故障转移相关
@@ -161,9 +163,8 @@ export function ProviderList({
   const isFailoverModeActive =
     isProxyTakeover === true && isAutoFailoverEnabled === true;
 
-  const isOpenCode = appId === "opencode";
-  const { data: currentOmoId } = useCurrentOmoProviderId(isOpenCode);
-  const { data: currentOmoSlimId } = useCurrentOmoSlimProviderId(isOpenCode);
+  const { data: currentOmoId } = useCurrentOmoProviderId(caps.omo);
+  const { data: currentOmoSlimId } = useCurrentOmoSlimProviderId(caps.omo);
 
   const getFailoverPriority = useCallback(
     (providerId: string): number | undefined => {
@@ -201,8 +202,8 @@ export function ProviderList({
   const { data: claudeDesktopStatus } = useQuery({
     queryKey: providerKeys.claudeDesktopStatus,
     queryFn: () => providersApi.getClaudeDesktopStatus(),
-    enabled: appId === "claude-desktop",
-    refetchInterval: appId === "claude-desktop" ? 5000 : false,
+    enabled: caps.configStatus,
+    refetchInterval: caps.configStatus ? 5000 : false,
   });
 
   // 连通性检查不发真实请求、无封号/计费风险，直接执行（无需确认弹窗）。
@@ -217,20 +218,9 @@ export function ProviderList({
   const queryClient = useQueryClient();
   const importMutation = useMutation({
     mutationFn: async (): Promise<boolean> => {
-      if (appId === "opencode") {
-        const count = await providersApi.importOpenCodeFromLive();
-        return count > 0;
-      }
-      if (appId === "openclaw") {
-        const count = await providersApi.importOpenClawFromLive();
-        return count > 0;
-      }
-      if (appId === "hermes") {
-        const count = await providersApi.importHermesFromLive();
-        return count > 0;
-      }
-      if (appId === "claude-desktop") {
-        const count = await providersApi.importClaudeDesktopFromClaude();
+      const importFromLive = IMPORT_FROM_LIVE[appId];
+      if (importFromLive) {
+        const count = await importFromLive();
         return count > 0;
       }
       return providersApi.importDefault(appId);
@@ -293,7 +283,7 @@ export function ProviderList({
   }, [searchTerm, sortedProviders]);
 
   const claudeDesktopStatusMessages = useMemo(() => {
-    if (appId !== "claude-desktop" || !claudeDesktopStatus) return [];
+    if (!caps.configStatus || !claudeDesktopStatus) return [];
 
     const messages: string[] = [];
     if (!claudeDesktopStatus.supported) {
@@ -326,7 +316,7 @@ export function ProviderList({
     }
 
     return messages;
-  }, [appId, claudeDesktopStatus, t]);
+  }, [caps.configStatus, claudeDesktopStatus, t]);
 
   if (isLoading) {
     return (
@@ -368,8 +358,8 @@ export function ProviderList({
             const isOmoCurrent = isOmo && provider.id === (currentOmoId || "");
             const isOmoSlimCurrent =
               isOmoSlim && provider.id === (currentOmoSlimId || "");
-            const isHermesCurrent =
-              appId === "hermes" && hermesCurrentProviderId === provider.id;
+            const isSwitchedDefault =
+              caps.defaultIsSwitch && switchedDefaultProviderId === provider.id;
             return (
               <SortableProviderCard
                 key={provider.id}
@@ -379,8 +369,8 @@ export function ProviderList({
                     ? isOmoCurrent
                     : isOmoSlim
                       ? isOmoSlimCurrent
-                      : appId === "hermes"
-                        ? isHermesCurrent
+                      : caps.defaultIsSwitch
+                        ? isSwitchedDefault
                         : provider.id === currentProviderId
                 }
                 appId={appId}
@@ -410,8 +400,8 @@ export function ProviderList({
                 activeProviderId={activeProviderId}
                 // OpenClaw: default model / Hermes: model.provider === provider.id
                 isDefaultModel={
-                  appId === "hermes"
-                    ? isHermesCurrent
+                  caps.defaultIsSwitch
+                    ? isSwitchedDefault
                     : isProviderDefaultModel(provider.id)
                 }
                 onSetAsDefault={
