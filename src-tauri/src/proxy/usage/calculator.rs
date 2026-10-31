@@ -85,6 +85,7 @@ impl CostCalculator {
     /// - cache_read_cost: cache_read_tokens × 缓存读取价格
     /// - Claude/Anthropic 的 input_tokens 已经不包含 cache_read_tokens
     /// - total_cost: 各项成本之和 × 倍率（倍率只作用于最终总价）
+    #[cfg(test)]
     pub fn calculate(
         usage: &TokenUsage,
         pricing: &ModelPricing,

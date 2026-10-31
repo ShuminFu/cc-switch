@@ -113,8 +113,7 @@ pub fn get_claude_api_format(provider: &Provider) -> &'static str {
 }
 
 pub fn claude_api_format_needs_transform(api_format: &str) -> bool {
-    WireProtocol::parse(api_format)
-        .is_some_and(|upstream| upstream != WireProtocol::AnthropicMessages)
+    super::bridge::Bridge::for_claude_api_format(api_format).needs_transform()
 }
 
 fn is_reasoning_vendor_identifier(value: &str) -> bool {

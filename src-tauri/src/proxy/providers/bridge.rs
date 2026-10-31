@@ -103,12 +103,13 @@ impl Bridge {
                     .pointer("/candidates/0/content/parts")
                     .and_then(Value::as_array)
                     .map(Vec::as_slice);
-                if parts.is_none() && body.pointer("/promptFeedback/blockReason").is_none() {
-                    if body.pointer("/candidates/0").is_none() {
-                        return Err(ProxyError::TransformError(
-                            "No candidates in Gemini response".to_string(),
-                        ));
-                    }
+                if parts.is_none()
+                    && body.pointer("/promptFeedback/blockReason").is_none()
+                    && body.pointer("/candidates/0").is_none()
+                {
+                    return Err(ProxyError::TransformError(
+                        "No candidates in Gemini response".to_string(),
+                    ));
                 }
                 Ok(ir::gemini::decode_response(body, parts))
             }
