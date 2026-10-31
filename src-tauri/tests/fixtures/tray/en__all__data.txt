@@ -32,6 +32,12 @@ TrayModel {
         },
         TraySectionModel {
             section: 1,
+            body: Empty {
+                label: "Claude Desktop (no providers)",
+            },
+        },
+        TraySectionModel {
+            section: 2,
             body: Providers {
                 label: "Codex",
                 items: [
@@ -45,13 +51,13 @@ TrayModel {
             },
         },
         TraySectionModel {
-            section: 2,
+            section: 3,
             body: Empty {
                 label: "Gemini (no providers)",
             },
         },
         TraySectionModel {
-            section: 3,
+            section: 4,
             body: Empty {
                 label: "Grok Build (no providers)",
             },

@@ -675,11 +675,11 @@ fn set_provider_null_deletes_key_while_omitted_keys_survive() {
         let yaml = "\
 custom_providers:
   - name: acme
-base_url: https://old.example.com
-api_key: sk-old
-rate_limit_delay: 2
-headers:
-  X-Org: team
+    base_url: https://old.example.com
+    api_key: sk-old
+    rate_limit_delay: 2
+    headers:
+      X-Org: team
 ";
         let config_path = get_hermes_config_path();
         fs::create_dir_all(config_path.parent().unwrap()).unwrap();

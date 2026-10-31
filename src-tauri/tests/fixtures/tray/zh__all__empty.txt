@@ -19,17 +19,23 @@ TrayModel {
         TraySectionModel {
             section: 1,
             body: Empty {
-                label: "Codex (无供应商)",
+                label: "Claude Desktop (无供应商)",
             },
         },
         TraySectionModel {
             section: 2,
             body: Empty {
-                label: "Gemini (无供应商)",
+                label: "Codex (无供应商)",
             },
         },
         TraySectionModel {
             section: 3,
+            body: Empty {
+                label: "Gemini (无供应商)",
+            },
+        },
+        TraySectionModel {
+            section: 4,
             body: Empty {
                 label: "Grok Build (无供应商)",
             },
