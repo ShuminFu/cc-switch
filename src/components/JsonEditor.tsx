@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { formatJSON } from "@/utils/formatters";
+import { lineModeHighlight, tomlDiagnostics } from "@/lib/codemirror/lineModes";
 
 interface JsonEditorProps {
   id?: string;
@@ -19,7 +20,11 @@ interface JsonEditorProps {
   darkMode?: boolean;
   rows?: number;
   showValidation?: boolean;
-  language?: "json" | "javascript";
+  /**
+   * `toml` (config.toml) and `dotenv` (.env) get their own highlighting; TOML
+   * parse errors are underlined at their line when `showValidation` is on.
+   */
+  language?: "json" | "javascript" | "toml" | "dotenv";
   height?: string | number;
   showMinimap?: boolean; // 添加此属性以防未来使用
 }
@@ -43,7 +48,11 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
     () =>
       linter((view) => {
         const diagnostics: Diagnostic[] = [];
-        if (!showValidation || language !== "json") return diagnostics;
+        if (!showValidation) return diagnostics;
+        if (language === "toml") {
+          return tomlDiagnostics(view.state.doc.toString());
+        }
+        if (language !== "json") return diagnostics;
 
         const doc = view.state.doc.toString();
         if (!doc.trim()) return diagnostics;
@@ -137,7 +146,11 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
 
     const extensions = [
       basicSetup,
-      language === "javascript" ? javascript() : json(),
+      language === "javascript"
+        ? javascript()
+        : language === "toml" || language === "dotenv"
+          ? lineModeHighlight(language)
+          : json(),
       placeholder(placeholderText || ""),
       baseTheme,
       sizingTheme,

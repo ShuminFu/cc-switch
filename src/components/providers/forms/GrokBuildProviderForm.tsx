@@ -549,8 +549,8 @@ export function GrokBuildProviderForm({
             placeholder=""
             darkMode={isDarkMode}
             rows={12}
-            showValidation={false}
-            language="javascript"
+            showValidation={true}
+            language="toml"
           />
           {rawConfigError && (
             <p className="text-xs text-destructive">

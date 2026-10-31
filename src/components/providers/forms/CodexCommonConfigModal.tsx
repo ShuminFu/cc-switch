@@ -124,8 +124,8 @@ export const CodexCommonConfigModal: React.FC<CodexCommonConfigModalProps> = ({
 # Add your common TOML configuration here`}
           darkMode={isDarkMode}
           rows={16}
-          showValidation={false}
-          language="javascript"
+          showValidation={true}
+          language="toml"
         />
 
         {error && (
