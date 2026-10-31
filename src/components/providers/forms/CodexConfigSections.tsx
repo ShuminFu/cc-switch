@@ -1,6 +1,7 @@
 // NOTE: Codex 1M 上下文 UI 已暂时隐藏（详见下方 CodexConfigSection 内 JSX 注释）。
 // 如需恢复，请同时：
 //   - 取消下面 `@/utils/providerConfigUtils` import 的注释
+import { useDarkMode } from "@/hooks/useDarkMode";
 import React, {
   useCallback,
   useEffect,
@@ -43,22 +44,7 @@ export const CodexAuthSection: React.FC<CodexAuthSectionProps> = ({
   isProxyTakeover = false,
 }) => {
   const { t } = useTranslation();
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
+  const isDarkMode = useDarkMode();
 
   const handleChange = (newValue: string) => {
     onChange(newValue);
@@ -134,22 +120,7 @@ export const CodexConfigSection: React.FC<CodexConfigSectionProps> = ({
   isProxyTakeover = false,
 }) => {
   const { t } = useTranslation();
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
+  const isDarkMode = useDarkMode();
 
   // Mirror value prop to local state (same pattern as CommonConfigEditor)
   const [localValue, setLocalValue] = useState(value);

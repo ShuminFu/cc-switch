@@ -769,7 +769,8 @@ export function ClaudeFormFields({
                     </SelectItem>
                     <SelectItem value="openai_chat">
                       {t("providerForm.apiFormatOpenAIChat", {
-                        defaultValue: "OpenAI Chat Completions (Requires routing)",
+                        defaultValue:
+                          "OpenAI Chat Completions (Requires routing)",
                       })}
                     </SelectItem>
                     <SelectItem value="openai_responses">
@@ -779,14 +780,16 @@ export function ClaudeFormFields({
                     </SelectItem>
                     <SelectItem value="gemini_native">
                       {t("providerForm.apiFormatGeminiNative", {
-                        defaultValue: "Gemini Native generateContent (Requires routing)",
+                        defaultValue:
+                          "Gemini Native generateContent (Requires routing)",
                       })}
                     </SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   {t("providerForm.apiFormatHint", {
-                    defaultValue: "Select the input format for the provider's API",
+                    defaultValue:
+                      "Select the input format for the provider's API",
                   })}
                 </p>
               </div>
@@ -821,7 +824,8 @@ export function ClaudeFormFields({
               </Select>
               <p className="text-xs text-muted-foreground">
                 {t("providerForm.authFieldHint", {
-                  defaultValue: "Select the authentication env variable name for the config",
+                  defaultValue:
+                    "Select the authentication env variable name for the config",
                 })}
               </p>
             </div>

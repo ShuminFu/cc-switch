@@ -177,7 +177,9 @@ export function GrokBuildProviderForm({
 
   const presetCategoryLabels = useMemo(
     () => ({
-      official: t("providerForm.categoryOfficial", { defaultValue: "Official" }),
+      official: t("providerForm.categoryOfficial", {
+        defaultValue: "Official",
+      }),
       cn_official: t("providerForm.categoryCnOfficial", {
         defaultValue: "Opensource Official",
       }),

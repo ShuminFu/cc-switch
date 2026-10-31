@@ -288,7 +288,8 @@ export function OpenClawFormFields({
           </FormLabel>
           <p className="text-xs text-muted-foreground">
             {t("openclaw.userAgentHint", {
-              defaultValue: "Some providers require a browser User-Agent header to work properly.",
+              defaultValue:
+                "Some providers require a browser User-Agent header to work properly.",
             })}
           </p>
         </div>
@@ -333,7 +334,8 @@ export function OpenClawFormFields({
         {models.length === 0 ? (
           <p className="text-sm text-muted-foreground py-2">
             {t("openclaw.noModels", {
-              defaultValue: "No models configured. Click Add Model to configure available models.",
+              defaultValue:
+                "No models configured. Click Add Model to configure available models.",
             })}
           </p>
         ) : (
@@ -433,7 +435,9 @@ export function OpenClawFormFields({
                   </div>
                   <div className="flex-1 space-y-1">
                     <label className="text-xs text-muted-foreground">
-                      {t("openclaw.modelName", { defaultValue: "Display Name" })}
+                      {t("openclaw.modelName", {
+                        defaultValue: "Display Name",
+                      })}
                     </label>
                     <Input
                       value={model.name}

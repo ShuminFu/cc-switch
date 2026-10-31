@@ -356,7 +356,9 @@ export function ClaudeDesktopProviderForm({
 
   const presetCategoryLabels: Record<string, string> = useMemo(
     () => ({
-      official: t("providerForm.categoryOfficial", { defaultValue: "Official" }),
+      official: t("providerForm.categoryOfficial", {
+        defaultValue: "Official",
+      }),
       cn_official: t("providerForm.categoryCnOfficial", {
         defaultValue: "Opensource Official",
       }),
@@ -841,7 +843,9 @@ export function ClaudeDesktopProviderForm({
               <div className="space-y-4 rounded-lg border border-border-default p-4">
                 <div className="space-y-2">
                   <Label>
-                    {t("providerForm.apiFormat", { defaultValue: "API Format" })}
+                    {t("providerForm.apiFormat", {
+                      defaultValue: "API Format",
+                    })}
                   </Label>
                   <Select
                     value={apiFormat}
@@ -860,12 +864,14 @@ export function ClaudeDesktopProviderForm({
                       </SelectItem>
                       <SelectItem value="openai_chat">
                         {t("providerForm.apiFormatOpenAIChat", {
-                          defaultValue: "OpenAI Chat Completions (Requires routing)",
+                          defaultValue:
+                            "OpenAI Chat Completions (Requires routing)",
                         })}
                       </SelectItem>
                       <SelectItem value="openai_responses">
                         {t("providerForm.apiFormatOpenAIResponses", {
-                          defaultValue: "OpenAI Responses API (Requires routing)",
+                          defaultValue:
+                            "OpenAI Responses API (Requires routing)",
                         })}
                       </SelectItem>
                       <SelectItem value="gemini_native">

@@ -286,7 +286,8 @@ export function HermesFormFields({
         </Select>
         <p className="text-xs text-muted-foreground">
           {t("hermes.form.apiModeHint", {
-            defaultValue: "Provider API protocol. Choose the format that matches your endpoint.",
+            defaultValue:
+              "Provider API protocol. Choose the format that matches your endpoint.",
           })}
         </p>
       </div>
@@ -368,7 +369,8 @@ export function HermesFormFields({
         {models.length === 0 ? (
           <p className="text-sm text-muted-foreground py-2">
             {t("hermes.form.noModels", {
-              defaultValue: "No models configured. Switching to this provider won't change the default model.",
+              defaultValue:
+                "No models configured. Switching to this provider won't change the default model.",
             })}
           </p>
         ) : (

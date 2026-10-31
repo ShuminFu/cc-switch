@@ -281,7 +281,8 @@ export function ProviderPresetSelector({
       case "official":
         return hint(
           t("providerForm.officialHint", {
-            defaultValue: "💡 Official provider uses browser login, no API Key needed",
+            defaultValue:
+              "💡 Official provider uses browser login, no API Key needed",
           }),
         );
       case "cn_official":
@@ -305,7 +306,8 @@ export function ProviderPresetSelector({
       case "custom":
         return hint(
           t("providerForm.customApiKeyHint", {
-            defaultValue: "💡 Custom configuration requires manually filling all necessary fields",
+            defaultValue:
+              "💡 Custom configuration requires manually filling all necessary fields",
           }),
         );
       case "omo":
@@ -317,7 +319,8 @@ export function ProviderPresetSelector({
         );
       default:
         return t("providerPreset.hint", {
-          defaultValue: "You can continue to adjust the fields below after selecting a preset.",
+          defaultValue:
+            "You can continue to adjust the fields below after selecting a preset.",
         });
     }
   };
@@ -565,7 +568,8 @@ export function ProviderPresetSelector({
               onClick={() => onUniversalPresetSelect(preset)}
               className="inline-flex items-center justify-start gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-accent text-muted-foreground hover:bg-accent/80 relative w-full"
               title={t("universalProvider.hint", {
-                defaultValue: "Cross-app unified config, auto-sync to Claude/Codex/Gemini",
+                defaultValue:
+                  "Cross-app unified config, auto-sync to Claude/Codex/Gemini",
               })}
             >
               <ProviderIcon

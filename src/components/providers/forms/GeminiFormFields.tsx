@@ -145,7 +145,9 @@ export function GeminiFormFields({
       {shouldShowSpeedTest && (
         <EndpointField
           id="baseUrl"
-          label={t("providerForm.apiEndpoint", { defaultValue: "API Endpoint" })}
+          label={t("providerForm.apiEndpoint", {
+            defaultValue: "API Endpoint",
+          })}
           value={baseUrl}
           onChange={onBaseUrlChange}
           placeholder={t("providerForm.apiEndpointPlaceholder", {

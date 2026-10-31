@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import { useDarkMode } from "@/hooks/useDarkMode";
+import React from "react";
 import { useTranslation } from "react-i18next";
 import JsonEditor from "@/components/JsonEditor";
 
@@ -27,22 +28,7 @@ export const GeminiEnvSection: React.FC<GeminiEnvSectionProps> = ({
   commonConfigError,
 }) => {
   const { t } = useTranslation();
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
+  const isDarkMode = useDarkMode();
 
   const handleChange = (newValue: string) => {
     onChange(newValue);
@@ -58,7 +44,9 @@ export const GeminiEnvSection: React.FC<GeminiEnvSectionProps> = ({
           htmlFor="geminiEnv"
           className="block text-sm font-medium text-foreground"
         >
-          {t("geminiConfig.envFile", { defaultValue: "Environment Variables (.env)" })}
+          {t("geminiConfig.envFile", {
+            defaultValue: "Environment Variables (.env)",
+          })}
         </label>
 
         <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
@@ -111,7 +99,8 @@ GEMINI_MODEL=gemini-3.5-flash`}
       {!error && (
         <p className="text-xs text-muted-foreground">
           {t("geminiConfig.envFileHint", {
-            defaultValue: "Configure Gemini environment variables in .env format",
+            defaultValue:
+              "Configure Gemini environment variables in .env format",
           })}
         </p>
       )}
@@ -134,22 +123,7 @@ export const GeminiConfigSection: React.FC<GeminiConfigSectionProps> = ({
   configError,
 }) => {
   const { t } = useTranslation();
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
+  const isDarkMode = useDarkMode();
 
   return (
     <div className="space-y-2">
@@ -182,7 +156,8 @@ export const GeminiConfigSection: React.FC<GeminiConfigSectionProps> = ({
       {!configError && (
         <p className="text-xs text-muted-foreground">
           {t("geminiConfig.configJsonHint", {
-            defaultValue: "Configure Gemini extended parameters in JSON format (optional)",
+            defaultValue:
+              "Configure Gemini extended parameters in JSON format (optional)",
           })}
         </p>
       )}

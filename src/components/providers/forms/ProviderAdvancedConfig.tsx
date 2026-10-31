@@ -126,7 +126,8 @@ export function ProviderAdvancedConfig({
                 />
                 <p className="text-xs text-muted-foreground">
                   {t("providerAdvanced.costMultiplierHint", {
-                    defaultValue: "Actual cost = Base cost × Multiplier, supports decimals like 1.5",
+                    defaultValue:
+                      "Actual cost = Base cost × Multiplier, supports decimals like 1.5",
                   })}
                 </p>
               </div>
@@ -169,7 +170,8 @@ export function ProviderAdvancedConfig({
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   {t("providerAdvanced.pricingModelSourceHint", {
-                    defaultValue: "Choose whether to match pricing by request model or response model",
+                    defaultValue:
+                      "Choose whether to match pricing by request model or response model",
                   })}
                 </p>
               </div>

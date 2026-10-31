@@ -446,7 +446,8 @@ export function CodexFormFields({
             defaultValue: "Official does not require API Key, save directly",
           }),
           thirdParty: t("providerForm.codexApiKeyAutoFill", {
-            defaultValue: "Just fill in here, auth.json below will be auto-filled",
+            defaultValue:
+              "Just fill in here, auth.json below will be auto-filled",
           }),
         }}
       />
@@ -472,7 +473,9 @@ export function CodexFormFields({
       {category !== "official" && onModelChange && (
         <div className="space-y-1.5">
           <FormLabel htmlFor="codexDefaultModel">
-            {t("codexConfig.defaultModelLabel", { defaultValue: "Default Model" })}
+            {t("codexConfig.defaultModelLabel", {
+              defaultValue: "Default Model",
+            })}
           </FormLabel>
           <div className="flex gap-1">
             <Input
