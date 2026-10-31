@@ -88,7 +88,7 @@ regex = "1.10"
 rquickjs = { version = "0.14", features = ["array-buffer", "classes"] }
 thiserror = "2.0"
 anyhow = "1.0"
-zip = "2.2"
+zip = "4.6"
 # CI-15: serde_yaml 0.9 is archived; serde_norway is its maintained, API-compatible fork.
 serde_yaml = { package = "serde_norway", version = "0.9" }
 tempfile = "3"

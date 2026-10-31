@@ -2805,7 +2805,7 @@ impl SkillService {
         // archive root, but still allows inner `..` (e.g. `root/../x`), which
         // would escape once the root folder is stripped. Accept only names made
         // of normal components.
-        let safe_name = |file: &zip::read::ZipFile<'_>| -> Result<PathBuf> {
+        let safe_name = |file: &zip::read::ZipFile<'_, R>| -> Result<PathBuf> {
             let enclosed = file
                 .enclosed_name()
                 .ok_or_else(|| unsafe_entry(file.name()))?;
