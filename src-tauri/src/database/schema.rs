@@ -183,6 +183,13 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         breaks_sync: false,
         up: Database::migrate_v16_to_v17,
     },
+    Migration {
+        version: 18,
+        name: "session_log_sync_byte_offsets",
+        checksum: "a61daa7f89650096a795f5249b5753ff020a86aad45660acf8bdb3118e291fba",
+        breaks_sync: false,
+        up: Database::migrate_v17_to_v18,
+    },
 ];
 
 /// 注册表中最新的 schema 版本（即 `SCHEMA_VERSION`）。
@@ -1858,6 +1865,21 @@ impl Database {
         Ok(())
     }
 
+    /// v17 → v18: session_log_sync 记录字节偏移与文件前缀哈希，Claude 会话日志
+    /// 增量同步可直接 seek 到上次位置而不是重读整个文件（SESS-28）
+    fn migrate_v17_to_v18(conn: &Connection) -> Result<(), AppError> {
+        if Self::table_exists(conn, "session_log_sync")? {
+            Self::add_column_if_missing(
+                conn,
+                "session_log_sync",
+                "byte_offset",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            Self::add_column_if_missing(conn, "session_log_sync", "prefix_hash", "TEXT")?;
+        }
+        Ok(())
+    }
+
     /// 插入默认模型定价数据
     /// 格式: (model_id, display_name, input, output, cache_read, cache_creation)
     /// 注意: model_id 使用短横线格式（如 claude-haiku-4-5），与 API 返回的模型名称标准化后一致
@@ -3483,7 +3505,7 @@ mod tests {
                 SCHEMA_VERSION,
                 crate::services::sync_protocol::DB_COMPAT_VERSION
             ),
-            (17, 6),
+            (18, 6),
             "SCHEMA_VERSION changed without reviewing DB_COMPAT_VERSION (or vice versa)"
         );
         assert_eq!(

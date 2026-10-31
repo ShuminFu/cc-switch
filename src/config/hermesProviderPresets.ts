@@ -4,6 +4,7 @@
  */
 import type { ProviderCategory } from "../types";
 import type { PresetTheme, TemplateValueConfig } from "./claudeProviderPresets";
+import { registerPresetCatalog } from "./presetCatalog";
 
 /**
  * Marker field and source values that `hermes_config.rs::get_providers`
@@ -1525,3 +1526,6 @@ export const hermesProviderPresets: HermesProviderPreset[] = [
     },
   },
 ];
+
+// Remote signed catalog overlay (PRODUCT-07); the list above stays the default.
+registerPresetCatalog("hermes", hermesProviderPresets);

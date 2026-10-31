@@ -131,14 +131,23 @@ fn test_parse_invalid_scheme() {
 
 #[test]
 fn test_parse_unsupported_version() {
+    // v2 is now a real version (envelope in `p`); v1-style params are rejected.
     let url = "ccswitch://v2/import?resource=provider&app=claude&name=Test";
-
-    let result = parse_deeplink_url(url);
-    assert!(result.is_err());
-    assert!(result
+    assert!(parse_deeplink_url(url)
         .unwrap_err()
         .to_string()
-        .contains("Unsupported protocol version"));
+        .contains("Missing 'p'"));
+
+    let err = parse_deeplink_url("ccswitch://v0/import?resource=skill&repo=o/r")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("Unsupported protocol version"));
+
+    // A future version asks the user to update (SESS-30).
+    let err = parse_deeplink_url("ccswitch://v3/import?x=1")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("newer CC Switch"), "{err}");
 }
 
 #[test]
@@ -229,6 +238,8 @@ fn test_build_gemini_provider_with_model() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        nonce: None,
+        bundle: None,
     };
 
     let provider = build_provider_from_request(&AppType::Gemini, &request).unwrap();
@@ -282,6 +293,8 @@ fn test_build_gemini_provider_without_model() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        nonce: None,
+        bundle: None,
     };
 
     let provider = build_provider_from_request(&AppType::Gemini, &request).unwrap();
@@ -328,6 +341,8 @@ fn test_deeplink_usage_script_does_not_copy_provider_credentials() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        nonce: None,
+        bundle: None,
     };
 
     let provider = build_provider_from_request(&AppType::Claude, &request).unwrap();
@@ -377,6 +392,8 @@ fn test_deeplink_usage_script_omits_explicit_credentials_that_match_provider() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        nonce: None,
+        bundle: None,
     };
 
     let provider = build_provider_from_request(&AppType::Claude, &request).unwrap();
@@ -425,6 +442,8 @@ fn test_deeplink_usage_script_preserves_distinct_usage_credentials() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        nonce: None,
+        bundle: None,
     };
 
     let provider = build_provider_from_request(&AppType::Claude, &request).unwrap();
@@ -478,6 +497,8 @@ fn test_parse_and_merge_config_claude() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        nonce: None,
+        bundle: None,
     };
 
     let merged = parse_and_merge_config(&request).unwrap();
@@ -601,6 +622,8 @@ fn test_parse_and_merge_config_url_override() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        nonce: None,
+        bundle: None,
     };
 
     let merged = parse_and_merge_config(&request).unwrap();
@@ -664,6 +687,8 @@ fn test_build_claude_provider_preserves_custom_env_fields() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        nonce: None,
+        bundle: None,
     };
 
     let provider = build_provider_from_request(&AppType::Claude, &request).unwrap();
@@ -719,6 +744,8 @@ fn test_build_claude_provider_without_config_unchanged() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        nonce: None,
+        bundle: None,
     };
 
     let provider = build_provider_from_request(&AppType::Claude, &request).unwrap();
@@ -849,7 +876,8 @@ fn test_parse_skill_deeplink() {
 
     assert_eq!(request.resource, "skill");
     assert_eq!(request.repo.unwrap(), "owner/repo");
-    assert_eq!(request.directory.unwrap(), "skills");
+    // `directory` was never honoured by the importer and is ignored (SESS-22).
+    assert_eq!(request.directory, None);
     assert_eq!(request.branch.unwrap(), "dev");
 }
 
@@ -1097,4 +1125,170 @@ fn test_deeplink_usage_script_is_disabled_unless_explicitly_enabled() {
     assert!(!script_enabled(&request));
     request.usage_enabled = Some(true);
     assert!(script_enabled(&request));
+}
+
+// =============================================================================
+// Wave-3 hardening (SESS-07, SESS-22, SESS-32, SESS-33, SESS-43, SESS-44)
+// =============================================================================
+
+#[test]
+fn test_skill_repo_and_branch_are_validated() {
+    for bad in [
+        "ccswitch://v1/import?resource=skill&repo=../x",
+        "ccswitch://v1/import?resource=skill&repo=owner/..",
+        "ccswitch://v1/import?resource=skill&repo=own%20er/repo",
+        "ccswitch://v1/import?resource=skill&repo=owner/repo&branch=../../",
+        "ccswitch://v1/import?resource=skill&repo=owner/repo&branch=-x",
+        "ccswitch://v1/import?resource=skill&repo=owner/repo&branch=a%3Bb",
+    ] {
+        assert!(parse_deeplink_url(bad).is_err(), "{bad}");
+    }
+    let ok = parse_deeplink_url(
+        "ccswitch://v1/import?resource=skill&repo=my.org/skills_repo-1&branch=release/2.0",
+    )
+    .unwrap();
+    assert_eq!(ok.branch.as_deref(), Some("release/2.0"));
+}
+
+#[test]
+fn test_grok_alias_is_accepted_for_every_resource() {
+    let provider = parse_deeplink_url(
+        "ccswitch://v1/import?resource=provider&app=grok&name=G&endpoint=https%3A%2F%2Fa.example&apiKey=k",
+    )
+    .unwrap();
+    assert_eq!(provider.app.as_deref(), Some("grokbuild"));
+
+    let prompt = parse_deeplink_url(&format!(
+        "ccswitch://v1/import?resource=prompt&app=grok&name=P&content={}",
+        BASE64_STANDARD.encode("x")
+    ))
+    .unwrap();
+    assert_eq!(prompt.app.as_deref(), Some("grokbuild"));
+
+    let mcp = parse_deeplink_url(&format!(
+        "ccswitch://v1/import?resource=mcp&apps=claude,%20grok&config={}",
+        BASE64_STANDARD.encode(r#"{"mcpServers":{"t":{"command":"echo"}}}"#)
+    ))
+    .unwrap();
+    assert_eq!(mcp.apps.as_deref(), Some("claude,grokbuild"));
+}
+
+#[test]
+fn test_oversized_url_is_rejected_quickly() {
+    let url = format!(
+        "ccswitch://v1/import?resource=prompt&app=claude&name=x&content={}",
+        "A".repeat(1024 * 1024)
+    );
+    let started = std::time::Instant::now();
+    let err = parse_deeplink_url(&url).unwrap_err().to_string();
+    assert!(err.contains("too large"), "{err}");
+    assert!(started.elapsed() < std::time::Duration::from_millis(50));
+}
+
+#[test]
+fn test_base64_decoder_handles_variants_and_caps_size() {
+    use super::utils::{decode_base64_param, MAX_DECODED_PARAM_BYTES};
+    let text = "héllo>>?";
+    let std = BASE64_STANDARD.encode(text);
+    let url_safe = BASE64_URL_SAFE_NO_PAD.encode(text);
+    for variant in [
+        std.clone(),
+        url_safe,
+        std.replace('+', " "),
+        std.trim_end_matches('=').to_string(),
+    ] {
+        assert_eq!(decode_base64_param("x", &variant).unwrap(), text.as_bytes());
+    }
+    let big = "A".repeat(MAX_DECODED_PARAM_BYTES / 3 * 4 + 400);
+    assert!(decode_base64_param("x", &big)
+        .unwrap_err()
+        .to_string()
+        .contains("too large"));
+}
+
+#[test]
+fn test_config_url_only_links_are_rejected() {
+    let err = parse_deeplink_url(
+        "ccswitch://v1/import?resource=provider&app=claude&name=X&configUrl=https%3A%2F%2Fa.example%2Fc.json",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("configUrl links are not supported"), "{err}");
+}
+
+#[test]
+fn test_inline_config_endpoint_must_be_http() {
+    let config = BASE64_STANDARD.encode(
+        r#"{"env":{"ANTHROPIC_BASE_URL":"file:///etc/passwd","ANTHROPIC_AUTH_TOKEN":"k"}}"#,
+    );
+    let url = format!("ccswitch://v1/import?resource=provider&app=claude&name=X&config={config}");
+    let request = parse_deeplink_url(&url).unwrap();
+    let err = parse_and_merge_config(&request).unwrap_err().to_string();
+    assert!(err.contains("Invalid URL scheme"), "{err}");
+}
+
+#[test]
+fn test_mcp_link_server_count_is_capped() {
+    let servers: serde_json::Map<String, serde_json::Value> = (0..51)
+        .map(|i| (format!("s{i}"), serde_json::json!({"command": "echo"})))
+        .collect();
+    let config = serde_json::json!({ "mcpServers": servers }).to_string();
+    let db = Arc::new(Database::memory().expect("create memory db"));
+    let state = AppState::new(db);
+    let err = super::import_mcp_from_deeplink(&state, mcp_request(&config, None))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("Too many MCP servers"), "{err}");
+}
+
+#[test]
+#[serial_test::serial]
+fn test_enabling_imported_prompt_backs_up_live_file_even_with_another_prompt_enabled() {
+    let _test_home = TestHomeGuard::new();
+    let db = Arc::new(Database::memory().expect("create memory db"));
+    let state = AppState::new(db.clone());
+
+    // An enabled prompt whose content differs from the hand-edited live file.
+    let existing = crate::prompt::Prompt {
+        id: "mine".into(),
+        name: "Mine".into(),
+        content: "original".into(),
+        description: None,
+        enabled: true,
+        created_at: Some(1),
+        updated_at: Some(1),
+    };
+    crate::services::PromptService::upsert_prompt(&state, AppType::Claude, "mine", existing)
+        .unwrap();
+    let live = crate::prompt_files::prompt_file_path(&AppType::Claude).unwrap();
+    std::fs::create_dir_all(live.parent().unwrap()).unwrap();
+    std::fs::write(&live, "hand edited live content").unwrap();
+
+    let url = format!(
+        "ccswitch://v1/import?resource=prompt&app=claude&name=Imported&content={}&enabled=true",
+        BASE64_STANDARD.encode("imported content")
+    );
+    let request = parse_deeplink_url(&url).unwrap();
+    import_prompt_from_deeplink(&state, request).unwrap();
+
+    let prompts = db.get_prompts("claude").unwrap();
+    let backup = prompts
+        .values()
+        .find(|p| p.id.starts_with("deeplink-backup-"))
+        .expect("backup prompt created");
+    assert_eq!(backup.content, "hand edited live content");
+    assert!(!backup.enabled);
+    assert_eq!(std::fs::read_to_string(&live).unwrap(), "imported content");
+}
+
+#[test]
+fn test_prompt_with_empty_sanitized_name_is_rejected() {
+    let url = format!(
+        "ccswitch://v1/import?resource=prompt&app=claude&name=%21%21%21&content={}",
+        BASE64_STANDARD.encode("x")
+    );
+    let request = parse_deeplink_url(&url).unwrap();
+    let db = Arc::new(Database::memory().expect("create memory db"));
+    let state = AppState::new(db);
+    assert!(import_prompt_from_deeplink(&state, request).is_err());
 }

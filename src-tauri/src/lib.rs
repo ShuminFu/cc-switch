@@ -979,6 +979,12 @@ pub fn run() {
             commands::merge_deeplink_config,
             commands::import_from_deeplink,
             commands::import_from_deeplink_unified,
+            commands::import_deeplink_bundle,
+            commands::discard_pending_deeplink,
+            commands::build_deeplink_share_link,
+            commands::get_preset_catalog,
+            commands::refresh_preset_catalog,
+            commands::set_preset_catalog_auto_update,
             update_tray_menu,
             // Environment variable management
             commands::check_env_conflicts,
@@ -1071,6 +1077,9 @@ pub fn run() {
             commands::save_stream_check_config,
             // Session manager
             commands::list_sessions,
+            commands::scan_sessions_report,
+            commands::get_session_index_snapshot,
+            commands::search_sessions,
             commands::get_session_messages,
             commands::delete_session,
             commands::delete_sessions,

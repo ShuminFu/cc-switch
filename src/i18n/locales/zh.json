@@ -41,7 +41,12 @@
     "auto": "自动",
     "enabled": "已开启",
     "notSet": "未设置",
-    "retry": "重试"
+    "retry": "重试",
+    "unsavedChanges": "有未保存的更改",
+    "copyFailed": "复制失败",
+    "unsavedChangesTitle": "放弃未保存的更改？",
+    "unsavedChangesMessage": "你的编辑尚未保存，将会丢失。",
+    "discard": "放弃"
   },
   "firstRunNotice": {
     "title": "欢迎使用 CC Switch",
@@ -176,7 +181,10 @@
         "apiKeyPlaceholder": "请输入 Gemini API Key"
       }
     },
-    "loadFailed": "加载供应商失败"
+    "loadFailed": "加载供应商失败",
+    "tabProviderFor": "{{app}} 供应商",
+    "configStatusLoading": "正在检查应用配置…",
+    "copyName": "{{name}} 副本"
   },
   "claudeCode": {
     "needsRouting": "需要路由",
@@ -274,7 +282,8 @@
     "windowControlFailed": "窗口控制失败：{{error}}",
     "officialBlockedByProxy": "本地路由模式下不能切换到官方供应商，使用路由访问官方 API 可能导致账号被封禁",
     "proxyOfficialWarning": "当前供应商 {{name}} 是官方供应商，建议切换到第三方供应商后再使用本地路由",
-    "proxyReasonClaudeDesktop": "使用 Claude Desktop 本地路由模式"
+    "proxyReasonClaudeDesktop": "使用 Claude Desktop 本地路由模式",
+    "openclawModelsRegisterFailed": "供应商已添加，但其模型无法注册到 OpenClaw：{{error}}"
   },
   "confirm": {
     "deleteProvider": "删除供应商",
@@ -930,6 +939,18 @@
       "title": "端到端加密",
       "tooShort": "请至少使用 {{count}} 个字符。",
       "unavailable": "无法从系统钥匙串读取密码短语。在你重新输入之前，上传将暂停。"
+    },
+    "secretsVault": {
+      "enabled": "供应商 API Key 现已存储在系统钥匙串中。",
+      "disabled": "供应商 API Key 已重新存储在数据库中。",
+      "title": "将 API Key 存储在系统钥匙串中",
+      "description": "将供应商 API Key 和令牌从 CC Switch 数据库移至系统钥匙串。之后数据库、其备份、SQL 导出和云同步中仅保留占位符。Claude Code、Codex 等工具的配置文件中仍包含当前生效的密钥。",
+      "unavailable": "此设备上没有可用的系统钥匙串，因此无法开启此选项。在 Linux 上，请运行 Secret Service 提供程序，如 GNOME Keyring 或 KWallet。",
+      "exportWarning": "开启此选项后，SQL 导出和云同步不包含密钥。在其他设备上需要重新输入 API Key；已有该供应商的设备会保留自己的密钥。",
+      "unresolved": "{{count}} 个 API Key 不在此设备的钥匙串中。请编辑以下供应商并重新输入密钥：",
+      "pendingIn": "仍有 {{count}} 个密钥存储在数据库中。",
+      "pendingOut": "部分密钥仍在钥匙串中。",
+      "retry": "重试"
     }
   },
   "apps": {
@@ -1032,7 +1053,11 @@
     "messageCopied": "已复制消息内容",
     "conversationHistory": "对话记录",
     "expandContent": "展开完整内容",
-    "collapseContent": "收起"
+    "collapseContent": "收起",
+    "searchTranscripts": "搜索消息内容",
+    "searchIndexing": "正在索引会话内容…结果会陆续增加",
+    "scanErrors": "部分会话无法读取",
+    "messagesLoadFailed": "加载此会话失败"
   },
   "console": {
     "providerSwitchReceived": "收到供应商切换事件:",
@@ -1243,7 +1268,12 @@
     "codexAuthNotObject": "auth.json 必须是 JSON 对象。",
     "codexConfigInvalid": "config.toml 存在语法错误，请修正后再保存。",
     "geminiConfigInvalid": "Gemini config.json 不是有效的 JSON，请修正后再保存。",
-    "geminiConfigNotObject": "Gemini config.json 必须是 JSON 对象。"
+    "geminiConfigNotObject": "Gemini config.json 必须是 JSON 对象。",
+    "settingsConfigInvalid": "供应商配置不是有效的 JSON 对象。",
+    "removeModel": "删除模型",
+    "providerKeyStatusUnavailable": "无法检查此供应商标识是否已被使用。请重新加载后重试。",
+    "moveModelUp": "上移模型",
+    "moveModelDown": "下移模型"
   },
   "copilot": {
     "authSection": "GitHub Copilot 认证",
@@ -1326,7 +1356,9 @@
     "testUnavailable": "测速功能不可用",
     "noResult": "未返回结果",
     "testFailed": "测速失败: {{error}}",
-    "empty": "暂无端点"
+    "empty": "暂无端点",
+    "endpointCount": "{{count}} 个端点",
+    "removeEndpoint": "删除端点"
   },
   "providerAdvanced": {
     "pricingConfig": "计费配置",
@@ -1486,7 +1518,8 @@
     "modelExtraFieldKeyPlaceholder": "variants",
     "sdkOptions": "SDK 选项",
     "modelOptionKeyPlaceholder": "provider",
-    "modelOptionValuePlaceholder": "{\"order\": [\"baseten\"]}"
+    "modelOptionValuePlaceholder": "{\"order\": [\"baseten\"]}",
+    "modelIdDuplicate": "ID 为 {{id}} 的模型已存在"
   },
   "providerPreset": {
     "label": "预设供应商",
@@ -1909,7 +1942,10 @@
       "headers": "请求头（可选）",
       "headersPlaceholder": "Authorization: Bearer your_token_here\nContent-Type: application/json",
       "preview": "配置预览",
-      "apply": "应用配置"
+      "apply": "应用配置",
+      "invalidLines": "部分行无法解析，请先修正。",
+      "cwd": "工作目录",
+      "unparsedLines": "无法解析：{{lines}}"
     },
     "id": "标识 (唯一)",
     "type": "类型",
@@ -1935,7 +1971,8 @@
       "commandRequired": "请填写命令",
       "singleServerObjectRequired": "此处只需单个服务器对象，请不要粘贴包含 mcpServers 的整份配置",
       "saveFailed": "保存失败",
-      "deleteFailed": "删除失败"
+      "deleteFailed": "删除失败",
+      "jsonInvalidDetail": "JSON 无效：{{error}}"
     },
     "validation": {
       "ok": "命令可用",
@@ -2184,7 +2221,9 @@
       "legacyTimeoutDescription": "当前配置仍在使用 agents.defaults.timeout。保存本页面时会迁移为 timeoutSeconds。",
       "saveSuccess": "Agents 配置已保存",
       "saveFailed": "保存 Agents 配置失败",
-      "loadFailed": "读取 Agents 配置失败"
+      "loadFailed": "读取 Agents 配置失败",
+      "primaryRequired": "添加回退模型前请先选择主模型。",
+      "positiveInteger": "请输入不小于 {{min}} 的整数。"
     },
     "health": {
       "title": "检测到 OpenClaw 配置警告",
@@ -2195,7 +2234,10 @@
       "parseFailed": "openclaw.json 不是合法 JSON5。请先修复文件，再通过这里编辑。"
     },
     "primaryModel": "默认模型",
-    "fallbackModel": "回退模型"
+    "fallbackModel": "回退模型",
+    "externalChange": "此配置已在磁盘上被修改。你未保存的编辑已保留。",
+    "reloadFromDisk": "放弃编辑并重新加载",
+    "modelsOrderHint": "第一个模型为默认模型（Primary），其余为回退模型。使用箭头调整顺序。"
   },
   "hermes": {
     "form": {
@@ -2271,7 +2313,9 @@
       "selectAll": "全选",
       "clearSelection": "取消选择",
       "deleteSelected": "删除选中 ({{count}})",
-      "deleting": "删除中..."
+      "deleting": "删除中...",
+      "hideValue": "隐藏值",
+      "showValue": "显示值"
     },
     "field": {
       "value": "值",
@@ -2284,7 +2328,8 @@
     },
     "delete": {
       "success": "环境变量已成功删除",
-      "error": "删除环境变量失败"
+      "error": "删除环境变量失败",
+      "undo": "撤销"
     },
     "backup": {
       "location": "备份位置: {{path}}"
@@ -2297,6 +2342,10 @@
     },
     "error": {
       "noSelection": "请选择要删除的环境变量"
+    },
+    "restore": {
+      "success": "环境变量已恢复",
+      "error": "恢复环境变量失败"
     }
   },
   "skills": {
@@ -2424,6 +2473,7 @@
     "uninstallConfirm": "确定要卸载技能 \"{{name}}\" 吗？这将从所有应用中移除该技能，并在删除前自动创建本地备份。",
     "uninstallInMainPanel": "请在主面板中卸载技能",
     "notFound": "未找到技能",
+    "openReadme": "打开 README",
     "backup": {
       "location": "备份位置: {{path}}"
     },
@@ -2524,7 +2574,9 @@
       "name": "名称",
       "description": "描述",
       "contentPreview": "内容预览",
-      "enabledWarning": "导入后将立即启用此提示词，其他提示词将被禁用"
+      "enabledWarning": "导入后将立即启用此提示词，其他提示词将被禁用",
+      "lineCount": "{{count}} 行，{{chars}} 个字符",
+      "enableNowLabel": "立即启用：用此内容替换 {{app}} 当前生效的提示词文件（当前文件会保存为备份提示词）"
     },
     "skill": {
       "title": "添加 Claude Skill 仓库",
@@ -2549,7 +2601,24 @@
     "switchRequestedWarning": "此链接要求立即将该供应商设为当前供应商，这会把 {{app}} 的全部流量发送到 {{host}}。只有勾选下方选项后才会切换。",
     "switchNowLabel": "立即切换到此供应商（将 {{app}} 的全部流量发送到 {{host}}）",
     "switchNowWarning": "导入后，{{app}} 的全部流量（包括你的提示词和文件内容）将立即发送到 {{host}}。",
-    "firstProviderNotice": "{{app}} 当前还没有启用的供应商，因此该供应商将成为当前供应商。"
+    "firstProviderNotice": "{{app}} 当前还没有启用的供应商，因此该供应商将成为当前供应商。",
+    "bundleProvider": "供应商",
+    "bundleMcp": "MCP 服务器",
+    "bundlePrompt": "提示词",
+    "bundleSkill": "Skill 仓库",
+    "bundleDescription": "此链接包含 {{count}} 项内容。请逐项检查，并取消勾选不想导入的项目。",
+    "bundlePartial": "已导入 {{ok}}/{{total}} 项",
+    "bundleSuccess": "已导入 {{count}} 项",
+    "importBundle": "导入合集",
+    "trustPublisher": "将此密钥记为“{{publisher}}”，用于以后的链接",
+    "queuedRequests": "此请求之后还有 {{count}} 个导入请求待显示。",
+    "unsignedLink": "未签名链接",
+    "unsignedLinkHint": "任何人都可以创建此链接。仅在信任其来源时导入。",
+    "signedBy": "由 {{publisher}} 签名",
+    "signedByUnverified": "由自称“{{publisher}}”的密钥签名",
+    "signatureKeyId": "密钥 ID {{keyId}}",
+    "publisherMismatch": "此名称属于你已知的发布者，但该链接使用了不同的密钥签名，可能是冒充。",
+    "publisherNew": "签名有效，但 CC Switch 之前未见过此密钥。"
   },
   "iconPicker": {
     "search": "搜索图标",
@@ -2578,14 +2647,19 @@
     "skillsFailedDescription": "请打开 Skills 页面点击“导入已有”手动导入（或重启后再试）。"
   },
   "agents": {
-    "title": "智能体"
+    "title": "智能体",
+    "comingSoon": {
+      "title": "即将推出",
+      "description": "智能体管理功能正在开发中，敬请期待强大的自主能力。"
+    }
   },
   "health": {
     "operational": "正常",
     "degraded": "降级",
     "failed": "失败",
     "circuitOpen": "熔断",
-    "consecutiveFailures": "连续失败 {{count}} 次"
+    "consecutiveFailures": "连续失败 {{count}} 次",
+    "responseTimeSuffix": "（{{ms}} ms）"
   },
   "failover": {
     "enabled": "{{app}} 故障转移已启用",
@@ -2593,6 +2667,8 @@
     "toggleFailed": "操作失败: {{detail}}",
     "inQueue": "已加入",
     "addQueue": "加入",
+    "priorityBadge": "P{{priority}}",
+    "toggleLabel": "{{app}} 故障转移",
     "priority": {
       "tooltip": "故障转移优先级 {{priority}}"
     },
@@ -2775,7 +2851,8 @@
       "maxRetriesHint": "请求失败时的重试次数（0-10）",
       "streamingFirstByteHint": "等待首个数据块的最大时间，范围 1-120 秒，默认 60 秒",
       "streamingIdleHint": "数据块之间的最大间隔，范围 60-600 秒，填 0 禁用（防止中途卡住）",
-      "nonStreamingHint": "非流式请求的总超时时间，范围 60-1200 秒，默认 600 秒（10 分钟）"
+      "nonStreamingHint": "非流式请求的总超时时间，范围 60-1200 秒，默认 600 秒（10 分钟）",
+      "rangeError": "请输入 {{min}} 到 {{max}} 之间的整数。"
     },
     "logging": {
       "enabled": "日志记录已启用",
@@ -2894,7 +2971,8 @@
     "savedAndSynced": "已保存并同步到所有应用",
     "saveAndSyncError": "保存并同步失败",
     "configJsonPreview": "配置 JSON 预览",
-    "configJsonPreviewHint": "以下是将要同步到各应用的配置内容（仅覆盖显示的字段，保留其他自定义配置）"
+    "configJsonPreviewHint": "以下是将要同步到各应用的配置内容（仅覆盖显示的字段，保留其他自定义配置）",
+    "savedButSyncFailed": "统一供应商已保存，但同步失败"
   },
   "omo": {
     "editProfile": "编辑 OMO 配置",
@@ -3149,5 +3227,22 @@
       "body": "CC Switch 可为 Claude Code、Claude Desktop、Codex、Gemini CLI、Grok Build、OpenCode、OpenClaw 和 Hermes 管理供应商、MCP 服务器、提示词和技能。如果你之前已配置过其中某个工具，CC Switch 已将该配置保存为名为“default”的供应商，不会有任何丢失。",
       "wizardHint": "这个简短的设置会帮你选择所用的工具、导入现有配置，并添加第一个供应商。你可以跳过，之后在 设置 → 关于 中重新打开。"
     }
+  },
+  "projects": {
+    "missingProfile": "（已删除的项目）",
+    "actionFailed": "目录绑定失败：{{detail}}",
+    "bindSuccess": "已绑定 {{path}}",
+    "applyWarnings": "已应用，{{count}} 条警告：\n{{details}}",
+    "applySuccessFiles": "已应用。已更新的文件：\n{{details}}",
+    "applySuccess": "目录绑定已应用",
+    "bindingsTitle": "目录绑定",
+    "bindingsDescription": "将文件夹（其 git 仓库根目录）绑定到项目，然后一键应用。开启项目文件后，{{apps}} 仅在该文件夹内的文件中使用该项目的供应商，其他文件夹保留各自的供应商。",
+    "noBindings": "尚未绑定文件夹",
+    "projectFilesBadge": "项目文件",
+    "apply": "立即应用",
+    "unbind": "解除绑定",
+    "selectProfile": "要绑定的项目",
+    "projectLevel": "写入项目文件",
+    "bindFolder": "绑定文件夹…"
   }
 }

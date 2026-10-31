@@ -13,6 +13,14 @@ use url::Url;
 /// Expected format:
 /// ccswitch://v1/import?resource={type}&...
 pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppError> {
+    // Reject oversized links before any parsing or decoding (SESS-33).
+    if url_str.len() > MAX_URL_BYTES {
+        return Err(AppError::InvalidInput(format!(
+            "Deep link is too large ({} bytes, max {MAX_URL_BYTES})",
+            url_str.len()
+        )));
+    }
+
     // Parse URL
     let url = Url::parse(url_str)
         .map_err(|e| AppError::InvalidInput(format!("Invalid deep link URL: {e}")))?;
@@ -31,11 +39,20 @@ pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppErr
         .ok_or_else(|| AppError::InvalidInput("Missing version in URL host".to_string()))?
         .to_string();
 
-    // Validate version
-    if version != "v1" {
-        return Err(AppError::InvalidInput(format!(
-            "Unsupported protocol version: {version}"
-        )));
+    // Validate version: v1 (flat query) and v2 (envelope). A higher
+    // version means the link was made for a newer app (SESS-30).
+    if version != "v1" && version != "v2" {
+        let newer = version
+            .strip_prefix('v')
+            .and_then(|n| n.parse::<u32>().ok())
+            .is_some_and(|n| n > 2);
+        return Err(AppError::InvalidInput(if newer {
+            format!(
+                "This link uses deep-link protocol {version}, which needs a newer CC Switch. Please update CC Switch."
+            )
+        } else {
+            format!("Unsupported protocol version: {version}")
+        }));
     }
 
     // Extract path (should be "/import")
@@ -49,6 +66,49 @@ pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppErr
     // Parse query parameters
     let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
 
+    if version == "v2" {
+        return super::v2::parse_v2(&params);
+    }
+    parse_params(&params, version)
+}
+
+/// Maximum accepted deep-link URL length.
+pub const MAX_URL_BYTES: usize = 64 * 1024;
+
+/// Apps a deep link may target, with accepted aliases (SESS-32).
+const APP_IDS: &[&str] = &[
+    "claude",
+    "codex",
+    "gemini",
+    "grokbuild",
+    "opencode",
+    "openclaw",
+    "hermes",
+];
+
+/// Normalize an app id: trims, lowercases and maps aliases (`grok` →
+/// `grokbuild`). Shared by every resource type.
+pub(crate) fn parse_app_id(raw: &str, field: &str) -> Result<String, AppError> {
+    let normalized = raw.trim().to_ascii_lowercase();
+    let canonical = match normalized.as_str() {
+        "grok" => "grokbuild",
+        other => other,
+    };
+    if APP_IDS.contains(&canonical) {
+        Ok(canonical.to_string())
+    } else {
+        Err(AppError::InvalidInput(format!(
+            "Invalid app in '{field}': must be one of {}, got '{raw}'",
+            APP_IDS.join(", ")
+        )))
+    }
+}
+
+/// Parse one resource from v1-style parameters (also used for v2 items).
+pub(crate) fn parse_params(
+    params: &HashMap<String, String>,
+    version: String,
+) -> Result<DeepLinkImportRequest, AppError> {
     // Extract and validate resource type
     let resource = params
         .get("resource")
@@ -57,10 +117,10 @@ pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppErr
 
     // Dispatch to appropriate parser based on resource type
     match resource.as_str() {
-        "provider" => parse_provider_deeplink(&params, version, resource),
-        "prompt" => parse_prompt_deeplink(&params, version, resource),
-        "mcp" => parse_mcp_deeplink(&params, version, resource),
-        "skill" => parse_skill_deeplink(&params, version, resource),
+        "provider" => parse_provider_deeplink(params, version, resource),
+        "prompt" => parse_prompt_deeplink(params, version, resource),
+        "mcp" => parse_mcp_deeplink(params, version, resource),
+        "skill" => parse_skill_deeplink(params, version, resource),
         _ => Err(AppError::InvalidInput(format!(
             "Unsupported resource type: {resource}"
         ))),
@@ -75,18 +135,8 @@ fn parse_provider_deeplink(
 ) -> Result<DeepLinkImportRequest, AppError> {
     let app = params
         .get("app")
-        .ok_or_else(|| AppError::InvalidInput("Missing 'app' parameter".to_string()))?
-        .clone();
-
-    // Validate app type
-    if !matches!(
-        app.as_str(),
-        "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes"
-    ) {
-        return Err(AppError::InvalidInput(format!(
-            "Invalid app type: must be 'claude', 'codex', 'gemini', 'grokbuild', 'opencode', 'openclaw', or 'hermes', got '{app}'"
-        )));
-    }
+        .ok_or_else(|| AppError::InvalidInput("Missing 'app' parameter".to_string()))?;
+    let app = parse_app_id(app, "app")?;
 
     let name = params
         .get("name")
@@ -126,7 +176,14 @@ fn parse_provider_deeplink(
         .filter(|v| !v.is_empty());
     let config = params.get("config").cloned();
     let config_format = params.get("configFormat").cloned();
-    let config_url = params.get("configUrl").cloned();
+    // Remote config URLs are not supported (SESS-44): fail clearly instead of
+    // previewing a link whose import can only fail.
+    if params.contains_key("configUrl") && config.is_none() {
+        return Err(AppError::InvalidInput(
+            "configUrl links are not supported. Ask the link author for a link with an inline 'config' parameter.".to_string(),
+        ));
+    }
+    let config_url = None;
     let enabled = params.get("enabled").and_then(|v| v.parse::<bool>().ok());
 
     // Extract usage script fields (v3.9+)
@@ -173,6 +230,8 @@ fn parse_provider_deeplink(
         usage_access_token,
         usage_user_id,
         usage_auto_interval,
+        nonce: None,
+        bundle: None,
     })
 }
 
@@ -184,18 +243,8 @@ fn parse_prompt_deeplink(
 ) -> Result<DeepLinkImportRequest, AppError> {
     let app = params
         .get("app")
-        .ok_or_else(|| AppError::InvalidInput("Missing 'app' parameter for prompt".to_string()))?
-        .clone();
-
-    // Validate app type
-    if !matches!(
-        app.as_str(),
-        "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes"
-    ) {
-        return Err(AppError::InvalidInput(format!(
-            "Invalid app type: must be 'claude', 'codex', 'gemini', 'grokbuild', 'opencode', 'openclaw', or 'hermes', got '{app}'"
-        )));
-    }
+        .ok_or_else(|| AppError::InvalidInput("Missing 'app' parameter for prompt".to_string()))?;
+    let app = parse_app_id(app, "app")?;
 
     let name = params
         .get("name")
@@ -243,6 +292,8 @@ fn parse_prompt_deeplink(
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        nonce: None,
+        bundle: None,
     })
 }
 
@@ -254,28 +305,14 @@ fn parse_mcp_deeplink(
 ) -> Result<DeepLinkImportRequest, AppError> {
     let apps = params
         .get("apps")
-        .ok_or_else(|| AppError::InvalidInput("Missing 'apps' parameter for MCP".to_string()))?
-        .clone();
+        .ok_or_else(|| AppError::InvalidInput("Missing 'apps' parameter for MCP".to_string()))?;
 
-    // Validate apps format
-    for app in apps.split(',') {
-        let trimmed = app.trim();
-        if !matches!(
-            trimmed,
-            "claude"
-                | "codex"
-                | "gemini"
-                | "grokbuild"
-                | "grok"
-                | "opencode"
-                | "openclaw"
-                | "hermes"
-        ) {
-            return Err(AppError::InvalidInput(format!(
-                "Invalid app in 'apps': must be 'claude', 'codex', 'gemini', 'grokbuild', 'opencode', 'openclaw', or 'hermes', got '{trimmed}'"
-            )));
-        }
-    }
+    // Validate and normalize every app (aliases map to canonical ids).
+    let apps = apps
+        .split(',')
+        .map(|app| parse_app_id(app, "apps"))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(",");
 
     let config = params
         .get("config")
@@ -315,6 +352,8 @@ fn parse_mcp_deeplink(
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        nonce: None,
+        bundle: None,
     })
 }
 
@@ -329,15 +368,25 @@ fn parse_skill_deeplink(
         .ok_or_else(|| AppError::InvalidInput("Missing 'repo' parameter for skill".to_string()))?
         .clone();
 
-    // Validate repo format (should be "owner/name")
-    if !repo.contains('/') || repo.split('/').count() != 2 {
+    // Validate repo format (should be "owner/name") and each part (SESS-22)
+    let parts: Vec<&str> = repo.split('/').collect();
+    if parts.len() != 2 || !parts.iter().all(|part| is_valid_repo_part(part)) {
         return Err(AppError::InvalidInput(format!(
-            "Invalid repo format: expected 'owner/name', got '{repo}'"
+            "Invalid repo format: expected 'owner/name' (letters, digits, '.', '_' or '-'), got '{repo}'"
         )));
     }
 
-    let directory = params.get("directory").cloned();
     let branch = params.get("branch").cloned();
+    if let Some(branch) = branch.as_deref() {
+        if !is_valid_branch(branch) {
+            return Err(AppError::InvalidInput(format!(
+                "Invalid branch name: '{branch}'"
+            )));
+        }
+    }
+    // `directory` was never honoured by the importer (a skill link adds the
+    // repository as a skill source); it is ignored instead of being shown.
+    let directory = None;
 
     Ok(DeepLinkImportRequest {
         version,
@@ -370,5 +419,30 @@ fn parse_skill_deeplink(
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        nonce: None,
+        bundle: None,
     })
+}
+
+/// GitHub owner / repository name: 1-100 of `[A-Za-z0-9_.-]`, not `.`/`..`.
+fn is_valid_repo_part(part: &str) -> bool {
+    !part.is_empty()
+        && part.len() <= 100
+        && part != "."
+        && part != ".."
+        && part
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+}
+
+/// Git branch: 1-255 of `[A-Za-z0-9._/-]`, no `..`, no leading `/` or `-`.
+fn is_valid_branch(branch: &str) -> bool {
+    !branch.is_empty()
+        && branch.len() <= 255
+        && !branch.contains("..")
+        && !branch.starts_with(['/', '-'])
+        && !branch.ends_with('/')
+        && branch
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | '/'))
 }

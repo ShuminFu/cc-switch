@@ -25,6 +25,8 @@ interface SessionItemProps {
   isChecked: boolean;
   isCheckDisabled?: boolean;
   searchQuery?: string;
+  /** Transcript excerpt from the backend full-text search. */
+  snippet?: string;
   onSelect: (key: string) => void;
   onToggleChecked: (checked: boolean) => void;
 }
@@ -36,6 +38,7 @@ export function SessionItem({
   isChecked,
   isCheckDisabled = false,
   searchQuery,
+  snippet,
   onSelect,
   onToggleChecked,
 }: SessionItemProps) {
@@ -96,6 +99,11 @@ export function SessionItem({
           />
         </div>
 
+        {snippet ? (
+          <p className="mb-1 line-clamp-2 text-[11px] text-muted-foreground">
+            {searchQuery ? highlightText(snippet, searchQuery) : snippet}
+          </p>
+        ) : null}
         <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
           <Clock className="size-3" />
           <span>

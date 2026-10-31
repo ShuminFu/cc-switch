@@ -6,6 +6,8 @@ use rusqlite::Connection;
 use serde_json::Value;
 
 use crate::hermes_config::get_hermes_dir;
+use crate::session_manager::cache::ScanCache;
+use crate::session_manager::source::SessionSource;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
 use super::utils::{
@@ -25,9 +27,9 @@ fn get_hermes_sessions_dir() -> PathBuf {
 
 /// Scan sessions from both SQLite database and JSONL transcript files,
 /// with SQLite taking precedence on ID conflicts.
-pub fn scan_sessions() -> Vec<SessionMeta> {
+pub fn scan_sessions(cache: &ScanCache) -> Vec<SessionMeta> {
     let sqlite_sessions = scan_sessions_sqlite();
-    let jsonl_sessions = scan_sessions_jsonl();
+    let jsonl_sessions = scan_sessions_jsonl(cache);
 
     if sqlite_sessions.is_empty() {
         return jsonl_sessions;
@@ -82,7 +84,9 @@ fn scan_sessions_sqlite() -> Vec<SessionMeta> {
     // Query sessions — use flexible column access via pragma
     let columns = get_table_columns(&conn, "sessions");
 
-    let query = "SELECT * FROM sessions ORDER BY rowid DESC LIMIT 500";
+    // No row cap: older sessions must not silently fall back to (or vanish
+    // behind) their legacy JSONL copies (SESS-40).
+    let query = "SELECT * FROM sessions ORDER BY rowid DESC";
     let mut stmt = match conn.prepare(query) {
         Ok(s) => s,
         Err(e) => {
@@ -142,6 +146,8 @@ fn sqlite_row_to_session_meta(row: &Value, db_source: &str) -> Option<SessionMet
     let source_path = format!("{}#{}", db_source, session_id);
 
     Some(SessionMeta {
+        source: None,
+        session_key: None,
         provider_id: PROVIDER_ID.to_string(),
         session_id,
         title,
@@ -235,12 +241,26 @@ pub fn load_messages_sqlite(source: &str) -> Result<Vec<SessionMessage>, String>
 
 /// Delete a session from the Hermes SQLite database.
 pub fn delete_session_sqlite(session_id: &str, source: &str) -> Result<bool, String> {
+    delete_session_sqlite_in(
+        session_id,
+        source,
+        &get_hermes_db_path(),
+        &get_hermes_sessions_dir(),
+    )
+}
+
+fn delete_session_sqlite_in(
+    session_id: &str,
+    source: &str,
+    expected_db: &Path,
+    sessions_dir: &Path,
+) -> Result<bool, String> {
     let (db_path, ref_session_id) = parse_sqlite_source(source)
         .ok_or_else(|| format!("Invalid SQLite source reference: {source}"))?;
     let db_path = db_path
         .canonicalize()
         .map_err(|e| format!("Failed to canonicalize Hermes database path: {e}"))?;
-    let expected_db_path = get_hermes_db_path()
+    let expected_db_path = expected_db
         .canonicalize()
         .map_err(|e| format!("Failed to canonicalize expected Hermes database path: {e}"))?;
 
@@ -260,8 +280,19 @@ pub fn delete_session_sqlite(session_id: &str, source: &str) -> Result<bool, Str
         .unchecked_transaction()
         .map_err(|e| format!("Failed to begin transaction: {e}"))?;
 
-    // Delete messages first (child records)
-    let _ = tx.execute("DELETE FROM messages WHERE session_id = ?1", [session_id]);
+    // Delete messages first (child records). The table is optional in older
+    // Hermes schemas, but when it exists a failure must abort the delete.
+    let has_messages: bool = tx
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='messages'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    if has_messages {
+        tx.execute("DELETE FROM messages WHERE session_id = ?1", [session_id])
+            .map_err(|e| format!("Failed to delete Hermes messages: {e}"))?;
+    }
 
     let deleted = tx
         .execute("DELETE FROM sessions WHERE id = ?1", [session_id])
@@ -270,29 +301,58 @@ pub fn delete_session_sqlite(session_id: &str, source: &str) -> Result<bool, Str
     tx.commit()
         .map_err(|e| format!("Failed to commit session deletion: {e}"))?;
 
+    // The scan merges legacy JSONL transcripts whose id is not in SQLite, so a
+    // leftover copy would make the deleted session reappear (SESS-40).
+    remove_legacy_jsonl_copies(sessions_dir, session_id)?;
+
     Ok(deleted > 0)
 }
 
-fn parse_sqlite_source(source: &str) -> Option<(PathBuf, String)> {
-    let rest = source.strip_prefix("sqlite:")?;
-    let hash_pos = rest.rfind('#')?;
-    let db_path = PathBuf::from(&rest[..hash_pos]);
-    let session_id = rest[hash_pos + 1..].to_string();
-    if session_id.is_empty() {
-        return None;
+/// Remove `sessions/*.json[l]` transcripts that belong to `session_id`.
+fn remove_legacy_jsonl_copies(sessions_dir: &Path, session_id: &str) -> Result<(), String> {
+    let Ok(entries) = std::fs::read_dir(sessions_dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let ext = path.extension().and_then(|e| e.to_str());
+        if ext != Some("jsonl") && ext != Some("json") {
+            continue;
+        }
+        let stem_matches = path.file_stem().and_then(|s| s.to_str()) == Some(session_id);
+        let id_matches = stem_matches
+            || parse_jsonl_session(&path).is_some_and(|meta| meta.session_id == session_id);
+        if id_matches {
+            std::fs::remove_file(&path).map_err(|e| {
+                format!(
+                    "Failed to delete Hermes session file {}: {e}",
+                    path.display()
+                )
+            })?;
+        }
     }
-    Some((db_path, session_id))
+    Ok(())
+}
+
+fn parse_sqlite_source(source: &str) -> Option<(PathBuf, String)> {
+    match SessionSource::from_legacy(PROVIDER_ID, source).ok()? {
+        SessionSource::Sqlite { db, id } => Some((PathBuf::from(db), id)),
+        _ => None,
+    }
 }
 
 // ── JSONL scanning ──────────────────────────────────────────────────
 
-fn scan_sessions_jsonl() -> Vec<SessionMeta> {
-    let sessions_dir = get_hermes_sessions_dir();
+fn scan_sessions_jsonl(cache: &ScanCache) -> Vec<SessionMeta> {
+    scan_sessions_jsonl_in(&get_hermes_sessions_dir(), cache)
+}
+
+fn scan_sessions_jsonl_in(sessions_dir: &Path, cache: &ScanCache) -> Vec<SessionMeta> {
     if !sessions_dir.exists() {
         return Vec::new();
     }
 
-    let entries = match std::fs::read_dir(&sessions_dir) {
+    let entries = match std::fs::read_dir(sessions_dir) {
         Ok(e) => e,
         Err(_) => return Vec::new(),
     };
@@ -304,7 +364,7 @@ fn scan_sessions_jsonl() -> Vec<SessionMeta> {
         if ext != Some("jsonl") && ext != Some("json") {
             continue;
         }
-        if let Some(meta) = parse_jsonl_session(&path) {
+        if let Some(meta) = cache.get_or_parse(PROVIDER_ID, &path, || parse_jsonl_session(&path)) {
             sessions.push(meta);
         }
     }
@@ -420,6 +480,8 @@ fn parse_jsonl_session(path: &Path) -> Option<SessionMeta> {
     let source_path = path.to_string_lossy().to_string();
 
     Some(SessionMeta {
+        source: None,
+        session_key: None,
         provider_id: PROVIDER_ID.to_string(),
         session_id,
         title: title.or_else(|| first_user_msg.clone()),
@@ -489,7 +551,17 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
 }
 
 /// Delete a Hermes JSONL session file.
-pub fn delete_session(_root: &Path, path: &Path, _session_id: &str) -> Result<bool, String> {
+pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<bool, String> {
+    // Re-parse the file so a stale or mismatched request cannot delete a
+    // different transcript (SESS-27).
+    let meta = parse_jsonl_session(path)
+        .ok_or_else(|| format!("Failed to parse Hermes session: {}", path.display()))?;
+    if meta.session_id != session_id {
+        return Err(format!(
+            "Hermes session ID mismatch: expected {session_id}, found {}",
+            meta.session_id
+        ));
+    }
     std::fs::remove_file(path).map_err(|e| {
         format!(
             "Failed to delete Hermes session file {}: {e}",
@@ -603,5 +675,53 @@ mod tests {
 
         delete_session(dir.path(), &path, "session").expect("should delete");
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn sqlite_delete_removes_legacy_jsonl_copy() {
+        let temp = tempdir().expect("tempdir");
+        let db = temp.path().join("state.db");
+        let sessions_dir = temp.path().join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, started_at TEXT);
+             CREATE TABLE messages (session_id TEXT, role TEXT, content TEXT, created_at INTEGER);
+             INSERT INTO sessions VALUES ('s-1', 'hello', datetime('now'));
+             INSERT INTO messages VALUES ('s-1', 'user', 'hi', 1);",
+        )
+        .unwrap();
+        drop(conn);
+        std::fs::write(
+            sessions_dir.join("s-1.jsonl"),
+            "{\"role\":\"user\",\"content\":\"hi\",\"timestamp\":\"2026-03-06T10:00:00Z\"}\n",
+        )
+        .unwrap();
+
+        let source = format!("sqlite:{}#s-1", db.display());
+        assert!(delete_session_sqlite_in("s-1", &source, &db, &sessions_dir).unwrap());
+        assert!(!sessions_dir.join("s-1.jsonl").exists());
+        assert!(scan_sessions_jsonl_in(&sessions_dir, &ScanCache::disabled()).is_empty());
+    }
+
+    #[test]
+    fn sqlite_rows_with_datetime_now_get_timestamps() {
+        let row = serde_json::json!({"id": "s-2", "started_at": "2026-03-06 10:17:58"});
+        let meta = sqlite_row_to_session_meta(&row, "sqlite:/db").unwrap();
+        assert_eq!(meta.last_active_at, Some(1_772_792_278_000));
+    }
+
+    #[test]
+    fn jsonl_delete_rejects_mismatched_id() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("real.jsonl");
+        std::fs::write(
+            &path,
+            "{\"role\":\"user\",\"content\":\"hi\",\"timestamp\":\"2026-03-06T10:00:00Z\"}\n",
+        )
+        .unwrap();
+        let err = delete_session(temp.path(), &path, "other").unwrap_err();
+        assert!(err.contains("mismatch"));
+        assert!(path.exists());
     }
 }

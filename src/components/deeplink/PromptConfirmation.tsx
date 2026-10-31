@@ -1,19 +1,33 @@
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { DeepLinkImportRequest } from "../../lib/api/deeplink";
 import { decodeBase64Utf8 } from "../../lib/utils/base64";
+import { Checkbox } from "@/components/ui/checkbox";
 
+/**
+ * Prompt import preview. The whole content is shown (scrollable, with a line
+ * count) because a prompt becomes part of the coding tool's system prompt;
+ * anything hidden past a preview cut-off could be a prompt injection
+ * (SESS-07). Enabling — which replaces the live CLAUDE.md / AGENTS.md — is a
+ * separate explicit opt-in that starts unticked.
+ */
 export function PromptConfirmation({
   request,
+  enableNow = false,
+  onEnableNowChange,
 }: {
   request: DeepLinkImportRequest;
+  enableNow?: boolean;
+  onEnableNowChange?: (value: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const enableId = useId();
 
   const decodedContent = useMemo(() => {
     if (!request.content) return "";
     return decodeBase64Utf8(request.content);
   }, [request.content]);
+  const lineCount = decodedContent ? decodedContent.split("\n").length : 0;
 
   return (
     <div className="space-y-4">
@@ -43,19 +57,45 @@ export function PromptConfirmation({
       )}
 
       <div>
-        <label className="block text-sm font-medium text-muted-foreground">
-          {t("deeplink.prompt.contentPreview")}
+        <label className="flex items-baseline justify-between text-sm font-medium text-muted-foreground">
+          <span>{t("deeplink.prompt.contentPreview")}</span>
+          <span className="text-xs font-normal">
+            {t("deeplink.prompt.lineCount", {
+              defaultValue: "{{count}} lines, {{chars}} characters",
+              count: lineCount,
+              chars: decodedContent.length,
+            })}
+          </span>
         </label>
-        <pre className="mt-1 max-h-48 overflow-auto bg-muted/50 p-2 rounded text-xs whitespace-pre-wrap border">
-          {decodedContent.substring(0, 500)}
-          {decodedContent.length > 500 && "..."}
+        <pre
+          className="mt-1 max-h-72 overflow-auto bg-muted/50 p-2 rounded text-xs whitespace-pre-wrap break-words border"
+          data-testid="deeplink-prompt-content"
+        >
+          {decodedContent}
         </pre>
       </div>
 
-      {request.enabled && (
-        <div className="text-yellow-600 dark:text-yellow-500 text-sm flex items-center gap-2">
-          <span>⚠️</span>
-          <span>{t("deeplink.prompt.enabledWarning")}</span>
+      {onEnableNowChange && (
+        <div className="space-y-1 rounded-lg border p-3">
+          {request.enabled && (
+            <div className="text-xs text-yellow-700 dark:text-yellow-400">
+              {t("deeplink.prompt.enabledWarning")}
+            </div>
+          )}
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id={enableId}
+              checked={enableNow}
+              onCheckedChange={(v) => onEnableNowChange(v === true)}
+            />
+            <label htmlFor={enableId} className="text-sm leading-tight">
+              {t("deeplink.prompt.enableNowLabel", {
+                defaultValue:
+                  "Enable now: replace the live {{app}} prompt file with this content (the current file is saved as a backup prompt)",
+                app: request.app,
+              })}
+            </label>
+          </div>
         </div>
       )}
     </div>

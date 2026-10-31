@@ -39,6 +39,7 @@ pub fn import_provider_from_deeplink(
 
     // Step 1: Merge config file if provided (v3.8+)
     let mut merged_request = parse_and_merge_config(&request)?;
+    validate_request_urls(&merged_request)?;
 
     // Extract required fields (now as Option)
     let app_str = merged_request
@@ -655,7 +656,28 @@ pub fn parse_and_merge_config(
         }
     }
 
+    // Endpoints copied from the inline config bypassed the parser's URL
+    // checks; validate them here so both the preview and the import refuse
+    // non-http(s) endpoints (SESS-43).
+    validate_request_urls(&merged)?;
+
     Ok(merged)
+}
+
+/// Every endpoint (comma-separated) and the homepage must be http(s) URLs.
+pub(crate) fn validate_request_urls(request: &DeepLinkImportRequest) -> Result<(), AppError> {
+    if let Some(endpoints) = request.endpoint.as_deref() {
+        for (i, url) in endpoints.split(',').enumerate() {
+            let trimmed = url.trim();
+            if !trimmed.is_empty() {
+                super::utils::validate_url(trimmed, &format!("endpoint[{i}]"))?;
+            }
+        }
+    }
+    if let Some(homepage) = request.homepage.as_deref().filter(|s| !s.is_empty()) {
+        super::utils::validate_url(homepage, "homepage")?;
+    }
+    Ok(())
 }
 
 /// Merge Claude configuration from config file

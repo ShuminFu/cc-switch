@@ -55,10 +55,15 @@ pub fn import_prompt_from_deeplink(
         .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
         .collect::<String>()
         .to_lowercase();
+    if sanitized_name.is_empty() {
+        return Err(AppError::InvalidInput(
+            "Prompt name must contain at least one letter or digit".to_string(),
+        ));
+    }
     let id = format!("{sanitized_name}-{timestamp}");
 
-    // Check if we should enable this prompt
-    let should_enable = request.enabled.unwrap_or(false);
+    // Only an explicit opt-in (set by the confirmation dialog) enables it.
+    let should_enable = request.enabled == Some(true);
 
     // Create Prompt (initially disabled)
     let prompt = Prompt {
@@ -74,8 +79,11 @@ pub fn import_prompt_from_deeplink(
     // Save using PromptService
     PromptService::upsert_prompt(state, app_type.clone(), &id, prompt)?;
 
-    // If enabled flag is set, enable this prompt (which will disable others)
+    // If enabled flag is set, enable this prompt (which will disable others).
+    // The live file is always snapshotted first: enable_prompt would otherwise
+    // fold it into the previously enabled prompt, silently rewriting it (SESS-07).
     if should_enable {
+        backup_live_prompt(state, &app_type, &name, timestamp)?;
         PromptService::enable_prompt(state, app_type, &id)?;
         log::info!("Successfully imported and enabled prompt '{name}' for {app_str}");
     } else {
@@ -83,4 +91,38 @@ pub fn import_prompt_from_deeplink(
     }
 
     Ok(id)
+}
+
+/// Save the current live prompt file as a disabled backup prompt.
+fn backup_live_prompt(
+    state: &AppState,
+    app_type: &AppType,
+    imported_name: &str,
+    timestamp: i64,
+) -> Result<(), AppError> {
+    let path = crate::prompt_files::prompt_file_path(app_type)?;
+    let Ok(live) = std::fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    if live.trim().is_empty() {
+        return Ok(());
+    }
+    let id = format!("deeplink-backup-{timestamp}");
+    let backup = Prompt {
+        id: id.clone(),
+        name: format!("Backup before importing {imported_name}"),
+        content: live,
+        description: Some(format!(
+            "Live {} saved before a deep-link prompt was enabled",
+            path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default()
+        )),
+        enabled: false,
+        created_at: Some(timestamp),
+        updated_at: Some(timestamp),
+    };
+    PromptService::upsert_prompt(state, app_type.clone(), &id, backup)?;
+    log::info!("Backed up live prompt before deep-link import: {id}");
+    Ok(())
 }

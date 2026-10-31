@@ -41,7 +41,12 @@
     "auto": "Auto",
     "enabled": "Enabled",
     "notSet": "Not Set",
-    "retry": "Retry"
+    "retry": "Retry",
+    "unsavedChanges": "Unsaved changes",
+    "copyFailed": "Copy failed",
+    "unsavedChangesTitle": "Discard unsaved changes?",
+    "unsavedChangesMessage": "Your edits have not been saved and will be lost.",
+    "discard": "Discard"
   },
   "firstRunNotice": {
     "title": "Welcome to CC Switch",
@@ -176,7 +181,10 @@
       }
     },
     "duplicateLiveIdsLoadFailed": "Failed to read provider keys from the config. Fix the config and try again",
-    "loadFailed": "Failed to load providers"
+    "loadFailed": "Failed to load providers",
+    "tabProviderFor": "{{app}} Provider",
+    "configStatusLoading": "Checking the app config…",
+    "copyName": "{{name}} copy"
   },
   "claudeCode": {
     "needsRouting": "Needs Routing",
@@ -274,7 +282,8 @@
     "windowControlFailed": "Window control failed: {{error}}",
     "officialBlockedByProxy": "Cannot switch to official provider while local routing is active. Using routing with official APIs may cause account bans.",
     "proxyOfficialWarning": "Current provider {{name}} is official. Consider switching to a third-party provider before using local routing.",
-    "proxyReasonClaudeDesktop": "uses Claude Desktop local routing mode"
+    "proxyReasonClaudeDesktop": "uses Claude Desktop local routing mode",
+    "openclawModelsRegisterFailed": "Provider added, but its models could not be registered in OpenClaw: {{error}}"
   },
   "confirm": {
     "deleteProvider": "Delete Provider",
@@ -930,6 +939,18 @@
       "title": "End-to-end encryption",
       "tooShort": "Use at least {{count}} characters.",
       "unavailable": "The passphrase cannot be read from the system keychain. Uploads are paused until you enter it again."
+    },
+    "secretsVault": {
+      "enabled": "Provider API keys are now stored in the system keychain.",
+      "disabled": "Provider API keys are stored in the database again.",
+      "title": "Store API keys in the system keychain",
+      "description": "Moves provider API keys and tokens out of the CC Switch database into the system keychain. The database, its backups, SQL exports and cloud sync then hold only placeholders. The config files of Claude Code, Codex and other tools still contain the active key.",
+      "unavailable": "No system keychain is available on this device, so this option cannot be turned on. On Linux, run a Secret Service provider such as GNOME Keyring or KWallet.",
+      "exportWarning": "SQL exports and cloud sync do not include the keys while this is on. On another device, re-enter the API keys; a device that already has a provider keeps its own key.",
+      "unresolved": "{{count}} API key(s) are not in this device's keychain. Edit these providers and enter the key again:",
+      "pendingIn": "{{count}} key(s) are still stored in the database.",
+      "pendingOut": "Some keys are still in the keychain.",
+      "retry": "Retry"
     }
   },
   "apps": {
@@ -1032,7 +1053,11 @@
     "messageCopied": "Message copied",
     "conversationHistory": "Conversation History",
     "expandContent": "Expand full content",
-    "collapseContent": "Collapse"
+    "collapseContent": "Collapse",
+    "searchTranscripts": "Search message contents",
+    "searchIndexing": "Indexing transcripts… results will grow",
+    "scanErrors": "Some sessions could not be read",
+    "messagesLoadFailed": "Failed to load this session"
   },
   "console": {
     "providerSwitchReceived": "Received provider switch event:",
@@ -1243,7 +1268,12 @@
     "codexAuthNotObject": "auth.json must be a JSON object.",
     "codexConfigInvalid": "config.toml has a syntax error. Fix it before saving.",
     "geminiConfigInvalid": "Gemini config.json is not valid JSON. Fix it before saving.",
-    "geminiConfigNotObject": "Gemini config.json must be a JSON object."
+    "geminiConfigNotObject": "Gemini config.json must be a JSON object.",
+    "settingsConfigInvalid": "The provider configuration is not a valid JSON object.",
+    "removeModel": "Remove model",
+    "providerKeyStatusUnavailable": "Could not check whether this provider key is already in use. Reload and try again.",
+    "moveModelUp": "Move model up",
+    "moveModelDown": "Move model down"
   },
   "copilot": {
     "authSection": "GitHub Copilot Authentication",
@@ -1326,7 +1356,9 @@
     "testUnavailable": "Speed test unavailable",
     "noResult": "No result returned",
     "testFailed": "Speed test failed: {{error}}",
-    "empty": "No endpoints"
+    "empty": "No endpoints",
+    "endpointCount": "{{count}} endpoints",
+    "removeEndpoint": "Remove endpoint"
   },
   "providerAdvanced": {
     "pricingConfig": "Pricing Config",
@@ -1486,7 +1518,8 @@
     "modelExtraFieldKeyPlaceholder": "variants",
     "sdkOptions": "SDK Options",
     "modelOptionKeyPlaceholder": "provider",
-    "modelOptionValuePlaceholder": "{\"order\": [\"baseten\"]}"
+    "modelOptionValuePlaceholder": "{\"order\": [\"baseten\"]}",
+    "modelIdDuplicate": "A model with ID {{id}} already exists"
   },
   "providerPreset": {
     "label": "Provider Preset",
@@ -1909,7 +1942,10 @@
       "headers": "Headers (optional)",
       "headersPlaceholder": "Authorization: Bearer your_token_here\nContent-Type: application/json",
       "preview": "Configuration Preview",
-      "apply": "Apply Configuration"
+      "apply": "Apply Configuration",
+      "invalidLines": "Some lines could not be parsed; fix them first.",
+      "cwd": "Working directory",
+      "unparsedLines": "Cannot parse: {{lines}}"
     },
     "id": "Identifier (unique)",
     "type": "Type",
@@ -1935,7 +1971,8 @@
       "commandRequired": "Please enter command",
       "singleServerObjectRequired": "Please paste a single MCP server object (do not include top-level mcpServers)",
       "saveFailed": "Save failed",
-      "deleteFailed": "Delete failed"
+      "deleteFailed": "Delete failed",
+      "jsonInvalidDetail": "Invalid JSON: {{error}}"
     },
     "validation": {
       "ok": "Command available",
@@ -2184,7 +2221,9 @@
       "legacyTimeoutDescription": "This config still uses agents.defaults.timeout. Saving here will migrate it to timeoutSeconds.",
       "saveSuccess": "Agents config saved",
       "saveFailed": "Failed to save agents config",
-      "loadFailed": "Failed to load agents config"
+      "loadFailed": "Failed to load agents config",
+      "primaryRequired": "Choose a primary model before adding fallbacks.",
+      "positiveInteger": "Enter a whole number of at least {{min}}."
     },
     "health": {
       "title": "OpenClaw config warnings detected",
@@ -2195,7 +2234,10 @@
       "parseFailed": "openclaw.json could not be parsed as valid JSON5. Fix the file before editing it here."
     },
     "primaryModel": "Primary Model",
-    "fallbackModel": "Fallback Model"
+    "fallbackModel": "Fallback Model",
+    "externalChange": "This config changed on disk. Your unsaved edits are kept.",
+    "reloadFromDisk": "Discard edits and reload",
+    "modelsOrderHint": "The first model is the default (Primary); the others are fallbacks. Use the arrows to change the order."
   },
   "hermes": {
     "form": {
@@ -2271,7 +2313,9 @@
       "selectAll": "Select All",
       "clearSelection": "Clear Selection",
       "deleteSelected": "Delete Selected ({{count}})",
-      "deleting": "Deleting..."
+      "deleting": "Deleting...",
+      "hideValue": "Hide value",
+      "showValue": "Show value"
     },
     "field": {
       "value": "Value",
@@ -2284,7 +2328,8 @@
     },
     "delete": {
       "success": "Environment variables deleted successfully",
-      "error": "Failed to delete environment variables"
+      "error": "Failed to delete environment variables",
+      "undo": "Undo"
     },
     "backup": {
       "location": "Backup location: {{path}}"
@@ -2297,6 +2342,10 @@
     },
     "error": {
       "noSelection": "Please select environment variables to delete"
+    },
+    "restore": {
+      "success": "Environment variables restored",
+      "error": "Failed to restore environment variables"
     }
   },
   "skills": {
@@ -2458,7 +2507,8 @@
       "successSingle": "Skill {{name}} installed",
       "successMultiple": "Successfully installed {{count}} skills",
       "noSkillsFound": "No skills found in ZIP file (requires SKILL.md file)"
-    }
+    },
+    "openReadme": "Open README"
   },
   "deeplink": {
     "confirmImport": "Confirm Import Provider",
@@ -2524,7 +2574,9 @@
       "name": "Name",
       "description": "Description",
       "contentPreview": "Content Preview",
-      "enabledWarning": "After import, this prompt will be enabled immediately and other prompts will be disabled"
+      "enabledWarning": "After import, this prompt will be enabled immediately and other prompts will be disabled",
+      "lineCount": "{{count}} lines, {{chars}} characters",
+      "enableNowLabel": "Enable now: replace the live {{app}} prompt file with this content (the current file is saved as a backup prompt)"
     },
     "skill": {
       "title": "Add Claude Skill Repository",
@@ -2549,7 +2601,24 @@
     "switchRequestedWarning": "This link asks to make this provider current immediately, which would route all {{app}} traffic to {{host}}. It is only switched if you tick the box below.",
     "switchNowLabel": "Switch to this provider now (route all {{app}} traffic to {{host}})",
     "switchNowWarning": "All {{app}} traffic, including your prompts and file contents, will be sent to {{host}} right after import.",
-    "firstProviderNotice": "No provider is active for {{app}} yet, so this provider will become the current one."
+    "firstProviderNotice": "No provider is active for {{app}} yet, so this provider will become the current one.",
+    "bundleProvider": "Provider",
+    "bundleMcp": "MCP servers",
+    "bundlePrompt": "Prompt",
+    "bundleSkill": "Skill repository",
+    "bundleDescription": "This link contains {{count}} items. Review each one and untick anything you do not want to import.",
+    "bundlePartial": "Imported {{ok}} of {{total}} items",
+    "bundleSuccess": "Imported {{count}} items",
+    "importBundle": "Import bundle",
+    "trustPublisher": "Remember this key as “{{publisher}}” for future links",
+    "queuedRequests": "{{count}} more import request(s) will be shown after this one.",
+    "unsignedLink": "Unsigned link",
+    "unsignedLinkHint": "anyone can create this link. Only import it if you trust where it came from.",
+    "signedBy": "Signed by {{publisher}}",
+    "signedByUnverified": "Signed by a key claiming to be “{{publisher}}”",
+    "signatureKeyId": "Key ID {{keyId}}",
+    "publisherMismatch": "This name belongs to a publisher you already know, but the link is signed with a different key. It may be an impersonation.",
+    "publisherNew": "The signature is valid, but CC Switch has not seen this key before."
   },
   "iconPicker": {
     "search": "Search Icons",
@@ -2578,14 +2647,19 @@
     "skillsFailedDescription": "Open the Skills page and click \"Import Existing\" to import manually (or restart and try again)."
   },
   "agents": {
-    "title": "Agents"
+    "title": "Agents",
+    "comingSoon": {
+      "title": "Coming Soon",
+      "description": "The Agents management feature is currently under development. Stay tuned for powerful autonomous capabilities."
+    }
   },
   "health": {
     "operational": "Operational",
     "degraded": "Degraded",
     "failed": "Failed",
     "circuitOpen": "Circuit Open",
-    "consecutiveFailures": "{{count}} consecutive failures"
+    "consecutiveFailures": "{{count}} consecutive failures",
+    "responseTimeSuffix": " ({{ms}} ms)"
   },
   "failover": {
     "enabled": "{{app}} failover enabled",
@@ -2600,7 +2674,9 @@
       "enabled": "{{app}} failover enabled\nRequests follow queue priority (P1→P2→...)",
       "disabled": "Enable {{app}} failover\nSwitches to queue P1 immediately, then falls back on failures",
       "takeoverRequired": "Enable {{app}} takeover before turning on failover"
-    }
+    },
+    "priorityBadge": "P{{priority}}",
+    "toggleLabel": "{{app}} failover"
   },
   "proxy": {
     "panel": {
@@ -2775,7 +2851,8 @@
       "maxRetriesHint": "Number of retries on request failure (0-10)",
       "streamingFirstByteHint": "Max time to wait for first data chunk, range 1-120s, default 60s",
       "streamingIdleHint": "Max interval between data chunks, range 60-600s, 0 to disable (prevents mid-stream stalls)",
-      "nonStreamingHint": "Total timeout for non-streaming requests, range 60-1200s, default 600s (10 min)"
+      "nonStreamingHint": "Total timeout for non-streaming requests, range 60-1200s, default 600s (10 min)",
+      "rangeError": "Enter a whole number from {{min}} to {{max}}."
     },
     "logging": {
       "enabled": "Logging enabled",
@@ -2894,7 +2971,8 @@
     "savedAndSynced": "Saved and synced to all apps",
     "saveAndSyncError": "Failed to save and sync",
     "configJsonPreview": "Config JSON Preview",
-    "configJsonPreviewHint": "The following configurations will be synced to each app (only the displayed fields will be overwritten, other custom settings will be preserved)"
+    "configJsonPreviewHint": "The following configurations will be synced to each app (only the displayed fields will be overwritten, other custom settings will be preserved)",
+    "savedButSyncFailed": "Universal provider saved, but sync failed"
   },
   "omo": {
     "editProfile": "Edit OMO Config",
@@ -3149,5 +3227,22 @@
       "body": "CC Switch manages providers, MCP servers, prompts and skills for Claude Code, Claude Desktop, Codex, Gemini CLI, Grok Build, OpenCode, OpenClaw and Hermes. If you already had one of these tools configured, CC Switch saved that setup as a provider named “default”, so nothing is lost.",
       "wizardHint": "This short setup picks the tools you use, imports your existing configs and helps you add a first provider. You can skip it and re-open it later from Settings → About."
     }
+  },
+  "projects": {
+    "missingProfile": "(deleted project)",
+    "actionFailed": "Directory binding failed: {{detail}}",
+    "bindSuccess": "Bound {{path}}",
+    "applyWarnings": "Applied with {{count}} warning(s):\n{{details}}",
+    "applySuccessFiles": "Applied. Updated files:\n{{details}}",
+    "applySuccess": "Directory binding applied",
+    "bindingsTitle": "Directory bindings",
+    "bindingsDescription": "Bind a folder (its git repository root) to a project, then apply it with one click. With project files on, {{apps}} get the project's provider in files inside that folder only, so other folders keep their own provider.",
+    "noBindings": "No folders bound yet",
+    "projectFilesBadge": "project files",
+    "apply": "Apply now",
+    "unbind": "Remove binding",
+    "selectProfile": "Project to bind",
+    "projectLevel": "Write project files",
+    "bindFolder": "Bind folder…"
   }
 }

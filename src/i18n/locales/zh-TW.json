@@ -41,7 +41,12 @@
     "auto": "自動",
     "enabled": "已啟用",
     "notSet": "未設定",
-    "retry": "重試"
+    "retry": "重試",
+    "unsavedChanges": "有未儲存的變更",
+    "copyFailed": "複製失敗",
+    "unsavedChangesTitle": "捨棄未儲存的變更？",
+    "unsavedChangesMessage": "你的編輯尚未儲存，將會遺失。",
+    "discard": "捨棄"
   },
   "firstRunNotice": {
     "title": "歡迎使用 CC Switch",
@@ -176,7 +181,10 @@
         "apiKeyPlaceholder": "請輸入 Gemini API Key"
       }
     },
-    "loadFailed": "載入供應商失敗"
+    "loadFailed": "載入供應商失敗",
+    "tabProviderFor": "{{app}} 供應商",
+    "configStatusLoading": "正在檢查應用程式設定…",
+    "copyName": "{{name}} 副本"
   },
   "claudeCode": {
     "needsRouting": "需要路由",
@@ -274,7 +282,8 @@
     "windowControlFailed": "視窗控制失敗：{{error}}",
     "officialBlockedByProxy": "本地路由模式下不能切換至官方供應商，使用路由存取官方 API 可能導致帳號被封鎖",
     "proxyOfficialWarning": "目前供應商 {{name}} 是官方供應商，建議切換至第三方供應商後再使用本地路由",
-    "proxyReasonClaudeDesktop": "使用 Claude Desktop 本地路由模式"
+    "proxyReasonClaudeDesktop": "使用 Claude Desktop 本地路由模式",
+    "openclawModelsRegisterFailed": "供應商已新增，但其模型無法註冊到 OpenClaw：{{error}}"
   },
   "confirm": {
     "deleteProvider": "刪除供應商",
@@ -930,6 +939,18 @@
       "title": "端對端加密",
       "tooShort": "請至少使用 {{count}} 個字元。",
       "unavailable": "無法從系統鑰匙圈讀取密語。在您重新輸入之前，上傳將會暫停。"
+    },
+    "secretsVault": {
+      "enabled": "供應商 API Key 現已儲存在系統鑰匙圈中。",
+      "disabled": "供應商 API Key 已重新儲存在資料庫中。",
+      "title": "將 API Key 儲存在系統鑰匙圈中",
+      "description": "將供應商 API Key 和權杖從 CC Switch 資料庫移至系統鑰匙圈。之後資料庫、其備份、SQL 匯出和雲端同步中僅保留預留位置。Claude Code、Codex 等工具的設定檔中仍包含目前生效的金鑰。",
+      "unavailable": "此裝置上沒有可用的系統鑰匙圈，因此無法開啟此選項。在 Linux 上，請執行 Secret Service 提供程式，如 GNOME Keyring 或 KWallet。",
+      "exportWarning": "開啟此選項後，SQL 匯出和雲端同步不包含金鑰。在其他裝置上需要重新輸入 API Key；已有該供應商的裝置會保留自己的金鑰。",
+      "unresolved": "{{count}} 個 API Key 不在此裝置的鑰匙圈中。請編輯以下供應商並重新輸入金鑰：",
+      "pendingIn": "仍有 {{count}} 個金鑰儲存在資料庫中。",
+      "pendingOut": "部分金鑰仍在鑰匙圈中。",
+      "retry": "重試"
     }
   },
   "apps": {
@@ -1032,7 +1053,11 @@
     "messageCopied": "已複製訊息內容",
     "conversationHistory": "對話紀錄",
     "expandContent": "展開完整內容",
-    "collapseContent": "收起"
+    "collapseContent": "收起",
+    "searchTranscripts": "搜尋訊息內容",
+    "searchIndexing": "正在索引對話內容…結果會陸續增加",
+    "scanErrors": "部分工作階段無法讀取",
+    "messagesLoadFailed": "載入此工作階段失敗"
   },
   "console": {
     "providerSwitchReceived": "收到供應商切換事件：",
@@ -1243,7 +1268,12 @@
     "codexAuthNotObject": "auth.json 必須是 JSON 物件。",
     "codexConfigInvalid": "config.toml 有語法錯誤，請修正後再儲存。",
     "geminiConfigInvalid": "Gemini config.json 不是有效的 JSON，請修正後再儲存。",
-    "geminiConfigNotObject": "Gemini config.json 必須是 JSON 物件。"
+    "geminiConfigNotObject": "Gemini config.json 必須是 JSON 物件。",
+    "settingsConfigInvalid": "供應商設定不是有效的 JSON 物件。",
+    "removeModel": "刪除模型",
+    "providerKeyStatusUnavailable": "無法檢查此供應商識別碼是否已被使用。請重新載入後重試。",
+    "moveModelUp": "上移模型",
+    "moveModelDown": "下移模型"
   },
   "copilot": {
     "authSection": "GitHub Copilot 驗證",
@@ -1326,7 +1356,9 @@
     "testUnavailable": "測速功能不可用",
     "noResult": "未回傳結果",
     "testFailed": "測速失敗：{{error}}",
-    "empty": "暫無端點"
+    "empty": "暫無端點",
+    "endpointCount": "{{count}} 個端點",
+    "removeEndpoint": "刪除端點"
   },
   "providerAdvanced": {
     "pricingConfig": "計費設定",
@@ -1486,7 +1518,8 @@
     "modelExtraFieldKeyPlaceholder": "variants",
     "sdkOptions": "SDK 選項",
     "modelOptionKeyPlaceholder": "provider",
-    "modelOptionValuePlaceholder": "{\"order\": [\"baseten\"]}"
+    "modelOptionValuePlaceholder": "{\"order\": [\"baseten\"]}",
+    "modelIdDuplicate": "ID 為 {{id}} 的模型已存在"
   },
   "providerPreset": {
     "label": "預設供應商",
@@ -1909,7 +1942,10 @@
       "headers": "請求標頭（選填）",
       "headersPlaceholder": "Authorization: Bearer your_token_here\nContent-Type: application/json",
       "preview": "設定預覽",
-      "apply": "套用設定"
+      "apply": "套用設定",
+      "invalidLines": "部分行無法解析，請先修正。",
+      "cwd": "工作目錄",
+      "unparsedLines": "無法解析：{{lines}}"
     },
     "id": "標識 (唯一)",
     "type": "類型",
@@ -1935,7 +1971,8 @@
       "commandRequired": "請填寫命令",
       "singleServerObjectRequired": "此處只需單個伺服器物件，請不要貼上包含 mcpServers 的整份設定",
       "saveFailed": "儲存失敗",
-      "deleteFailed": "刪除失敗"
+      "deleteFailed": "刪除失敗",
+      "jsonInvalidDetail": "JSON 無效：{{error}}"
     },
     "validation": {
       "ok": "命令可用",
@@ -2184,7 +2221,9 @@
       "legacyTimeoutDescription": "目前設定仍在使用 agents.defaults.timeout。儲存本頁面時會遷移為 timeoutSeconds。",
       "saveSuccess": "Agents 設定已儲存",
       "saveFailed": "儲存 Agents 設定失敗",
-      "loadFailed": "讀取 Agents 設定失敗"
+      "loadFailed": "讀取 Agents 設定失敗",
+      "primaryRequired": "新增備用模型前請先選擇主模型。",
+      "positiveInteger": "請輸入不小於 {{min}} 的整數。"
     },
     "health": {
       "title": "檢測到 OpenClaw 設定警告",
@@ -2195,7 +2234,10 @@
       "parseFailed": "openclaw.json 不是合法 JSON5。請先修復檔案，再透過這裡編輯。"
     },
     "primaryModel": "預設模型",
-    "fallbackModel": "備用模型"
+    "fallbackModel": "備用模型",
+    "externalChange": "此設定已在磁碟上被修改。你未儲存的編輯已保留。",
+    "reloadFromDisk": "捨棄編輯並重新載入",
+    "modelsOrderHint": "第一個模型為預設模型（Primary），其餘為備用模型。使用箭頭調整順序。"
   },
   "hermes": {
     "form": {
@@ -2271,7 +2313,9 @@
       "selectAll": "全選",
       "clearSelection": "取消選擇",
       "deleteSelected": "刪除選取 ({{count}})",
-      "deleting": "刪除中..."
+      "deleting": "刪除中...",
+      "hideValue": "隱藏值",
+      "showValue": "顯示值"
     },
     "field": {
       "value": "值",
@@ -2284,7 +2328,8 @@
     },
     "delete": {
       "success": "環境變數已成功刪除",
-      "error": "刪除環境變數失敗"
+      "error": "刪除環境變數失敗",
+      "undo": "復原"
     },
     "backup": {
       "location": "備份位置：{{path}}"
@@ -2297,6 +2342,10 @@
     },
     "error": {
       "noSelection": "請選擇要刪除的環境變數"
+    },
+    "restore": {
+      "success": "環境變數已還原",
+      "error": "還原環境變數失敗"
     }
   },
   "skills": {
@@ -2424,6 +2473,7 @@
     "uninstallConfirm": "確定要解除安裝技能 \"{{name}}\" 嗎？這將從所有應用程式中移除該技能，並在刪除前自動建立本地備份。",
     "uninstallInMainPanel": "請在主面板中解除安裝技能",
     "notFound": "未找到技能",
+    "openReadme": "開啟 README",
     "backup": {
       "location": "備份位置：{{path}}"
     },
@@ -2524,7 +2574,9 @@
       "name": "名稱",
       "description": "描述",
       "contentPreview": "內容預覽",
-      "enabledWarning": "匯入後將立即啟用此提示詞，其他提示詞將被停用"
+      "enabledWarning": "匯入後將立即啟用此提示詞，其他提示詞將被停用",
+      "lineCount": "{{count}} 行，{{chars}} 個字元",
+      "enableNowLabel": "立即啟用：以此內容取代 {{app}} 目前生效的提示詞檔案（目前檔案會儲存為備份提示詞）"
     },
     "skill": {
       "title": "新增 Claude Skill 儲存庫",
@@ -2549,7 +2601,24 @@
     "switchRequestedWarning": "此連結要求立即將該供應商設為目前供應商，這會把 {{app}} 的全部流量傳送至 {{host}}。只有勾選下方選項後才會切換。",
     "switchNowLabel": "立即切換至此供應商（將 {{app}} 的全部流量傳送至 {{host}}）",
     "switchNowWarning": "匯入後，{{app}} 的全部流量（包括你的提示詞和檔案內容）將立即傳送至 {{host}}。",
-    "firstProviderNotice": "{{app}} 目前尚無啟用的供應商，因此該供應商將成為目前供應商。"
+    "firstProviderNotice": "{{app}} 目前尚無啟用的供應商，因此該供應商將成為目前供應商。",
+    "bundleProvider": "供應商",
+    "bundleMcp": "MCP 伺服器",
+    "bundlePrompt": "提示詞",
+    "bundleSkill": "Skill 儲存庫",
+    "bundleDescription": "此連結包含 {{count}} 個項目。請逐項檢查，並取消勾選不想匯入的項目。",
+    "bundlePartial": "已匯入 {{ok}}/{{total}} 項",
+    "bundleSuccess": "已匯入 {{count}} 項",
+    "importBundle": "匯入合集",
+    "trustPublisher": "將此金鑰記為「{{publisher}}」，用於日後的連結",
+    "queuedRequests": "此請求之後還有 {{count}} 個匯入請求待顯示。",
+    "unsignedLink": "未簽章連結",
+    "unsignedLinkHint": "任何人都可以建立此連結。僅在信任其來源時匯入。",
+    "signedBy": "由 {{publisher}} 簽章",
+    "signedByUnverified": "由自稱「{{publisher}}」的金鑰簽章",
+    "signatureKeyId": "金鑰 ID {{keyId}}",
+    "publisherMismatch": "此名稱屬於你已知的發布者，但該連結使用了不同的金鑰簽章，可能是冒充。",
+    "publisherNew": "簽章有效，但 CC Switch 之前未見過此金鑰。"
   },
   "iconPicker": {
     "search": "搜尋圖示",
@@ -2578,14 +2647,19 @@
     "skillsFailedDescription": "請開啟 Skills 頁面點擊「匯入現有」手動匯入（或重新啟動後再試）。"
   },
   "agents": {
-    "title": "Agent"
+    "title": "Agent",
+    "comingSoon": {
+      "title": "即將推出",
+      "description": "Agent 管理功能正在開發中，敬請期待強大的自主能力。"
+    }
   },
   "health": {
     "operational": "正常",
     "degraded": "降級",
     "failed": "失敗",
     "circuitOpen": "斷路",
-    "consecutiveFailures": "連續失敗 {{count}} 次"
+    "consecutiveFailures": "連續失敗 {{count}} 次",
+    "responseTimeSuffix": "（{{ms}} ms）"
   },
   "failover": {
     "enabled": "{{app}} 故障轉移已啟用",
@@ -2593,6 +2667,8 @@
     "toggleFailed": "操作失敗：{{detail}}",
     "inQueue": "已加入",
     "addQueue": "加入",
+    "priorityBadge": "P{{priority}}",
+    "toggleLabel": "{{app}} 故障轉移",
     "priority": {
       "tooltip": "故障轉移優先順序 {{priority}}"
     },
@@ -2775,7 +2851,8 @@
       "maxRetriesHint": "請求失敗時的重試次數（0-10）",
       "streamingFirstByteHint": "等待首個資料區塊的最大時間，範圍 1-120 秒，預設 60 秒",
       "streamingIdleHint": "資料區塊之間的最大間隔，範圍 60-600 秒，填 0 停用（防止中途卡住）",
-      "nonStreamingHint": "非串流請求的總逾時時間，範圍 60-1200 秒，預設 600 秒（10 分鐘）"
+      "nonStreamingHint": "非串流請求的總逾時時間，範圍 60-1200 秒，預設 600 秒（10 分鐘）",
+      "rangeError": "請輸入 {{min}} 到 {{max}} 之間的整數。"
     },
     "logging": {
       "enabled": "日誌紀錄已啟用",
@@ -2894,7 +2971,8 @@
     "savedAndSynced": "已儲存並同步至所有應用程式",
     "saveAndSyncError": "儲存並同步失敗",
     "configJsonPreview": "設定 JSON 預覽",
-    "configJsonPreviewHint": "以下是將要同步至各應用程式的設定內容（僅覆寫顯示的欄位，保留其他自訂設定）"
+    "configJsonPreviewHint": "以下是將要同步至各應用程式的設定內容（僅覆寫顯示的欄位，保留其他自訂設定）",
+    "savedButSyncFailed": "通用供應商已儲存，但同步失敗"
   },
   "omo": {
     "editProfile": "編輯 OMO 設定",
@@ -3149,5 +3227,22 @@
       "body": "CC Switch 可為 Claude Code、Claude Desktop、Codex、Gemini CLI、Grok Build、OpenCode、OpenClaw 和 Hermes 管理供應商、MCP 伺服器、提示詞和技能。如果您先前已設定過其中某個工具，CC Switch 已將該設定儲存為名為「default」的供應商，不會有任何遺失。",
       "wizardHint": "這個簡短的設定會協助您選擇所用的工具、匯入現有設定，並新增第一個供應商。您可以略過，之後在 設定 → 關於 中重新開啟。"
     }
+  },
+  "projects": {
+    "missingProfile": "（已刪除的專案）",
+    "actionFailed": "目錄綁定失敗：{{detail}}",
+    "bindSuccess": "已綁定 {{path}}",
+    "applyWarnings": "已套用，{{count}} 條警告：\n{{details}}",
+    "applySuccessFiles": "已套用。已更新的檔案：\n{{details}}",
+    "applySuccess": "目錄綁定已套用",
+    "bindingsTitle": "目錄綁定",
+    "bindingsDescription": "將資料夾（其 git 儲存庫根目錄）綁定到專案，然後一鍵套用。開啟專案檔案後，{{apps}} 僅在該資料夾內的檔案中使用該專案的供應商，其他資料夾保留各自的供應商。",
+    "noBindings": "尚未綁定資料夾",
+    "projectFilesBadge": "專案檔案",
+    "apply": "立即套用",
+    "unbind": "解除綁定",
+    "selectProfile": "要綁定的專案",
+    "projectLevel": "寫入專案檔案",
+    "bindFolder": "綁定資料夾…"
   }
 }

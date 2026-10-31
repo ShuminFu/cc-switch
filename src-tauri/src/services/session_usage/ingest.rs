@@ -99,6 +99,16 @@ pub(crate) struct CursorUpdate<'a> {
     pub key: &'a str,
     pub last_modified: i64,
     pub last_offset: i64,
+    /// Byte position after the last consumed line plus a hash of the file
+    /// prefix, letting the next sync `seek` instead of re-reading (SESS-28).
+    pub byte: Option<ByteCursor>,
+}
+
+/// Byte-level resume point of a sync cursor (schema v18).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ByteCursor {
+    pub offset: i64,
+    pub prefix_hash: String,
 }
 
 /// Parse an RFC 3339 timestamp to unix seconds, falling back to "now".
@@ -332,6 +342,9 @@ pub(crate) fn commit_session_rows(
 
     if let Some(cursor) = cursor {
         update_sync_state_on(&tx, cursor.key, cursor.last_modified, cursor.last_offset)?;
+        if let Some(byte) = &cursor.byte {
+            update_byte_cursor_on(&tx, cursor.key, byte)?;
+        }
     }
 
     tx.commit()
@@ -358,6 +371,48 @@ pub(crate) fn update_sync_state_on(
     .and_then(|mut stmt| stmt.execute(params![key, last_modified, last_offset, now_secs()]))
     .map_err(|e| AppError::Database(format!("更新同步状态失败: {e}")))?;
     Ok(())
+}
+
+/// Record the byte resume point for `key` (row written by [`update_sync_state_on`]).
+pub(crate) fn update_byte_cursor_on(
+    conn: &Connection,
+    key: &str,
+    byte: &ByteCursor,
+) -> Result<(), AppError> {
+    conn.prepare_cached(
+        "UPDATE session_log_sync SET byte_offset = ?2, prefix_hash = ?3 WHERE file_path = ?1",
+    )
+    .and_then(|mut stmt| stmt.execute(params![key, byte.offset, byte.prefix_hash]))
+    .map_err(|e| AppError::Database(format!("更新字节游标失败: {e}")))?;
+    Ok(())
+}
+
+/// Byte resume points keyed by file path (only rows that have one).
+pub(crate) fn load_byte_cursors(db: &Database) -> Result<HashMap<String, ByteCursor>, AppError> {
+    let conn = lock_conn!(db.conn);
+    let mut stmt = conn
+        .prepare(
+            "SELECT file_path, byte_offset, prefix_hash FROM session_log_sync
+             WHERE byte_offset > 0 AND prefix_hash IS NOT NULL",
+        )
+        .map_err(|e| AppError::Database(format!("读取字节游标失败: {e}")))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                ByteCursor {
+                    offset: row.get(1)?,
+                    prefix_hash: row.get(2)?,
+                },
+            ))
+        })
+        .map_err(|e| AppError::Database(format!("读取字节游标失败: {e}")))?;
+    let mut cursors = HashMap::new();
+    for row in rows {
+        let (key, cursor) = row.map_err(|e| AppError::Database(e.to_string()))?;
+        cursors.insert(key, cursor);
+    }
+    Ok(cursors)
 }
 
 /// All sync cursors keyed by file path, loaded with one statement per pass.
@@ -514,6 +569,7 @@ mod tests {
                 key: "/tmp/x.jsonl",
                 last_modified: 42,
                 last_offset: 3,
+                byte: None,
             }),
         )?;
         let cursors = load_sync_cursors(&db)?;

@@ -1495,6 +1495,11 @@ fn drop_columns(conn: &Connection, table: &str, columns: &[&str]) {
 /// `create_tables` stay in place, as they did in real installations).
 fn undo_migration(conn: &Connection, version: i32) {
     match version {
+        18 => {
+            drop_columns(conn, "session_log_sync", &["byte_offset", "prefix_hash"]);
+            conn.execute("DELETE FROM schema_migrations WHERE version = 18", [])
+                .expect("undo v18 ledger row");
+        }
         17 => conn
             .execute_batch("DROP TABLE schema_migrations;")
             .expect("undo v17"),
@@ -1654,7 +1659,15 @@ fn fresh_database_is_created_at_current_version_with_baseline_ledger() {
     );
     let ledger = ledger_sources(&conn);
     assert_eq!(ledger.len(), SCHEMA_VERSION as usize);
-    assert!(ledger.iter().all(|(_, source)| source == "baseline"));
+    // Versions up to the baseline are recorded as such; later migrations run
+    // on top of the baseline DDL.
+    assert!(ledger.iter().all(|(version, source)| {
+        if *version <= i64::from(schema::BASELINE_SCHEMA_VERSION) {
+            source == "baseline"
+        } else {
+            source == "migrated"
+        }
+    }));
     let proxy_rows: i64 = conn
         .query_row("SELECT COUNT(*) FROM proxy_config", [], |row| row.get(0))
         .expect("count proxy_config");
@@ -1714,7 +1727,17 @@ fn every_historical_version_upgrades_to_the_fresh_schema() {
         let conn = database_at_version(version);
         upgrade_like_startup(&conn);
         assert_same_schema(&fresh, &schema_snapshot(&conn), &format!("v{version}"));
-        assert_ledger(&conn, version as i64);
+        if version >= schema::BASELINE_SCHEMA_VERSION {
+            // Created after the ledger existed: earlier rows keep their source.
+            let ledger = ledger_sources(&conn);
+            assert_eq!(ledger.len(), SCHEMA_VERSION as usize);
+            assert!(ledger
+                .iter()
+                .filter(|(v, _)| *v > version as i64)
+                .all(|(_, source)| source == "migrated"));
+        } else {
+            assert_ledger(&conn, version as i64);
+        }
 
         // Data survives the upgrade.
         let providers: i64 = conn
@@ -1824,7 +1847,8 @@ fn baseline_schema_checksum_is_pinned() {
     // Hash of the frozen baseline DDL as SQLite stores it (tables + indexes, excluding the
     // dedup triggers whose SQL lives in services::usage_stats). The baseline is shared by
     // fresh databases and the pre-v17 upgrade path, so it must never change: add a
-    // migration instead.
+    // migration instead. The hash covers the fresh schema, i.e. the baseline plus
+    // later migrations (v18 added session_log_sync.byte_offset / prefix_hash).
     let conn = Connection::open_in_memory().expect("open memory db");
     Database::create_tables_on_conn(&conn).expect("create fresh schema");
     let objects = query_strings(
@@ -1840,7 +1864,7 @@ fn baseline_schema_checksum_is_pinned() {
     let checksum = format!("{:x}", Sha256::digest(text.as_bytes()));
     assert_eq!(
         checksum,
-        "ceeeda1a4bb8e81897d3fa7c1f89b2c0267b5b7941370bf265153f2720e8f1fc",
+        "fdaeff6ec45e56ed983d89cd27688965b0536e90ce61ddc240b8664795da2da5",
         "baseline schema changed; it is frozen at v{}:\n{text}",
         schema::BASELINE_SCHEMA_VERSION
     );

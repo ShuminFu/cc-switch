@@ -26,8 +26,9 @@ use std::time::{Instant, SystemTime};
 pub(crate) mod ingest;
 
 use ingest::{
-    commit_session_rows, created_at_from_rfc3339, load_sync_cursors, prune_missing_cursors,
-    update_sync_state_on, CursorUpdate, PricingCache, SessionSource, SessionUsageRow, WritePolicy,
+    commit_session_rows, created_at_from_rfc3339, load_byte_cursors, load_sync_cursors,
+    prune_missing_cursors, update_sync_state_on, ByteCursor, CursorUpdate, PricingCache,
+    SessionSource, SessionUsageRow, WritePolicy,
 };
 
 /// 同步结果
@@ -168,6 +169,7 @@ fn sync_claude_projects_dir(
 
     // 一次查询载入全部同步游标；未变化的文件只需一次 stat（PERF-10）
     let cursors = load_sync_cursors(db)?;
+    let byte_cursors = load_byte_cursors(db)?;
     let mut pricing = PricingCache::default();
 
     // 收集所有 .jsonl 文件
@@ -178,9 +180,9 @@ fn sync_claude_projects_dir(
         result.files_scanned += 1;
         let key = file_path.to_string_lossy().to_string();
         let cursor = cursors.get(&key).copied().unwrap_or((0, 0));
-        discovered.insert(key);
+        discovered.insert(key.clone());
 
-        match sync_claude_file(db, file_path, cursor, &mut pricing) {
+        match sync_claude_file(db, file_path, cursor, byte_cursors.get(&key), &mut pricing) {
             Ok((imported, skipped)) => {
                 result.imported += imported;
                 result.skipped += skipped;
@@ -309,11 +311,97 @@ pub(crate) fn for_each_complete_line(
     Ok(line_no)
 }
 
+/// Bytes of the file start hashed into a byte cursor's `prefix_hash`.
+const PREFIX_HASH_BYTES: u64 = 4096;
+
+/// Hash of the first `min(len, 4 KiB)` bytes: detects a file that was rewritten
+/// (rather than appended to) since the cursor was stored.
+pub(crate) fn file_prefix_hash(file_path: &Path, len: u64) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let take = len.min(PREFIX_HASH_BYTES);
+    let mut buf = Vec::with_capacity(take as usize);
+    fs::File::open(file_path)
+        .ok()?
+        .take(take)
+        .read_to_end(&mut buf)
+        .ok()?;
+    if (buf.len() as u64) < take {
+        return None;
+    }
+    let digest = Sha256::digest(&buf);
+    Some(format!("{take}:{}", hex_prefix(&digest)))
+}
+
+fn hex_prefix(bytes: &[u8]) -> String {
+    bytes[..16].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Whether `cursor` still describes a prefix of the current file: the file is
+/// at least as long, the byte before the offset is a newline and the prefix
+/// hash matches.
+fn byte_cursor_still_valid(file_path: &Path, file_len: u64, cursor: &ByteCursor) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(offset) = u64::try_from(cursor.offset) else {
+        return false;
+    };
+    if offset == 0 || offset > file_len {
+        return false;
+    }
+    let Ok(mut file) = fs::File::open(file_path) else {
+        return false;
+    };
+    let mut last = [0u8; 1];
+    if file.seek(SeekFrom::Start(offset - 1)).is_err() || file.read_exact(&mut last).is_err() {
+        return false;
+    }
+    last[0] == b'\n' && file_prefix_hash(file_path, offset).as_deref() == Some(&cursor.prefix_hash)
+}
+
+/// Like [`for_each_complete_line`] but starts at byte `start` (a line boundary)
+/// with line numbers continuing after `start_line`. Returns the total complete
+/// line count and the byte position after the last complete line.
+pub(crate) fn for_each_complete_line_from(
+    file_path: &Path,
+    start: u64,
+    start_line: i64,
+    mut on_line: impl FnMut(i64, &str),
+) -> Result<(i64, u64), AppError> {
+    use std::io::{Seek, SeekFrom};
+    let mut file =
+        fs::File::open(file_path).map_err(|e| AppError::Config(format!("无法打开文件: {e}")))?;
+    file.seek(SeekFrom::Start(start))
+        .map_err(|e| AppError::Config(format!("定位文件失败: {e}")))?;
+    let mut reader = BufReader::new(file);
+    let mut buf = Vec::new();
+    let mut line_no = start_line;
+    let mut pos = start;
+    loop {
+        buf.clear();
+        let read = reader
+            .read_until(b'\n', &mut buf)
+            .map_err(|e| AppError::Config(format!("读取文件失败: {e}")))?;
+        if read == 0 || buf.last() != Some(&b'\n') {
+            break;
+        }
+        line_no += 1;
+        pos += read as u64;
+        if let Ok(line) = std::str::from_utf8(&buf) {
+            on_line(line_no, line.trim_end_matches(['\n', '\r']));
+        }
+    }
+    Ok((line_no, pos))
+}
+
 /// 同步单个 JSONL 文件，返回 (imported, skipped)
+///
+/// With a valid byte cursor only the appended bytes are read (SESS-28); a file
+/// that was rewritten or truncated is re-read from the start.
 fn sync_claude_file(
     db: &Database,
     file_path: &Path,
     (last_modified, last_offset): (i64, i64),
+    byte_cursor: Option<&ByteCursor>,
     pricing: &mut PricingCache,
 ) -> Result<(u32, u32), AppError> {
     let file_path_str = file_path.to_string_lossy().to_string();
@@ -331,27 +419,39 @@ fn sync_claude_file(
     let mut messages: HashMap<String, ParsedAssistantUsage> = HashMap::new();
     let mut current_session_id: Option<String> = None;
 
+    let (start_byte, start_line, last_offset) = match byte_cursor {
+        Some(cursor) if byte_cursor_still_valid(file_path, metadata.len(), cursor) => {
+            (cursor.offset as u64, last_offset, last_offset)
+        }
+        // The stored prefix no longer matches: the file was rewritten, so
+        // re-read everything (rows are keyed by message id, no duplicates).
+        Some(_) => (0, 0, 0),
+        // Legacy cursor without a byte offset: skip by line count.
+        None => (0, 0, last_offset),
+    };
+
     // 从上次偏移位置开始增量解析
-    let line_offset = for_each_complete_line(file_path, |line_no, line| {
-        // 跳过已处理的行
-        if line_no <= last_offset || line.trim().is_empty() {
-            return;
-        }
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-            return;
-        };
-
-        // 提取 session ID (从 system 或首条消息)
-        if current_session_id.is_none() {
-            if let Some(sid) = value.get("sessionId").and_then(|v| v.as_str()) {
-                current_session_id = Some(sid.to_string());
+    let (line_offset, end_byte) =
+        for_each_complete_line_from(file_path, start_byte, start_line, |line_no, line| {
+            // 跳过已处理的行
+            if line_no <= last_offset || line.trim().is_empty() {
+                return;
             }
-        }
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                return;
+            };
 
-        if let Some(parsed) = parse_assistant_usage(&value, current_session_id.as_ref()) {
-            merge_snapshot(&mut messages, parsed);
-        }
-    })?;
+            // 提取 session ID (从 system 或首条消息)
+            if current_session_id.is_none() {
+                if let Some(sid) = value.get("sessionId").and_then(|v| v.as_str()) {
+                    current_session_id = Some(sid.to_string());
+                }
+            }
+
+            if let Some(parsed) = parse_assistant_usage(&value, current_session_id.as_ref()) {
+                merge_snapshot(&mut messages, parsed);
+            }
+        })?;
 
     // 只要产生了真实计费 token 就导入，不再强制要求 stop_reason 或 output>0。
     //
@@ -384,6 +484,12 @@ fn sync_claude_file(
             key: &file_path_str,
             last_modified: file_modified,
             last_offset: line_offset,
+            byte: file_prefix_hash(file_path, end_byte)
+                .filter(|_| end_byte > 0)
+                .map(|prefix_hash| ByteCursor {
+                    offset: end_byte as i64,
+                    prefix_hash,
+                }),
         }),
     )
 }
@@ -543,8 +649,16 @@ mod tests {
 
     /// 以当前持久化游标同步单个文件（测试辅助）。
     fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppError> {
-        let cursor = get_sync_state(db, &file_path.to_string_lossy())?;
-        sync_claude_file(db, file_path, cursor, &mut PricingCache::default())
+        let key = file_path.to_string_lossy().to_string();
+        let cursor = get_sync_state(db, &key)?;
+        let byte = load_byte_cursors(db)?.remove(&key);
+        sync_claude_file(
+            db,
+            file_path,
+            cursor,
+            byte.as_ref(),
+            &mut PricingCache::default(),
+        )
     }
 
     fn assistant_line(msg_id: &str, output: u32, stop_reason: Option<&str>) -> String {
@@ -884,5 +998,91 @@ mod tests {
         let db = Database::memory().unwrap();
         let _held = SYNC_RUNNING.lock().unwrap_or_else(|e| e.into_inner());
         assert!(sync_all_session_usage(&db, SyncTrigger::Background).is_none());
+    }
+
+    #[test]
+    fn test_byte_cursor_resumes_without_rereading_prefix() -> Result<(), AppError> {
+        // SESS-28: after a sync only appended bytes are parsed. A line rewritten
+        // in the already-consumed region (beyond the hashed prefix) is not seen
+        // again, which proves the reader seeks instead of re-reading.
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("main.jsonl");
+        let filler = format!("{{\"type\":\"user\",\"pad\":\"{}\"}}", "x".repeat(5000));
+        let line_a = assistant_line("msg_aaaa", 10, Some("end_turn"));
+        fs::write(&file, format!("{filler}\n{line_a}\n")).unwrap();
+        assert_eq!(sync_single_file(&db, &file)?, (1, 0));
+        let key = file.to_string_lossy().to_string();
+        let byte = load_byte_cursors(&db)?
+            .remove(&key)
+            .expect("byte cursor stored");
+        assert_eq!(byte.offset as u64, fs::metadata(&file).unwrap().len());
+
+        // Same length, different message id, outside the 4 KiB prefix.
+        let line_z = assistant_line("msg_zzzz", 10, Some("end_turn"));
+        assert_eq!(line_a.len(), line_z.len());
+        let line_b = assistant_line("msg_bbbb", 30, Some("end_turn"));
+        fs::write(&file, format!("{filler}\n{line_z}\n{line_b}\n")).unwrap();
+        bump_mtime(&file, get_sync_state(&db, &key)?.0);
+
+        assert_eq!(sync_single_file(&db, &file)?, (1, 0));
+        assert_eq!(row_tokens_and_cost(&db, "session:msg_bbbb").1, 30);
+        let conn = db.conn.lock().unwrap();
+        let z: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM proxy_request_logs WHERE request_id = 'session:msg_zzzz'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(z, 0, "consumed bytes are not parsed again");
+        drop(conn);
+        assert_eq!(get_sync_state(&db, &key)?.1, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn test_rewritten_file_is_reread_from_start() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("main.jsonl");
+        let line_a = assistant_line("msg_a", 10, Some("end_turn"));
+        let line_b = assistant_line("msg_b", 20, Some("end_turn"));
+        fs::write(&file, format!("{line_a}\n{line_b}\n")).unwrap();
+        assert_eq!(sync_single_file(&db, &file)?, (2, 0));
+        let key = file.to_string_lossy().to_string();
+        let mtime = get_sync_state(&db, &key)?.0;
+
+        // Rewritten with a different first line: the prefix hash no longer
+        // matches, so the whole file is parsed again.
+        let line_c = assistant_line("msg_c", 40, Some("end_turn"));
+        fs::write(&file, format!("{line_c}\n{line_b}\n{line_a}\n")).unwrap();
+        bump_mtime(&file, mtime);
+        let (imported, _) = sync_single_file(&db, &file)?;
+        assert!(imported >= 1);
+        assert_eq!(row_tokens_and_cost(&db, "session:msg_c").1, 40);
+        assert_eq!(get_sync_state(&db, &key)?.1, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn test_truncated_file_invalidates_byte_cursor() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("t.jsonl");
+        fs::write(&file, "aaaa\nbbbb\n").unwrap();
+        let cursor = ByteCursor {
+            offset: 10,
+            prefix_hash: file_prefix_hash(&file, 10).unwrap(),
+        };
+        assert!(byte_cursor_still_valid(&file, 10, &cursor));
+        fs::write(&file, "aaaa\n").unwrap();
+        assert!(!byte_cursor_still_valid(&file, 5, &cursor));
+        // An offset that is not on a line boundary is rejected.
+        fs::write(&file, "aaaa\nbbbb\n").unwrap();
+        let mid = ByteCursor {
+            offset: 7,
+            prefix_hash: file_prefix_hash(&file, 7).unwrap(),
+        };
+        assert!(!byte_cursor_still_valid(&file, 10, &mid));
     }
 }

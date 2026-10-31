@@ -60,6 +60,13 @@ function captureImportRequests() {
   return received;
 }
 
+/** Import is armed shortly after the reviewed content appears (SESS-39). */
+async function clickImport() {
+  const button = screen.getByRole("button", { name: /import/i });
+  await waitFor(() => expect(button).not.toBeDisabled(), { timeout: 3000 });
+  fireEvent.click(button);
+}
+
 async function openWith(request: DeepLinkImportRequest) {
   await act(async () => {
     emitTauriEvent("deeplink-import", request);
@@ -90,7 +97,7 @@ describe("DeepLinkImportDialog provider trust model", () => {
       screen.getByTestId("deeplink-switch-requested-warning"),
     ).toHaveTextContent("would route all claude traffic to evil.example");
 
-    fireEvent.click(screen.getByRole("button", { name: /import/i }));
+    await clickImport();
     await waitFor(() => expect(received).toHaveLength(1));
     expect(received[0].enabled).toBe(false);
   });
@@ -109,7 +116,7 @@ describe("DeepLinkImportDialog provider trust model", () => {
       screen.getByText(/will be sent to evil\.example right after import/i),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /import/i }));
+    await clickImport();
     await waitFor(() => expect(received).toHaveLength(1));
     expect(received[0].enabled).toBe(true);
   });
@@ -128,7 +135,7 @@ describe("DeepLinkImportDialog provider trust model", () => {
       await screen.findByTestId("deeplink-usage-script-source"),
     ).toHaveTextContent("while(true){}");
 
-    fireEvent.click(screen.getByRole("button", { name: /import/i }));
+    await clickImport();
     await waitFor(() => expect(received).toHaveLength(1));
     expect(received[0].usageEnabled).toBe(false);
     expect(received[0].enabled).toBe(false);
@@ -175,7 +182,7 @@ describe("McpConfirmation", () => {
     expect(
       await screen.findByText(/only enabled if you tick the box above/i),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /import/i }));
+    await clickImport();
     await waitFor(() => expect(received).toHaveLength(1));
     expect(received[0].enabled).toBe(false);
   });
@@ -190,7 +197,7 @@ describe("McpConfirmation", () => {
         name: /enable for the target apps now/i,
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: /import/i }));
+    await clickImport();
     await waitFor(() => expect(received).toHaveLength(1));
     expect(received[0].enabled).toBe(true);
   });

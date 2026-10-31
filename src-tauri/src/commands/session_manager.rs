@@ -10,6 +10,52 @@ pub async fn list_sessions() -> Result<Vec<session_manager::SessionMeta>, String
     Ok(sessions)
 }
 
+/// Incremental rescan through the persistent session index. Returns the
+/// sessions plus per-provider scan errors and a generation counter that
+/// changes whenever the list changes (cheap to poll: unchanged files are only
+/// `stat`ed).
+#[tauri::command]
+pub async fn scan_sessions_report(
+    knownGeneration: Option<u64>,
+) -> Result<session_manager::index::ScanReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        session_manager::scan_report().elide_if_known(knownGeneration)
+    })
+    .await
+    .map_err(|e| format!("Failed to scan sessions: {e}"))
+}
+
+/// Sessions stored by the last scan (possibly from a previous run), returned
+/// without touching provider directories so the list renders instantly.
+#[tauri::command]
+pub async fn get_session_index_snapshot() -> Result<Vec<session_manager::SessionMeta>, String> {
+    tauri::async_runtime::spawn_blocking(|| session_manager::index::global().snapshot())
+        .await
+        .map_err(|e| format!("Failed to read session index: {e}"))
+}
+
+/// Full-text search across session titles, paths and transcripts.
+/// Transcripts are indexed lazily (redacted) on the first searches; the
+/// response's `complete` flag is false while indexing is still in progress.
+#[tauri::command]
+pub async fn search_sessions(
+    query: String,
+    limit: Option<usize>,
+) -> Result<session_manager::index::SearchResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let index = session_manager::index::global();
+        index.refresh(session_manager::registry::PROVIDERS);
+        index.search(
+            session_manager::registry::PROVIDERS,
+            &query,
+            limit.unwrap_or(100),
+            session_manager::index::SEARCH_INDEX_BUDGET,
+        )
+    })
+    .await
+    .map_err(|e| format!("Failed to search sessions: {e}"))
+}
+
 #[tauri::command]
 pub async fn get_session_messages(
     providerId: String,
@@ -41,7 +87,7 @@ pub async fn launch_session_terminal(
     let target = match preferred.as_deref() {
         Some("iterm2") => "iterm".to_string(),
         Some(t) => t.to_string(),
-        None => "terminal".to_string(), // Default to Terminal.app on macOS
+        None => session_manager::terminal::default_terminal().to_string(),
     };
 
     tauri::async_runtime::spawn_blocking(move || {

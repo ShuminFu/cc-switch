@@ -474,6 +474,7 @@ fn sync_codex_file(
             key: &file_path_str,
             last_modified: file_modified,
             last_offset: line_offset,
+            byte: None,
         }),
     )?;
     Ok((imported, skipped + replay_skipped))
