@@ -100,3 +100,14 @@ separate commit.
 - Blocked: Create the `no-fixture-needed` and `fixtures` labels. Needs repo write access and a human decision.
 - Blocked: See the proxy-fixture workflow pass/fail on a real PR. Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history) (the 13-case local test stands in).
 - Done in [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): actionlint with shellcheck passes and its config is committed.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- See the proxy-fixture workflow pass/fail on a real PR (needs a real GitHub Actions run; the 13-case local test covers this in the meantime)
+
+### Still blocked by
+
+- Make 'Proxy fixture required' a required status check in the branch protection rule for main. **Needs:** Repo admin to change GitHub branch protection settings
+- Create the `no-fixture-needed` and `fixtures` labels in the repository. **Needs:** Someone with repo write access to create the labels in GitHub repo settings, plus a human decision

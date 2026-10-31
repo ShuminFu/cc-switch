@@ -1,6 +1,6 @@
 # CCS-019: [ci] Publish report-only coverage from cargo-llvm-cov and vitest
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
 
 > **Ticket key:** `p0-ci-coverage-report` · **Phase:** P0 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -72,3 +72,11 @@ None.
 
 - Blocked: AC1: coverage-frontend/coverage-rust artifacts and per-directory summaries on a PR run. Needs a real GitHub Actions PR run.
 - Follow-up [CCS-222](../P0-safety-net/CCS-222-p0-coverage-remeasure-baseline.md): Re-measure the coverage baseline on a clean tree and record proxy/ and database/ numbers.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- AC1: coverage-frontend / coverage-rust artifacts upload and per-directory summaries for proxy/ and database/ render on a PR run (needs a real GitHub Actions PR run of ci.yml coverage jobs)
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

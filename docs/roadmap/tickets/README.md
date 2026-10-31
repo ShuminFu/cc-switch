@@ -14,26 +14,26 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-011](P0-safety-net/CCS-011-p0-migration-harness.md) | chore | p1 | M | [db] Add a migration equivalence harness from every released schema and from legacy config.json |  | Done |
 | [CCS-012](P0-safety-net/CCS-012-p0-config-writer-snapshots.md) | chore | p1 | M | [apps] Add round-trip snapshots for all live-config writers, OAuth token stores and the Codex state DB |  | Done |
 | [CCS-013](P0-safety-net/CCS-013-p0-testenv-paths.md) | refactor | p1 | L | [tests] Introduce a hermetic TestEnv with injected Paths and remove the global test_mutex |  | Done |
-| [CCS-014](P0-safety-net/CCS-014-p0-proxy-harness-e2e.md) | chore | p1 | L | [proxy-tests] Add ProxyHarness with a mock upstream and an end-to-end proxy suite with baselines | CCS-013 | Partial |
+| [CCS-014](P0-safety-net/CCS-014-p0-proxy-harness-e2e.md) | chore | p1 | L | [proxy-tests] Add ProxyHarness with a mock upstream and an end-to-end proxy suite with baselines | CCS-013 | Done |
 | [CCS-015](P0-safety-net/CCS-015-p0-untested-module-tests.md) | chore | p2 | S | [tests] Add unit tests for untested proxy helpers, failover switch and balance parsing |  | Done |
 | [CCS-016](P0-safety-net/CCS-016-p0-ci-clippy-all-targets.md) | chore | p2 | S | [ci] Run clippy with --all-targets |  | Done |
 | [CCS-017](P0-safety-net/CCS-017-p0-ci-eslint-prettier.md) | chore | p2 | M | [ci] Add ESLint with a baseline and extend Prettier to tests/ |  | Done |
 | [CCS-018](P0-safety-net/CCS-018-p0-ci-cargo-deny.md) | chore | p2 | S | [ci] Gate on dependency advisories with cargo-deny and pnpm audit |  | Partial |
-| [CCS-019](P0-safety-net/CCS-019-p0-ci-coverage-report.md) | chore | p3 | S | [ci] Publish report-only coverage from cargo-llvm-cov and vitest |  | Partial |
+| [CCS-019](P0-safety-net/CCS-019-p0-ci-coverage-report.md) | chore | p3 | S | [ci] Publish report-only coverage from cargo-llvm-cov and vitest |  | Done |
 | [CCS-020](P0-safety-net/CCS-020-p0-ci-i18n-parity.md) | chore | p2 | S | [i18n] Add a locale parity and used-key check to CI |  | Done |
 | [CCS-021](P0-safety-net/CCS-021-p0-i18n-missing-keys.md) | bug | p2 | S | [i18n] Add 10 keys that are used in code but missing from every locale |  | Done |
 | [CCS-022](P0-safety-net/CCS-022-p0-i18n-zhtw-keys.md) | bug | p3 | S | [i18n] Translate the 30 missing zh-TW keys and drop 2 unused zh-TW-only keys |  | Done |
 | [CCS-023](P0-safety-net/CCS-023-p0-ci-release-gated.md) | chore | p1 | S | [ci] Require green CI on the tag SHA before release builds |  | Partial |
 | [CCS-024](P0-safety-net/CCS-024-p0-ci-build-smoke.md) | chore | p2 | S | [ci] Add a vite production build and a Linux tauri build smoke to PR CI |  | Done |
 | [CCS-025](P0-safety-net/CCS-025-p0-ci-toolchain-msrv.md) | chore | p2 | S | [ci] Use rust-toolchain.toml as the single toolchain source and fix the false MSRV |  | Done |
-| [CCS-026](P0-safety-net/CCS-026-p0-ci-node-version.md) | chore | p3 | S | [ci] Read the Node version from .node-version in CI and release |  | Partial |
-| [CCS-027](P0-safety-net/CCS-027-p0-ci-permissions.md) | security | p3 | S | [ci] Add a minimal permissions block to ci.yml |  | Partial |
+| [CCS-026](P0-safety-net/CCS-026-p0-ci-node-version.md) | chore | p3 | S | [ci] Read the Node version from .node-version in CI and release |  | Done |
+| [CCS-027](P0-safety-net/CCS-027-p0-ci-permissions.md) | security | p3 | S | [ci] Add a minimal permissions block to ci.yml |  | Done |
 | [CCS-028](P0-safety-net/CCS-028-p0-ci-pin-actions.md) | security | p1 | S | [ci] Pin every GitHub Action to a commit SHA |  | Done |
 | [CCS-029](P0-safety-net/CCS-029-p0-ci-release-secrets-env.md) | security | p1 | S | [ci] Pass release secrets via env: and stop exporting signing material to GITHUB_ENV | CCS-028 | Partial |
 | [CCS-030](P0-safety-net/CCS-030-p0-ci-updater-sig-fatal.md) | bug | p1 | S | [ci] Fail the release when an updater artifact or signature is missing and validate latest.json |  | Done |
-| [CCS-031](P0-safety-net/CCS-031-p0-ci-release-concurrency.md) | chore | p3 | S | [ci] Never cancel an in-progress release publish |  | Partial |
-| [CCS-032](P0-safety-net/CCS-032-p0-ci-prerelease-promotion.md) | chore | p3 | S | [ci] Document or automate promoting a prerelease to latest for the updater |  | Partial |
-| [CCS-033](P0-safety-net/CCS-033-p0-ci-release-hygiene.md) | chore | p3 | M | [ci] Add rust-cache, a version consistency check, provenance attestation and SHA256SUMS | CCS-028 | Partial |
+| [CCS-031](P0-safety-net/CCS-031-p0-ci-release-concurrency.md) | chore | p3 | S | [ci] Never cancel an in-progress release publish |  | Done |
+| [CCS-032](P0-safety-net/CCS-032-p0-ci-prerelease-promotion.md) | chore | p3 | S | [ci] Document or automate promoting a prerelease to latest for the updater |  | Done |
+| [CCS-033](P0-safety-net/CCS-033-p0-ci-release-hygiene.md) | chore | p3 | M | [ci] Add rust-cache, a version consistency check, provenance attestation and SHA256SUMS | CCS-028 | Done |
 | [CCS-034](P0-safety-net/CCS-034-p0-dev-acceptance-process.md) | chore | p2 | S | [process] Add the ACCEPTANCE playbook, the fixture-required PR rule and the fix-commit KPI | CCS-008 | Partial |
 | [CCS-035](P0-safety-net/CCS-035-p0-hotfix-deeplink-redaction.md) | security | p1 | S | [deeplink] Stop leaking raw deeplink URLs to logs and to the webview console |  | Done |
 | [CCS-036](P0-safety-net/CCS-036-p0-hotfix-terminal-tempfiles.md) | security | p1 | S | [terminal] Write provider terminal config and launcher scripts as private, uniquely named temp files |  | Partial |
@@ -43,13 +43,13 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-040](P0-safety-net/CCS-040-p0-failure-threshold-const.md) | bug | p3 | S | [proxy] Use one shared default for the circuit-breaker failure_threshold |  | Done |
 | [CCS-041](P0-safety-net/CCS-041-p0-unused-tower-http.md) | chore | p3 | S | [deps] Remove the unused tower-http 0.5 dependency |  | Done |
 | [CCS-042](P0-safety-net/CCS-042-p0-icon-scripts-cjs.md) | bug | p3 | S | [tooling] Make the icon extract and filter scripts runnable under type: module |  | Done |
-| [CCS-043](P0-safety-net/CCS-043-p0-ci-stale-workflow.md) | bug | p3 | S | [ci] Remove the invalid stale.yml input and implement a real popular-issue exemption |  | Partial |
+| [CCS-043](P0-safety-net/CCS-043-p0-ci-stale-workflow.md) | bug | p3 | S | [ci] Remove the invalid stale.yml input and implement a real popular-issue exemption |  | Done |
 | [CCS-044](P0-safety-net/CCS-044-p0-flatpak-manifest.md) | chore | p3 | M | [packaging] Update the Flatpak manifest and either build it in CI or stop installing flatpak tools |  | Done |
 | [CCS-045](P0-safety-net/CCS-045-p0-docs-changelog-unreleased.md) | chore | p3 | S | [docs] Add an [Unreleased] CHANGELOG section that lists Grok Build and other post-3.17 changes |  | Done |
 | [CCS-046](P0-safety-net/CCS-046-p0-docs-readme-release-sync.md) | chore | p3 | S | [docs] Update the README release sections: release-notes links and Linux asset names |  | Done |
 | [CCS-047](P0-safety-net/CCS-047-p0-docs-package-description.md) | chore | p3 | S | [docs] Update the package description to cover all supported tools |  | Done |
 | [CCS-048](P0-safety-net/CCS-048-p0-docs-root-clutter.md) | chore | p3 | S | [docs] Move the session-manager PRD into docs/ and leave the Pages-served deplink.html alone |  | Done |
-| [CCS-213](P0-safety-net/CCS-213-p0-ci-proxy-perf-artifact.md) | chore | p3 | S | [ci] Upload the proxy_e2e perf JSON as a CI artifact from the backend matrix |  | Partial |
+| [CCS-213](P0-safety-net/CCS-213-p0-ci-proxy-perf-artifact.md) | chore | p3 | S | [ci] Upload the proxy_e2e perf JSON as a CI artifact from the backend matrix |  | Done |
 | [CCS-214](P0-safety-net/CCS-214-p0-deps-cargo-update-deny-baseline.md) | security | p2 | M | [deps] Refresh Cargo.lock and prune the cargo-deny advisory baseline |  | Done |
 | [CCS-215](P0-safety-net/CCS-215-p0-deps-zip-upgrade.md) | security | p2 | M | [deps] Upgrade the direct zip dependency to a release that fixes RUSTSEC-2026-0367/0368/0369 | CCS-214 | Done |
 | [CCS-216](P0-safety-net/CCS-216-p0-deps-vitest-upgrade.md) | security | p2 | M | [deps] Upgrade vitest 2.x to >=3.2.6 and drop the 4 ignored GHSAs from pnpm audit |  | Done |
@@ -96,11 +96,11 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-076](P1-trust-release/CCS-076-p1-session-load-messages-roots.md) | security | p3 | S | [sessions] Apply the provider-root check to load_messages and the sqlite delete paths |  | Done |
 | [CCS-077](P1-trust-release/CCS-077-p1-csp-tighten.md) | security | p3 | S | [security] Narrow the CSP connect-src and img-src |  | Done |
 | [CCS-078](P1-trust-release/CCS-078-p1-asset-protocol-remove.md) | security | p3 | S | [security] Remove the unused asset protocol and protocol-asset feature |  | Done |
-| [CCS-079](P1-trust-release/CCS-079-p1-atomic-write-durable.md) | bug | p1 | S | [config] Make atomic_write durable, Windows-safe and free of leftover temp files | CCS-012 | Partial |
+| [CCS-079](P1-trust-release/CCS-079-p1-atomic-write-durable.md) | bug | p1 | S | [config] Make atomic_write durable, Windows-safe and free of leftover temp files | CCS-012 | Done |
 | [CCS-080](P1-trust-release/CCS-080-p1-atomic-write-perms.md) | security | p1 | S | [config] Create new files written by atomic_write with 0600 permissions | CCS-079 | Done |
 | [CCS-081](P1-trust-release/CCS-081-p1-atomic-write-symlink.md) | bug | p2 | S | [config] Write through symlinked config files instead of replacing the link | CCS-079 | Done |
 | [CCS-082](P1-trust-release/CCS-082-p1-route-writes-atomic-lint.md) | refactor | p2 | S | [config] Route the remaining config writers through atomic_write and ban std::fs::write | CCS-080, CCS-012 | Done |
-| [CCS-083](P1-trust-release/CCS-083-p1-oauth-token-store-hardening.md) | security | p2 | M | [auth] Harden the Copilot and Codex OAuth token stores | CCS-080 | Partial |
+| [CCS-083](P1-trust-release/CCS-083-p1-oauth-token-store-hardening.md) | security | p2 | M | [auth] Harden the Copilot and Codex OAuth token stores | CCS-080 | Done |
 | [CCS-084](P1-trust-release/CCS-084-p1-settings-atomic-save.md) | bug | p1 | S | [settings] Save settings.json atomically and back up a corrupt file instead of silently resetting | CCS-080 | Done |
 | [CCS-085](P1-trust-release/CCS-085-p1-settings-save-race.md) | bug | p2 | S | [settings] Hold the settings write lock across merge, save and swap | CCS-084 | Done |
 | [CCS-086](P1-trust-release/CCS-086-p1-sql-import-sandbox.md) | security | p1 | S | [db] Block ATTACH, VACUUM INTO and unsafe statements during SQL import and sync restore |  | Done |
@@ -191,7 +191,7 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-149](P4-app-adapters-persistence/CCS-149-p4-adapter-additive.md) | refactor | p2 | L | [apps] Migrate OpenCode, OpenClaw and Hermes to AppAdapter and remove the remaining fan-out | CCS-147, CCS-148 | Done |
 | [CCS-150](P4-app-adapters-persistence/CCS-150-p4-adapter-conformance.md) | chore | p1 | M | [apps] Add an adapter conformance suite that loops over APPS, plus the dummy 9th-app test | CCS-149 | Done |
 | [CCS-151](P4-app-adapters-persistence/CCS-151-p4-mcp-projector.md) | refactor | p2 | M | [mcp] Add McpProjector and generic MCP import loops | CCS-146, CCS-011 | Done |
-| [CCS-152](P4-app-adapters-persistence/CCS-152-p4-takeover-crash-e2e.md) | chore | p1 | M | [takeover] Add crash/restore E2E for each proxy-capable app and a legacy-path runtime flag | CCS-014, CCS-012 | Partial |
+| [CCS-152](P4-app-adapters-persistence/CCS-152-p4-takeover-crash-e2e.md) | chore | p1 | M | [takeover] Add crash/restore E2E for each proxy-capable app and a legacy-path runtime flag | CCS-014, CCS-012 | Done |
 | [CCS-153](P4-app-adapters-persistence/CCS-153-p4-services-proxy-split.md) | refactor | p2 | M | [proxy] Split services/proxy.rs (7.2k lines) into lifecycle, takeover, backup, hot_switch and config modules | CCS-152, CCS-054 | Done |
 | [CCS-154](P4-app-adapters-persistence/CCS-154-p4-takeover-engine.md) | refactor | p2 | L | [proxy] Unify takeover behind takeover(app, Strict\|BestEffort) with TakeoverError and a registry-driven status | CCS-153, CCS-149 | Done |
 | [CCS-155](P4-app-adapters-persistence/CCS-155-p4-per-app-settings-state.md) | refactor | p2 | M | [settings] Use keyed per-app maps with old-key dual-write, and migrate profiles and localStorage | CCS-112, CCS-085 | Done |
@@ -233,7 +233,7 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-176](P5-protocol-ir-commands/CCS-176-p5-codec-openai-chat.md) | refactor | p2 | L | [proxy] Migrate the Anthropic<-OpenAI Chat bridge to codecs | CCS-175 | Done |
 | [CCS-177](P5-protocol-ir-commands/CCS-177-p5-codec-gemini.md) | refactor | p2 | L | [proxy] Migrate the Gemini bridge to codecs | CCS-176 | Done |
 | [CCS-178](P5-protocol-ir-commands/CCS-178-p5-codec-responses.md) | refactor | p2 | XL | [proxy] Migrate the Responses bridges to codecs and remove the legacy engine | CCS-177 | Partial |
-| [CCS-179](P5-protocol-ir-commands/CCS-179-p5-misc-split-terminal.md) | refactor | p2 | L | [commands] Split misc.rs into cli_tools services and a unified platform terminal stack | CCS-104, CCS-036 | Partial |
+| [CCS-179](P5-protocol-ir-commands/CCS-179-p5-misc-split-terminal.md) | refactor | p2 | L | [commands] Split misc.rs into cli_tools services and a unified platform terminal stack | CCS-104, CCS-036 | Done |
 | [CCS-180](P5-protocol-ir-commands/CCS-180-p5-command-domains-permissions.md) | security | p2 | M | [ipc] Register commands per domain with collect_commands! and scope them with AppManifest permissions | CCS-179, CCS-117, CCS-075 | Done |
 | [CCS-181](P5-protocol-ir-commands/CCS-181-p5-thin-commands.md) | refactor | p2 | L | [commands] Make commands thin adapters over a Ctx/EventSink seam and reach 100% IpcError | CCS-180, CCS-114 | Done |
 | [CCS-182](P5-protocol-ir-commands/CCS-182-p5-app-shell-bootstrap.md) | refactor | p2 | M | [shell] Add a StartupStep pipeline with a startup diagnostics report and a single run-event router | CCS-181 | Done |

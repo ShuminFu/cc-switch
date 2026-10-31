@@ -187,3 +187,14 @@ Differential tests on hand-written inputs beyond the corpus:
 - Follow-up [CCS-244](../P5-protocol-ir-commands/CCS-244-p5-usage-token-names-out-of-taps.md): Move cache-token field parsing out of stream taps, session_usage and the provider testkit.
 - Follow-up [CCS-245](../P5-protocol-ir-commands/CCS-245-p5-proxy-repoint-legacy-reexports.md): Repoint non-legacy callers from legacy transform re-exports to codec::*.
 - Follow-up [CCS-246](../P5-protocol-ir-commands/CCS-246-p5-codec-engine-ir-default.md): Prepare the default flip to codecEngine = ir (merge needs a maintainer release decision).
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, checks that need a GitHub Actions run are skipped (not verified). None of this ticket's remaining items depend only on GitHub Actions, so that decision does not change its status.
+
+### Still blocked by
+
+- Delete the 10 legacy transform*/streaming*.rs files (18,397 lines), the CodecEngine flag and codecEngine setting, the legacy bridge arms and the codec_parity tests. **Needs:** Release soak: one shipped release with codecEngine = ir and no regressions
+- Net reduction of at least 8k lines (AC1). **Needs:** The release-gated deletion first, plus a maintainer decision because triage measures about -2.8k against the >= 8k target
+- Grep criterion: cached_tokens/cache_creation_input_tokens only in codec and usage modules (AC2). **Needs:** The release-gated deletion, plus a maintainer decision on whether stream/taps.rs, services/session_usage.rs and providers/testkit.rs count as usage/test modules (or CCS-244 is done)
+- Ship codecEngine = ir as the default (prerequisite for the soak, code in CCS-246). **Needs:** Maintainer release decision

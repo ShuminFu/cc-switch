@@ -1,6 +1,6 @@
 # CCS-026: [ci] Read the Node version from .node-version in CI and release
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
 
 > **Ticket key:** `p0-ci-node-version` · **Phase:** P0 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -40,3 +40,11 @@ None.
 
 - Blocked: The CI log prints v22.12.0. Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history).
 - Follow-up [CCS-219](../P0-safety-net/CCS-219-p0-ci-node-version-assert.md): Assert the resolved Node version after every setup-node step.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- The CI log prints v22.12.0 (this can only be checked in a real GitHub Actions run, in the 'Setup Node.js' step output)
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

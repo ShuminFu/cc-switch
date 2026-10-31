@@ -65,3 +65,15 @@ Related follow-ups in other tracks that touch the frontend, all Done: CCS-216 (v
 
 **Remaining (why Partial).** Only one criterion is open, and it can't be closed from this environment:
 1. **tauri-driver smoke green in CI and blocking release (CCS-201).** Needs a green GitHub Actions run of `tauri-build-smoke` (`ubuntu-22.04`) and of the AppImage smoke in the Linux `release.yml` legs (`ubuntu-22.04`, `ubuntu-22.04-arm`, i.e. a release tag run). Then a maintainer has to add `tauri-build-smoke` as a required check in GitHub branch protection. After both, tick the criterion, set CCS-201 to Done and this epic to Done.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- tauri-driver smoke green in CI: a green GitHub Actions run of the tauri-build-smoke job (ci.yml, ubuntu-22.04) (CCS-201 AC1)
+- AppImage smoke green in the Linux release.yml legs (ubuntu-22.04, ubuntu-22.04-arm) on a tag-triggered release run (CCS-201 AC1)
+- A failing smoke blocks the release.yml upload end to end, confirmed by a tag-triggered release.yml run (CCS-201 AC2)
+
+### Still blocked by
+
+- Epic exit criterion 'tauri-driver smoke ... blocking release' / CCS-201: tauri-build-smoke is not yet a required status check in branch protection. **Needs:** A maintainer has to add tauri-build-smoke as a required check in the GitHub branch protection settings (a GitHub repo settings change). Once that is done, CCS-201 and this epic can be set to Done.

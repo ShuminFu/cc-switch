@@ -81,3 +81,14 @@ After the fix: 30 of 30 runs pass on the debug binary and 5 of 5 on the AppImage
 - Blocked: AC1: the E2E smoke job green in CI (tauri-build-smoke on ubuntu-22.04; AppImage smoke on ubuntu-22.04 and ubuntu-22.04-arm). Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history), then a maintainer to add it as a required check.
 - Blocked: AC2: a failing smoke blocks the release.yml upload, end to end. Needs a tag-triggered release.yml run; the static guard in tests/ci/e2eSmoke.test.ts is the best local check.
 - Follow-ups: none; nothing left here can be coded or verified locally.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- AC1: the E2E smoke job is green in CI (tauri-build-smoke debug smoke on ubuntu-22.04, plus the AppImage smoke on the ubuntu-22.04 and ubuntu-22.04-arm release legs). This needs a real GitHub Actions run.
+- AC2: a failing smoke blocks the release.yml upload end to end. This needs a tag-triggered release.yml run. Locally it is covered only by the static guard in tests/ci/e2eSmoke.test.ts.
+
+### Still blocked by
+
+- Make the tauri-build-smoke E2E job a required status check under branch protection. Triage lists this as part of closing AC1. **Needs:** A maintainer has to change the GitHub repo settings (branch protection / required checks).

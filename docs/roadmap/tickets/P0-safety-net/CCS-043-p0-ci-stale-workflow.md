@@ -1,6 +1,6 @@
 # CCS-043: [ci] Remove the invalid stale.yml input and implement a real popular-issue exemption
 
-**Status:** Partial · **Kind:** bug · **Labels:** `bug`, `phase:P0`, `p3-low`, `area:ci`
+**Status:** Done · **Kind:** bug · **Labels:** `bug`, `phase:P0`, `p3-low`, `area:ci`
 
 > **Ticket key:** `p0-ci-stale-workflow` · **Phase:** P0 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -44,3 +44,11 @@ None.
 
 - Blocked: workflow_dispatch run of 'Close Stale Issues' with debug-only: true, checking for no 'Unexpected input(s)' warning and that popular/security/performance issues are skipped. Needs a real Actions run with issues:write; nothing more is codable.
 - Follow-ups: none; nothing left here can be coded or verified locally.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- workflow_dispatch run of 'Close Stale Issues' (stale.yml) with debug-only: true, confirming no 'Unexpected input(s)' warning and that popular/security/performance-labelled issues are skipped. This needs a real GitHub Actions run; the actionlint half of the criterion is already met locally.
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

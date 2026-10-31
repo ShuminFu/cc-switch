@@ -1,6 +1,6 @@
 # CCS-079: [config] Make atomic_write durable, Windows-safe and free of leftover temp files
 
-**Status:** Partial · **Kind:** bug · **Labels:** `bug`, `phase:P1`, `p1-high`, `area:config`
+**Status:** Done · **Kind:** bug · **Labels:** `bug`, `phase:P1`, `p1-high`, `area:config`
 
 > **Ticket key:** `p1-atomic-write-durable` · **Phase:** P1 · **Priority:** p1-high · **Effort:** S · **Depends on:** `p0-config-writer-snapshots`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -81,3 +81,11 @@ p0-config-writer-snapshots
 - Run: `cargo test --target x86_64-pc-windows-gnu --no-fail-fast` under Wine 9.0 (mingw cross-compile, `LANG=LC_ALL=C.UTF-8`, `WINEPATH` set to the target dir), at `bdd666e`. This was the whole crate, not an extract, so the CCS-228 note that cross-compiling fails in `aws-lc-sys` no longer applies once mingw is installed. Result: 3092 passed, 1 failed (the CCS-083 DACL test, a Wine limitation; see CCS-083).
 - Under the default C locale, `database::backup::tests::backup_commands_reject_colon_filenames_without_touching_files` fails with NotFound when it renames `ok.db` to `我的备份.db`. Wine maps non-ASCII names through the unix locale. A C repro (`MoveFileExW` to a CJK name) fails with error 2 under `LANG` unset and succeeds under `C.UTF-8`. NTFS has no such limit, so this is not a product bug. Run Wine with a UTF-8 locale.
 - Still needs real Windows: the "On Windows CI" box (windows-latest run).
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- On Windows CI, overwrite works without remove_file (needs a windows-latest GitHub Actions run; Wine evidence from CCS-228 and the full Windows suite under Wine is interim only)
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

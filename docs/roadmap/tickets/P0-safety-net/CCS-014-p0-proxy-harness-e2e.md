@@ -1,6 +1,6 @@
 # CCS-014: [proxy-tests] Add ProxyHarness with a mock upstream and an end-to-end proxy suite with baselines
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p1-high`, `area:proxy-tests`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p1-high`, `area:proxy-tests`
 
 > **Ticket key:** `p0-proxy-harness-e2e` · **Phase:** P0 · **Priority:** p1-high · **Effort:** L · **Depends on:** `p0-testenv-paths`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -70,3 +70,12 @@ Baseline recorded (linux-x86_64, debug): p50 2.87 ms, p95 3.18 ms, 17 SQL statem
 
 - Run: `cargo test --target x86_64-pc-windows-gnu --no-fail-fast` under Wine 9.0 (mingw cross-compile, `LANG=LC_ALL=C.UTF-8`, `WINEPATH` set to the target dir), at `bdd666e`. Under Wine, `proxy_e2e` passes 37 of 37 and `proxy_golden` 18 of 18, and the capture and trace suites pass too. Full suite: 3092 passed, 1 failed (the CCS-083 DACL test, a Wine limitation). Cross-compiling to windows-gnu now works once mingw is installed.
 - Still needs real runners: macOS, and a windows-latest run of the backend matrix. Wine does not exercise real WebView2, the real filesystem or real performance (for example the half-open timing and allocation gates).
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- At least 8 scenarios green on macOS and Windows in the CI backend matrix (macos-latest / windows-latest legs of ci.yml): 10 tests already pass on Linux locally, and Wine shows 37/37 proxy_e2e passing for windows-gnu
+- Check that the proxy_e2e perf JSON artifact (proxy-e2e-perf-${{ matrix.os }}) really uploads during a GitHub Actions run (the step itself was added by CCS-213)
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

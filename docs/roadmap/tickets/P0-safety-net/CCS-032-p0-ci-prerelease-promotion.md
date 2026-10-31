@@ -1,6 +1,6 @@
 # CCS-032: [ci] Document or automate promoting a prerelease to latest for the updater
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
 
 > **Ticket key:** `p0-ci-prerelease-promotion` · **Phase:** P0 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -103,3 +103,11 @@ the wiring test were updated. Status stays Partial (fork check still manual).
 
 - Blocked: AC2: after promotion, `curl -sIL .../releases/latest/download/latest.json` redirects to the new tag. Needs a fork with a published release and a manual promote-release.yml run.
 - Done in [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): actionlint with shellcheck passes and its config is committed.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- AC2: on a fork, tag a release (release.yml tag run) and run the Promote Release workflow (promote-release.yml, workflow_dispatch), then confirm `curl -sIL https://github.com/<fork>/releases/latest/download/latest.json` redirects to the new tag. This needs a real GitHub Actions run; the workflow's 'Verify updater endpoint' step does the curl check itself.
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

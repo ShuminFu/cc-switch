@@ -1,6 +1,6 @@
 # CCS-031: [ci] Never cancel an in-progress release publish
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
 
 > **Ticket key:** `p0-ci-release-concurrency` · **Phase:** P0 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -55,3 +55,11 @@ The build group includes `matrix.os` (each matrix entry has a unique `os`) so th
 
 - Blocked: Fork test: a re-pushed tag during publish waits instead of cancelling. Needs a live Actions run on a fork with the release environment and secrets (act ignores concurrency).
 - Follow-ups: none; nothing left here can be coded or verified locally.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- Fork test: a re-pushed tag during publish waits rather than cancelling (needs a live GitHub Actions release.yml run on a fork with the release environment and secrets; act ignores concurrency). This also covers the residual pending-job-replacement risk noted in Review.
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

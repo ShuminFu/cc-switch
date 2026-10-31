@@ -67,3 +67,12 @@ The Linux half of "a fork test tag still produces .sig files" was exercised at `
 - After each build, `minisign -V -p <decoded .key.pub> -m <artifact> -x <decoded .sig>` (minisign 0.11) printed `Signature and comment signature verified` for all 3 artifacts. With the other throwaway pubkey it failed on a key id mismatch. After one byte was appended to the `.deb` it printed `Signature verification failed`.
 - Expected warning, seen in both builds: `The updater secret key from TAURI_SIGNING_PRIVATE_KEY does not match the public key from plugins > updater > pubkey` (throwaway key).
 
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- A fork test tag still produces .sig files on all 3 OSes (needs a release.yml tag run on macOS/Windows GitHub Actions runners; the Linux leg was verified locally in CCS-220)
+
+### Still blocked by
+
+- Confirm the repository's TAURI_SIGNING_PRIVATE_KEY secret holds the canonical single-line base64 .key contents (as written by `tauri signer generate`); re-save it if it is stored as raw two-line text or the bare second line. **Needs:** A human with repository secrets access to check the secret's format and re-save it if needed

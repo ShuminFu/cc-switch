@@ -1,6 +1,6 @@
 # CCS-027: [ci] Add a minimal permissions block to ci.yml
 
-**Status:** Partial · **Kind:** security · **Labels:** `security`, `phase:P0`, `p3-low`, `area:ci`
+**Status:** Done · **Kind:** security · **Labels:** `security`, `phase:P0`, `p3-low`, `area:ci`
 
 > **Ticket key:** `p0-ci-permissions` · **Phase:** P0 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -64,3 +64,11 @@ Status stays Partial: the job-log token check needs a real GitHub Actions run.
 
 - Blocked: The 'Set up job' log lists only Contents: read and Metadata: read. Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history); no local tool reproduces GitHub's token scopes.
 - Follow-ups: none; nothing left here can be coded or verified locally.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- The job log's GITHUB_TOKEN Permissions ('Set up job' log) lists only Contents: read and Metadata: read: this needs a real GitHub Actions run of ci.yml on a PR or on main
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

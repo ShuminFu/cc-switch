@@ -128,3 +128,13 @@ Tracked elsewhere (no longer open on this ticket):
 - zip 2.x advisories (RUSTSEC-2026-0367/0368/0369): [CCS-215](../P0-safety-net/CCS-215-p0-deps-zip-upgrade.md).
 - zstd 0.13 / zstd-safe 7 advisories (RUSTSEC-2026-0391/0398/0403): fixed upstream in zstd 0.14.3 / zstd-safe 8.2.0, a breaking bump that zip 2.x also pins; follow-up noted in CCS-214.
 - vitest GHSAs: [CCS-216](../P0-safety-net/CCS-216-p0-deps-vitest-upgrade.md).
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- Observing at least one real GitHub Actions run of .github/workflows/audit.yml (cargo-deny and pnpm audit jobs, including the weekly scheduled run) before the checks can be selected as required
+
+### Still blocked by
+
+- Make the 'cargo-deny' and 'pnpm audit' checks required in branch protection for main. **Needs:** A repo admin has to change the GitHub branch-protection or ruleset settings (a repo settings change, not an Actions run)

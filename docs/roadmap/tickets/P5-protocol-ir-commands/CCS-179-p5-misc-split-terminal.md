@@ -1,6 +1,6 @@
 # CCS-179: [commands] Split misc.rs into cli_tools services and a unified platform terminal stack
 
-**Status:** Partial · **Kind:** refactor · **Labels:** `refactor`, `phase:P5`, `p2-medium`, `area:commands`
+**Status:** Done · **Kind:** refactor · **Labels:** `refactor`, `phase:P5`, `p2-medium`, `area:commands`
 
 > **Ticket key:** `p5-misc-split-terminal` · **Phase:** P5 · **Priority:** p2-medium · **Effort:** L · **Depends on:** `p1-powershell-quote`, `p0-hotfix-terminal-tempfiles`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -89,3 +89,11 @@ p1-powershell-quote, p0-hotfix-terminal-tempfiles
 - Blocked: 'Terminal unit tests pass on 3 OSes' still needs a native macOS run. Needs the macos-latest CI leg or a Mac.
 - Follow-up [CCS-247](../P5-protocol-ir-commands/CCS-247-p5-terminal-applescript-builders-neutral.md): Move the macOS AppleScript builders into an OS-neutral module so their tests run on Linux.
   - Done in CCS-247 (98337e0). The macOS AppleScript and `sh -c` builder logic now lives in `platform/terminal/applescript.rs`, and its 8 tests run on Linux. The 3-OS box still needs a native macOS run for the `osascript` / `open` launchers in `macos.rs`.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- Terminal unit tests (tempfile paths, powershell quoting) pass on 3 OSes: the only unmet part is the native macOS test run (macos-latest CI leg). Linux passed natively, Windows passed under Wine, and macOS passed clippy with a check-only build; the AppleScript builder tests now run on Linux via CCS-247. Skipped as Actions-only: the ticket wording is 'its tests still need a macOS CI run'.
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

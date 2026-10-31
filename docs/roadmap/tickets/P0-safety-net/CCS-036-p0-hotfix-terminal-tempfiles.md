@@ -131,3 +131,13 @@ Each launch got its own config path holding its own provider's env, mode 600
 `cc_switch_launcher_*.sh` was left once the stub exited. The Linux manual box is ticked
 on this evidence. A run with gnome-terminal/konsole and the real claude CLI was not done,
 and the macOS/Windows compile is still open, so the status stays Partial.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- Compile and run the cfg-gated macOS/Windows branches (platform/terminal/macos.rs, windows.rs) via windows-latest/macos-latest legs of the ci.yml backend matrix (Actions-only; cross-compiling fails on aws-lc-sys)
+
+### Still blocked by
+
+- Confirm on a real desktop terminal (gnome-terminal/konsole) with the real claude CLI that the config file is -rw-------, is removed after claude exits, and that quick A-then-B launches each get their own config path (CCS-223 covered this headless with xterm under xvfb and a stub claude only). **Needs:** Interactive human check on a real Linux desktop session with the real claude CLI installed

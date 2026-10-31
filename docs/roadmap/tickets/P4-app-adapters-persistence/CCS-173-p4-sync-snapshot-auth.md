@@ -120,3 +120,12 @@ docs/dev/SECRET_STORAGE.md.
 - Follow-up [CCS-237](../P4-app-adapters-persistence/CCS-237-p4-sync-key-field-api.md): Add the sync-key field to sync settings and expose signature/allowUnsigned in the API layer.
 - Follow-up [CCS-238](../P4-app-adapters-persistence/CCS-238-p4-sync-unsigned-migration-prompt.md): Prompt before applying unsigned snapshots and block tampered ones, with i18n for sync.* errors.
 - Follow-up [CCS-239](../P4-app-adapters-persistence/CCS-239-p4-sync-manifest-rollback-protection.md): Reject signed sync manifests older than the last applied one.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, checks that need a GitHub Actions run are skipped (not verified). None of this ticket's remaining items depend only on GitHub Actions, so that decision does not change its status.
+
+### Still blocked by
+
+- Make the sync key mandatory (refuse unsigned uploads/imports when no key is set). **Needs:** Product decision, to be made after the sync-key UI has shipped in a release
+- Bind the HMAC signature to the remote location/profile. **Needs:** Protocol decision plus a manifest version bump (maintainer decision)

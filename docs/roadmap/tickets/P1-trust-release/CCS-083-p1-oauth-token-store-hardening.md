@@ -1,6 +1,6 @@
 # CCS-083: [auth] Harden the Copilot and Codex OAuth token stores
 
-**Status:** Partial · **Kind:** security · **Labels:** `security`, `phase:P1`, `p2-medium`, `area:auth`
+**Status:** Done · **Kind:** security · **Labels:** `security`, `phase:P1`, `p2-medium`, `area:auth`
 
 > **Ticket key:** `p1-oauth-token-store-hardening` · **Phase:** P1 · **Priority:** p2-medium · **Effort:** M · **Depends on:** `p1-atomic-write-perms`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -97,3 +97,11 @@ Mark the "Windows CI test" item done once that job passes.
 - That failure is a Wine limitation, not a product bug. A minimal mingw C repro (`SetEntriesInAclW` + `SetNamedSecurityInfoW(DACL | PROTECTED_DACL)` on a new file, then `GetNamedSecurityInfoW`) shows that Wine returns `ERROR_SUCCESS` but does not keep the DACL. Reading it back gives a DACL with 3 ACEs synthesised from the unix mode, control `0x8004` (no `SE_DACL_PROTECTED`), and no `user.wine.sd` xattr on the file. `GetKernelObjectSecurity` gives the same result. The test was not changed and must still pass on real Windows.
 - The rest of the `#[cfg(windows)]` atomic-write path passed under Wine: `rename_replace` overwrites without `remove_file`, there are no leftover `*.tmp.*` files, and creating then rewriting through `atomic_write_secret` works.
 - Still needs real Windows: the owner-only DACL assertion (a windows-latest CI job or a Windows machine).
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- Windows CI test: the ACL has only the current user (config::tests::atomic_write_secret_sets_owner_only_acl). It runs in the windows-latest job of .github/workflows/ci.yml and is not yet verified. Under Wine it fails only because Wine does not keep the DACL.
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

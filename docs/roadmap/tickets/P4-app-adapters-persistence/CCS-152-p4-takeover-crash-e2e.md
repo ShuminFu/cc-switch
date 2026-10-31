@@ -1,6 +1,6 @@
 # CCS-152: [takeover] Add crash/restore E2E for each proxy-capable app and a legacy-path runtime flag
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P4`, `p1-high`, `area:proxy-tests`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P4`, `p1-high`, `area:proxy-tests`
 
 > **Ticket key:** `p4-takeover-crash-e2e` · **Phase:** P4 · **Priority:** p1-high · **Effort:** M · **Depends on:** `p0-proxy-harness-e2e`, `p0-config-writer-snapshots`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -95,3 +95,11 @@ Re-run on the lane2/followups tree at f13a403 (Linux):
 - Fixed in `4385f6f`: `Paths::with_home` derives `<home>\AppData\Local`, `Paths::system()` keeps reading the env var, and `AppDescriptor::default_dir` takes `&Paths`.
 - Run: `cargo test --target x86_64-pc-windows-gnu --no-fail-fast` under Wine 9.0 (mingw cross-compile, `LANG=LC_ALL=C.UTF-8`, `WINEPATH` set to the target dir), at `bdd666e`. `takeover_crash` passes 10 of 10 under Wine and 10 of 10 on Linux. Full Wine suite: 3092 passed, 1 failed (the CCS-083 DACL test, a Wine limitation).
 - Still needs a real run: windows-latest and macos-latest (Wine is interim evidence; macOS has not been run).
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- Green on 3 OSes (ubuntu-22.04, windows-latest, macos-latest legs of the ci.yml backend matrix running takeover_crash). This is a GitHub Actions CI matrix run. Linux passes 10/10 and the Wine/Windows interim run passes 10/10.
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

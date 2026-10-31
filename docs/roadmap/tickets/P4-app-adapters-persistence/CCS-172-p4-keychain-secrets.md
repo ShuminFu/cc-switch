@@ -128,3 +128,13 @@ and Linux.
   the `plaintext` downgrade with `release()`, cleanup via `secret-tool search`, and the no-D-Bus
   fallback to a 0600 `secrets.json`. This covers checklist steps 2-5 for Linux/GNOME Keyring at the
   API level; the macOS, Windows and KWallet items above remain.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, checks that need a GitHub Actions run are skipped (not verified). None of this ticket's remaining items depend only on GitHub Actions, so that decision does not change its status.
+
+### Still blocked by
+
+- Manual check on macOS: Keychain Access entries and prompts, plus the downgrade path (checklist in docs/dev/SECRET_STORAGE.md). **Needs:** A real Mac and a human tester running it interactively
+- Manual check on Windows: Credential Manager entries, owner-only ACL on the fallback secrets.json, PowerShell downgrade. **Needs:** A real Windows machine and a human tester
+- Manual check on a Linux desktop: the KWallet path and real interactive unlock prompts (CCS-240 already covered GNOME Keyring/Secret Service at the API level and the headless fallback). **Needs:** An interactive Linux desktop session (KDE/KWallet) and a human tester

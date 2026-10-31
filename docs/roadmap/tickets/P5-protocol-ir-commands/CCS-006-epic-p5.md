@@ -100,3 +100,19 @@ Re-audited 2026-10-31 on `claude/funny-carson-9c7j3e` (673be73), after the follo
    - CCS-179: the `osascript`/`open` launchers in `macos.rs` need a native macOS run (the macos-latest CI leg or a Mac).
    - CCS-184: resume needs a manual GUI check on a real Windows desktop (cmd /K, PowerShell, Windows Terminal, the real npm `claude.cmd` shim) and on real gnome-terminal/konsole.
    - CCS-246 and CCS-244: their PRs need the CCS-034 fixture label (`fixtures` / `no-fixture-needed`) set on GitHub.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- Criterion 5 (proxy/ and database/ coverage of at least 75%, ratcheted): the first real run of the blocking coverage-rust job in ci.yml on GitHub Actions. The criterion is already met in code and locally (proxy 92.27%, database 85.70%).
+- Child CCS-179: 'Terminal unit tests pass on 3 OSes' still needs a native macOS run of the osascript/open launchers in macos.rs. This is skipped as the macos-latest CI leg.
+
+### Still blocked by
+
+- Criterion 1 / CCS-178: delete the 10 legacy providers/transform*.rs and streaming*.rs files (18,396 lines), the CodecEngine flag, the legacy arms in codec/bridge.rs and the test-only legacy imports. **Needs:** A release soak: one shipped release with codecEngine = ir as the default and no regressions. A maintainer has to schedule and ship that release.
+- Criterion 1: a net reduction of at least 8k lines. After the deletion it measures about -2.8k (legacy was 20,307 lines; proxy/codec/ is 17,482). **Needs:** A maintainer or product decision: revise the target, or trim the codec tests that duplicate legacy tests when the parity tests are removed.
+- Criterion 2: cached_tokens/cache_creation_input_tokens appear only in codec and usage modules. 5 legacy files still match, and the check-usage-token-names.mjs allowlist has to be emptied. **Needs:** The legacy deletion gated on the release soak (CCS-178).
+- Criterion 6: proxy fix commits per release are below the P0 baseline window. **Needs:** v4.0 has to ship with release tags, and a P0 baseline count of proxy fix commits has to be recorded so the release KPI can be measured.
+- Child CCS-184 (does not block an exit criterion): a manual resume check on a real Windows desktop (cmd /K, PowerShell, Windows Terminal, real npm claude.cmd shim) and on real gnome-terminal/konsole. **Needs:** An interactive human check on real Windows and Linux desktops.
+- Children CCS-244 and CCS-246 (do not block an exit criterion): their PRs need the CCS-034 fixture label (fixtures or no-fixture-needed). **Needs:** Labels set on the PRs in GitHub.

@@ -1,6 +1,6 @@
 # CCS-033: [ci] Add rust-cache, a version consistency check, provenance attestation and SHA256SUMS
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
 
 > **Ticket key:** `p0-ci-release-hygiene` · **Phase:** P0 · **Priority:** p3-low · **Effort:** M · **Depends on:** `p0-ci-pin-actions`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -104,3 +104,11 @@ Re-run on the lane2/followups tree at f13a403:
 - `grep -n "rust-cache\|attest-build-provenance" .github/workflows/*.yml`
   confirms the SHA pins listed above; no tag-only reference is left.
 - AC2 stays open (Blocked, needs a signed tag run on a public fork).
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- AC2: Release assets include SHA256SUMS and `gh attestation verify` passes on a fork. This needs a real release.yml tag run on GitHub Actions (signing secrets, macOS/Windows runners, and an OIDC provenance attestation from publish-release), so it can only be met by a GitHub Actions run.
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

@@ -1,6 +1,6 @@
 # CCS-213: [ci] Upload the proxy_e2e perf JSON as a CI artifact from the backend matrix
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
 
 > **Ticket key:** `p0-ci-proxy-perf-artifact` · **Phase:** P0 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -39,3 +39,11 @@ None.
 - `pnpm typecheck`: clean. `prettier --check` on the new test file and `ci.yml`: clean.
 
 **Remaining (Partial).** Confirming that the artifact really uploads on ubuntu-22.04, windows-latest and macos-latest needs a GitHub Actions run of the backend matrix. That cannot be done in this environment, and the repo has no Actions history.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- Confirm that the proxy-e2e-perf artifact actually uploads from the backend matrix on ubuntu-22.04, windows-latest and macos-latest. This needs a real GitHub Actions run of ci.yml.
+
+With these skipped, nothing else blocks this ticket, so it is set to **Done**.

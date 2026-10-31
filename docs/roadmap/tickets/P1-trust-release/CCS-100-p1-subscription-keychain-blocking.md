@@ -55,3 +55,13 @@ None.
 - Blocked: AC2a: `cargo clippy` on the macOS runner. Needs a macos-latest Actions run or a Mac.
 - Blocked: AC2b: other commands respond while a real keychain prompt is open, and the 20 s fallback. Needs interactive use on a Mac with a real Keychain entry.
 - Follow-ups: none; nothing left here can be coded or verified locally.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- AC2a: `cargo clippy` on the macOS CI runner (macos-latest GitHub Actions leg). The keychain code paths already compile clippy-clean on Linux with the macOS gates swapped in.
+
+### Still blocked by
+
+- AC2b: Check by hand that other commands keep responding while a real macOS keychain prompt is open, and that the quota falls back to the credentials file after the 20 s timeout if the prompt is ignored. **Needs:** Someone using a real Mac with a real Keychain entry (Claude Code-credentials / Codex Auth / gemini-cli-oauth) who can trigger and leave the prompt open.

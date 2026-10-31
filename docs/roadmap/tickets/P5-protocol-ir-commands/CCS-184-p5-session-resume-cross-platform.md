@@ -121,3 +121,12 @@ Locally: 3 passing, and the full suite has 4/4 spec files passing. Dropping the 
 ### Windows `.bat` under Wine cmd (CCS-249)
 
 The ignored test `platform::terminal::resume::tests::windows_resume_batch_runs_under_wine_cmd` (`cargo test --manifest-path src-tauri/Cargo.toml --lib under_wine -- --ignored`) now runs the output of `build_windows_resume_batch` under `wine cmd /c` and `wine cmd /K` (stdin closed). The cwd is `Z:\tmp\...\proj (1)&x^y\100%` and a fake `claude.cmd` shim is on `WINEPATH`. It checks that `cd /d` entered the quoted dir, that the shim got exactly `--resume <id>`, that the batch kept going after `call`, and that `del "%~f0"` deleted the batch. This covers the `.bat` content only. It does not cover how cmd, Windows Terminal or PowerShell launch the batch, so the manual Windows check above stays open. Wine 9.0's cmd sets no return code for builtins, so `cd ... || exit /b 1` takes the `||` branch even when `cd` succeeds. When the test detects this, it strips ` || exit /b 1` before running. That means the cd-failure branch is still verified only by the content tests.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, checks that need a GitHub Actions run are skipped (not verified). None of this ticket's remaining items depend only on GitHub Actions, so that decision does not change its status.
+
+### Still blocked by
+
+- Manual session resume on a real Windows desktop (cmd /K, PowerShell -NoExit, Windows Terminal, real npm claude.cmd shim). **Needs:** Interactive human check on a real Windows machine. Wine cannot stand in for start/wt/PowerShell, and CCS-249 covers only the .bat content.
+- Manual session resume on a real Linux desktop terminal (gnome-terminal/konsole). **Needs:** Interactive human check on a real GNOME/KDE desktop session. CCS-248's xvfb/xterm automation covers most of it but not the real desktop terminals.

@@ -82,3 +82,12 @@ on a host with IPv6 loopback.
 
 - Blocked: AC1-AC3: the [::1] tests actually running and passing. Need one run on a host with IPv6 loopback (GitHub-hosted runner or dev machine); this kernel has no IPv6.
 - Follow-up [CCS-227](../P1-trust-release/CCS-227-p1-proxy-require-ipv6-guard.md): Fail the [::1] proxy tests instead of skipping when CCS_REQUIRE_IPV6 is set.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, checks that need a GitHub Actions run are skipped (not verified). None of this ticket's remaining items depend only on GitHub Actions, so that decision does not change its status.
+
+### Still blocked by
+
+- AC1: connect_via_proxy_reaches_ipv6_literal_proxy (CONNECT responder on [::1]:0) must actually run its IPv6 assertions and pass. **Needs:** One cargo test run on a host with IPv6 loopback. A dev machine works, so it does not need GitHub Actions. This sandbox gets EAFNOSUPPORT, so the test skips early.
+- AC2: send_raw_request_reaches_ipv6_literal_upstream (send_raw_request to http://[::1]:<port>/ returns Ok without fallback) must actually run and pass. **Needs:** One cargo test run on a host with IPv6 loopback. A dev machine works, so it does not need GitHub Actions.

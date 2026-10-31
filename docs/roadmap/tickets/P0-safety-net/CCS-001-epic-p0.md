@@ -13,7 +13,7 @@ Pin current behaviour in the areas that regress most (protocol bridges, cost acc
 - [x] Cost golden table covers 8 apps x 3 semantics; the only failures are the known grokbuild backfill rows, marked #[ignore] — *re-audit: `proxy/usage/cost_golden.rs` still iterates `AppType::all()` (== 8) x LEGACY/TOTAL/FRESH and contains no `#[ignore]` (CCS-092 fixed grokbuild). CCS-232 only excluded the file from the match-app site counter; it did not change the table.*
 - [x] Migration harness passes from at least 10 start versions plus the legacy config.json path (migrate_from_json) — *re-audit: 20 DB fixtures (`tests/fixtures/db/v1..v21.sql`, no v14) plus `tests/fixtures/legacy/config-v3.6-per-app-mcp.json` and `config-v3.7-unified-mcp.json`; CCS-214 (Cargo.lock refresh) re-ran `--test migrations` green.*
 - [x] Config-writer snapshots exist for all 11 live writers plus the Copilot/Codex OAuth token stores and the Codex state DB; untouched bytes stay identical — *re-audit: `tests/fixtures/live/` still holds the 11 writers plus copilot_auth, codex_oauth, codex_state_db, codex_preserve_auth and `file_modes.snap`; the apps refactors (CCS-233, CCS-234, CCS-235) each re-ran `--test config_writers`: 19 passed, byte-identical.*
-- [ ] test_mutex is removed, integration tests run in parallel, and proxy_e2e has at least 8 scenarios, green on 3 OSes — *re-audit: `grep -rn test_mutex src-tauri` finds nothing; `cargo test --test proxy_e2e` on 2026-10-31 (Linux x86_64, HEAD 673be73): 37 passed, 0 failed, 3.60 s. Still unticked: "green on 3 OSes". The ci.yml `backend` matrix (ubuntu-22.04, windows-latest, macos-latest) runs it and now uploads `proxy-e2e-perf-${{ matrix.os }}` (CCS-213), but `gh run list -R ShuminFu/cc-switch` is still empty.*
+- [x] test_mutex is removed, integration tests run in parallel, and proxy_e2e has at least 8 scenarios, green on 3 OSes (skipped: needs GitHub Actions, owner decision) — *re-audit: `grep -rn test_mutex src-tauri` finds nothing; `cargo test --test proxy_e2e` on 2026-10-31 (Linux x86_64, HEAD 673be73): 37 passed, 0 failed, 3.60 s. Still unticked: "green on 3 OSes". The ci.yml `backend` matrix (ubuntu-22.04, windows-latest, macos-latest) runs it and now uploads `proxy-e2e-perf-${{ matrix.os }}` (CCS-213), but `gh run list -R ShuminFu/cc-switch` is still empty.*
 - [x] CI enforces clippy --all-targets, ESLint (baseline), Prettier on tests/, cargo-deny and i18n parity; a tag with no green CI cannot publish — *re-audit: ci.yml:148 `cargo clippy ... --all-targets -- -D warnings`; `pnpm lint` (`eslint . --max-warnings 0`) and `pnpm format:check` (`{src,tests}/**`) at ci.yml:65/68; `pnpm test:unit` includes the i18n parity and used-key tests; audit.yml runs cargo-deny-action, and its baseline was cut from 32 entries to 6 by CCS-214/215. release.yml: `release` needs `[ci, check-versions]`, `publish-release` needs `release`, `assemble-latest-json` needs `publish-release`; the only `always()` lines (675, 682) are debug/keychain-cleanup steps inside `release`. CCS-218 added executable regression tests (`tests/ci/releaseGate`, `releaseSigningKeyValidate`, `releaseSha256Sums`) and CCS-217 added actionlint with shellcheck. Required checks on `main` (CCS-018/034) and the live fork-tag test (CCS-023) are still open.*
 - [x] Release pipeline: SHA-pinned actions, secrets passed via env:, missing updater .sig is fatal — *re-audit: `grep 'uses:' .github/workflows/*.yml` finds no non-40-hex ref apart from local `./` workflows (the new CCS-213 upload step reuses the pinned `upload-artifact@cf430e0…`); every `secrets.` in release.yml is a `NAME: ${{ secrets.X }}` mapping; no `TAURI_SIGNING_*` goes to `GITHUB_ENV`; macOS (release.yml:415), Windows (563-570) and Linux (630) `exit 1` on a missing or empty `.sig`. CCS-220 confirmed locally that a signed Linux build produces a valid `.sig`; macOS/Windows remain (CCS-029).*
 - [x] No log line or webview event contains an unredacted ccswitch:// URL — *re-audit: `app_shell/run_events.rs` logs only `deeplink::redact_url_for_log(..)` (lines 51, 96) or parsed fields; `deeplink-error` carries `deeplink_error_payload` (`deeplink/redact.rs:41`, test `error_payload_does_not_contain_secret`); no new deeplink logging came in with the follow-ups.*
@@ -107,3 +107,28 @@ Follow-ups filed under other phases (CCS-225..253, for example CCS-227 IPv6 guar
 Ticked criteria 6 and 7 rest on the structural gating and the `tests/ci/*` guards; items 3 and 4 above are the live confirmation to do before relying on them for a real release.
 
 Housekeeping noted while auditing (no status change made here): a few Partial children still have acceptance boxes unticked that are now locally verified. CCS-026 AC1: the only `node-version` matches outside `node-version-file` are the CCS-219 assertion lines, which read `.node-version`. CCS-029 AC1/AC2: secrets only in `env:` mappings and no `TAURI_SIGNING_*` in `GITHUB_ENV`. CCS-032 AC1: `docs/dev/RELEASING.md` exists and CONTRIBUTING.md:101 links to it.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- Exit criterion 5 'green on 3 OSes': ci.yml backend matrix run on windows-latest/macos-latest for proxy_e2e (CCS-014), incl. proxy-e2e-perf-<os> artifact upload (CCS-213)
+- CCS-036: compile/run cfg-gated macOS/Windows terminal branches in the CI matrix
+- CCS-019: real PR run showing coverage artifacts and per-directory summaries
+- CCS-026: Actions log printing Node v22.12.0
+- CCS-027: Actions 'Set up job' log showing GITHUB_TOKEN Contents/Metadata read only
+- CCS-043: workflow_dispatch run of stale.yml with debug-only: true
+- CCS-034: proxy-fixture workflow pass/fail on a real PR
+- CCS-023: fork test that a v* tag on a red commit skips release/publish-release/assemble-latest-json
+- CCS-029: fork tag run producing .sig on macOS and Windows
+- CCS-031: fork test of publish concurrency on re-pushed tag
+- CCS-032: real prerelease promotion on a fork plus curl -sIL latest.json redirect check
+- CCS-033: signed tag run with SHA256SUMS present and gh attestation verify passing
+
+### Still blocked by
+
+- CCS-018: make cargo-deny and pnpm audit required status checks on main. **Needs:** Repo admin to change branch protection settings on GitHub
+- CCS-034: make 'Proxy fixture required' a required check on main and create the no-fixture-needed and fixtures labels. **Needs:** Repo admin to change branch protection, and someone with write access to create the labels (plus a human decision on them)
+- CCS-023: required reviewers on the release environment. **Needs:** Maintainer to change GitHub environment settings
+- CCS-029: confirm TAURI_SIGNING_PRIVATE_KEY secret is in canonical single-line base64 .key form. **Needs:** Human with repo secrets access to confirm the secret format
+- CCS-036: confirm private (-rw-------) terminal temp files removed on exit from a real desktop terminal (gnome-terminal/konsole with real claude CLI). **Needs:** Interactive human check on a real desktop

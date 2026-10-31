@@ -43,3 +43,13 @@ None.
 - Blocked: Required reviewers on the `release` environment. Needs a maintainer to change GitHub environment settings.
 - Done in [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): actionlint with shellcheck passes and its config is committed.
 - Follow-up [CCS-218](../P0-safety-net/CCS-218-p0-ci-release-regression-tests.md): Add executable regression tests for the release gate, signing-key validation and SHA256SUMS.
+
+## Owner decision: GitHub Actions checks skipped
+
+By the repository owner's decision on 2026-10-31, the following checks that need a GitHub Actions run are **skipped, not verified**. No green Actions run has been observed for them; they no longer block this ticket.
+
+- Fork test: a v* tag on a commit with a failing test must skip release, publish-release and assemble-latest-json. This needs a real GitHub Actions run on a fork.
+
+### Still blocked by
+
+- Required reviewers on the `release` environment (Settings > Environments > release > Required reviewers). **Needs:** A maintainer has to change this GitHub repository/environment setting.
