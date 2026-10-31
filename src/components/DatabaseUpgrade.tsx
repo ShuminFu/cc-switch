@@ -13,6 +13,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { RecoveryBackupList } from "@/components/workbench/RecoveryBackupList";
 
 const RELEASES_URL = "https://github.com/farion1231/cc-switch/releases";
 
@@ -52,6 +53,8 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
   const [availableVersion, setAvailableVersion] = useState<string | null>(null);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // The update check failed (e.g. offline): not the same as "no update".
+  const [checkFailed, setCheckFailed] = useState(false);
   const unlistenRef = useRef<(() => void) | null>(null);
 
   const dbVersion = payload.db_version;
@@ -74,7 +77,10 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
         }
       } catch {
         // 检查失败（如离线）：仍允许尝试升级，避免完全卡死
-        if (!cancelled) setPhase("upgradable");
+        if (!cancelled) {
+          setCheckFailed(true);
+          setPhase("upgradable");
+        }
       }
     })();
     return () => {
@@ -191,6 +197,17 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
             })}
           </p>
         )}
+
+        {phase === "upgradable" && checkFailed && (
+          <p className="text-sm text-muted-foreground" role="status">
+            {t("dbUpgrade.checkFailed", {
+              defaultValue:
+                "Could not check for updates (offline?). You can retry the upgrade or restore a backup.",
+            })}
+          </p>
+        )}
+
+        <RecoveryBackupList disabled={phase === "updating"} />
 
         {phase === "incompatible" && (
           <div className="space-y-2 rounded-lg border border-red-300/60 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-950/40 dark:text-red-300">

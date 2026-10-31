@@ -7,6 +7,7 @@
 pub mod audit_log;
 pub mod config_history;
 pub mod custom_tools;
+pub mod db_recovery;
 pub mod deeplink_nav;
 pub mod file_dialog;
 pub mod log_retention;
