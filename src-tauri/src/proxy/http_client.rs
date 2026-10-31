@@ -3,28 +3,28 @@
 //! 提供支持全局代理配置的 HTTP 客户端。
 //! 所有需要发送 HTTP 请求的模块都应使用此模块提供的客户端。
 
-use once_cell::sync::OnceCell;
 use reqwest::Client;
 use std::env;
 use std::net::IpAddr;
+use std::sync::OnceLock;
 use std::sync::RwLock;
 use std::time::Duration;
 
 /// 全局 HTTP 客户端实例
-static GLOBAL_CLIENT: OnceCell<RwLock<Client>> = OnceCell::new();
+static GLOBAL_CLIENT: OnceLock<RwLock<Client>> = OnceLock::new();
 
 /// 与 `GLOBAL_CLIENT` 代理配置相同、但不跟随重定向的客户端。
 ///
 /// 用于会携带用户自定义请求头（API Key 等）的请求（如用量查询脚本）：
 /// reqwest 跟随跨域重定向时只剥离 Authorization/Cookie 等少数头，
 /// 自定义头会被原样发往重定向目标，因此由调用方自行校验后再决定是否跟随。
-static GLOBAL_NO_REDIRECT_CLIENT: OnceCell<RwLock<Client>> = OnceCell::new();
+static GLOBAL_NO_REDIRECT_CLIENT: OnceLock<RwLock<Client>> = OnceLock::new();
 
 /// 当前代理 URL（用于日志和状态查询）
-static CURRENT_PROXY_URL: OnceCell<RwLock<Option<String>>> = OnceCell::new();
+static CURRENT_PROXY_URL: OnceLock<RwLock<Option<String>>> = OnceLock::new();
 
 /// CC Switch 代理服务器当前监听的端口
-static CC_SWITCH_PROXY_PORT: OnceCell<RwLock<u16>> = OnceCell::new();
+static CC_SWITCH_PROXY_PORT: OnceLock<RwLock<u16>> = OnceLock::new();
 
 /// 设置 CC Switch 代理服务器的监听端口
 ///

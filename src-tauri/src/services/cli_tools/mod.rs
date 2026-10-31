@@ -11,8 +11,6 @@
 #[allow(unused_imports)]
 use crate::app_config::AppType;
 #[allow(unused_imports)]
-use once_cell::sync::Lazy;
-#[allow(unused_imports)]
 use regex::Regex;
 #[allow(unused_imports)]
 use std::collections::HashMap;
@@ -20,6 +18,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 #[allow(unused_imports)]
 use std::str::FromStr;
+#[allow(unused_imports)]
+use std::sync::LazyLock;
 
 #[cfg(target_os = "windows")]
 #[allow(unused_imports)]
