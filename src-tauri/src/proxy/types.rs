@@ -260,6 +260,13 @@ pub struct OptimizerConfig {
     /// Cache 注入子开关（总开关开启后默认生效）
     #[serde(default = "default_true")]
     pub cache_injection: bool,
+    /// Adaptive models: inject `output_config.effort = "max"` (opt-in, PROXY-47).
+    #[serde(default)]
+    pub thinking_max_effort: bool,
+    /// Adaptive models: append the `context-1m-2025-08-07` beta (opt-in, PROXY-47;
+    /// Bedrock rejects it for accounts without 1M access).
+    #[serde(default)]
+    pub context_1m_beta: bool,
 }
 
 impl Default for OptimizerConfig {
@@ -268,6 +275,8 @@ impl Default for OptimizerConfig {
             enabled: false,
             thinking_optimizer: true,
             cache_injection: true,
+            thinking_max_effort: false,
+            context_1m_beta: false,
         }
     }
 }

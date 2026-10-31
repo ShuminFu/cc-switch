@@ -335,6 +335,7 @@ pub(crate) fn codex_anthropic_cache_config(config: &OptimizerConfig) -> Optimize
         enabled: true,
         thinking_optimizer: false,
         cache_injection: config.cache_injection,
+        ..OptimizerConfig::default()
     }
 }
 
