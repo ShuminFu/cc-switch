@@ -122,6 +122,8 @@ describe("LiveWritePreviewDialog (preview_live_write)", () => {
         onDelete={vi.fn()}
       />,
     );
-    expect(screen.queryByRole("button", { name: "Preview changes" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Preview changes" }),
+    ).toBeNull();
   });
 });

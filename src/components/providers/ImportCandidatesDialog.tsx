@@ -65,10 +65,12 @@ export function ImportCandidatesDialog({
 }: ImportCandidatesDialogProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { data: candidates, isLoading, isError, error } = useImportCandidates(
-    appId,
-    open,
-  );
+  const {
+    data: candidates,
+    isLoading,
+    isError,
+    error,
+  } = useImportCandidates(appId, open);
   const existing = useMemo(() => new Set(existingIds), [existingIds]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [isImporting, setIsImporting] = useState(false);
@@ -107,7 +109,8 @@ export function ImportCandidatesDialog({
         const provider: Provider = {
           id,
           name: candidate.name || id,
-          settingsConfig: candidate.settingsConfig as Provider["settingsConfig"],
+          settingsConfig:
+            candidate.settingsConfig as Provider["settingsConfig"],
           createdAt: Date.now(),
         };
         await providersApi.add(provider, appId, false);

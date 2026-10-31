@@ -178,7 +178,9 @@ describe("ManagedItemsPanel adapters", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Gemini" })[0]);
     expect(await screen.findByText("Gemini: not synced")).toBeInTheDocument();
     expect(
-      screen.getByTitle(/config directory \/home\/mock\/\.gemini does not exist/),
+      screen.getByTitle(
+        /config directory \/home\/mock\/\.gemini does not exist/,
+      ),
     ).toBeInTheDocument();
     expect(api.callsTo("get_mcp_sync_skips").length).toBeGreaterThanOrEqual(2);
   });
