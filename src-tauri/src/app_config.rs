@@ -100,6 +100,9 @@ pub struct SkillApps {
     pub opencode: bool,
     #[serde(default)]
     pub hermes: bool,
+    /// PRODUCT-53: OpenClaw loads managed skills from `~/.openclaw/skills`.
+    #[serde(default)]
+    pub openclaw: bool,
 }
 
 impl SkillApps {
@@ -112,7 +115,7 @@ impl SkillApps {
             AppType::GrokBuild => self.grokbuild,
             AppType::OpenCode => self.opencode,
             AppType::Hermes => self.hermes,
-            AppType::OpenClaw => false, // OpenClaw doesn't support Skills
+            AppType::OpenClaw => self.openclaw,
             AppType::ClaudeDesktop => false,
         }
     }
@@ -126,7 +129,7 @@ impl SkillApps {
             AppType::GrokBuild => self.grokbuild = enabled,
             AppType::OpenCode => self.opencode = enabled,
             AppType::Hermes => self.hermes = enabled,
-            AppType::OpenClaw => {} // OpenClaw doesn't support Skills, ignore
+            AppType::OpenClaw => self.openclaw = enabled,
             AppType::ClaudeDesktop => {} // Claude Desktop 3P profiles don't use CC Switch skill sync
         }
     }
@@ -152,6 +155,9 @@ impl SkillApps {
         if self.hermes {
             apps.push(AppType::Hermes);
         }
+        if self.openclaw {
+            apps.push(AppType::OpenClaw);
+        }
         apps
     }
 
@@ -163,6 +169,7 @@ impl SkillApps {
             && !self.grokbuild
             && !self.opencode
             && !self.hermes
+            && !self.openclaw
     }
 
     /// 仅启用指定应用（其他应用设为禁用）

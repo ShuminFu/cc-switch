@@ -246,6 +246,13 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         breaks_sync: false,
         up: Database::migrate_v25_to_v26,
     },
+    Migration {
+        version: 27,
+        name: "openclaw_skills",
+        checksum: "69756384aa3458aee69940111f75e2ac472201ed1faa8df6a92900c9d60f0836",
+        breaks_sync: false,
+        up: Database::migrate_v26_to_v27,
+    },
 ];
 
 /// 注册表中最新的 schema 版本（即 `SCHEMA_VERSION`）。
@@ -2101,6 +2108,22 @@ impl Database {
         Ok(())
     }
 
+    /// v26 → v27 (PRODUCT-53): `skills.enabled_openclaw` so a skill can be
+    /// synced to OpenClaw's managed skills directory (`~/.openclaw/skills`).
+    /// Additive with a default: older clients ignore the column, snapshots
+    /// without it import as disabled, so sync stays compatible.
+    fn migrate_v26_to_v27(conn: &Connection) -> Result<(), AppError> {
+        if Self::table_exists(conn, "skills")? {
+            Self::add_column_if_missing(
+                conn,
+                "skills",
+                "enabled_openclaw",
+                "BOOLEAN NOT NULL DEFAULT 0",
+            )?;
+        }
+        Ok(())
+    }
+
     /// v21 → v22 (DB-20, first increment): per-row `sync_rev` /
     /// `sync_updated_at` (Unix ms) on the synced entity tables and a local
     /// `sync_tombstones` table recording deletions, maintained by the app's
@@ -2593,7 +2616,7 @@ mod tests {
                 SCHEMA_VERSION,
                 crate::services::sync_protocol::DB_COMPAT_VERSION
             ),
-            (26, 6),
+            (27, 6),
             "SCHEMA_VERSION changed without reviewing DB_COMPAT_VERSION (or vice versa)"
         );
         assert_eq!(

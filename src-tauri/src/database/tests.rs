@@ -1807,6 +1807,7 @@ fn drop_columns(conn: &Connection, table: &str, columns: &[&str]) {
 /// `create_tables` stay in place, as they did in real installations).
 fn undo_migration(conn: &Connection, version: i32) {
     match version {
+        27 => drop_columns(conn, "skills", &["enabled_openclaw"]),
         26 => {
             conn.execute_batch(
                 "DROP INDEX idx_request_logs_zero_cost_nanos;
@@ -2231,7 +2232,8 @@ fn baseline_schema_checksum_is_pinned() {
     // later migrations (v18 added session_log_sync.byte_offset / prefix_hash; v19-v22
     // added the endpoint unique index, pricing source, CHECK-free proxy_config and row versions;
     // v23 dropped the unused status_code request-log index; v24/v25 added the
-    // model_pricing catalog columns; v26 the integer cost columns and index).
+    // model_pricing catalog columns; v26 the integer cost columns and index;
+    // v27 skills.enabled_openclaw).
     let conn = Connection::open_in_memory().expect("open memory db");
     Database::create_tables_on_conn(&conn).expect("create fresh schema");
     let objects = query_strings(
@@ -2247,7 +2249,7 @@ fn baseline_schema_checksum_is_pinned() {
     let checksum = format!("{:x}", Sha256::digest(text.as_bytes()));
     assert_eq!(
         checksum,
-        "ccd4179c6daba8a51300c928fb28e64fe9748f0155e5dee37465454a6d0773f3",
+        "9bf327fdf49c0ed4241d20f542438db91304a3eae278d69c55c057522ebe3b13",
         "baseline schema changed; it is frozen at v{}:\n{text}",
         schema::BASELINE_SCHEMA_VERSION
     );
