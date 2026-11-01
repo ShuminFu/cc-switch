@@ -8,6 +8,7 @@ import type {
   OpenClawDefaultModel,
 } from "../types";
 import type { PresetTheme, TemplateValueConfig } from "./claudeProviderPresets";
+import { registerPresetCatalog } from "./presetCatalog";
 
 /** Suggested default model configuration for a preset */
 export interface OpenClawSuggestedDefaults {
@@ -2507,3 +2508,6 @@ export const openclawProviderPresets: OpenClawProviderPreset[] = [
     iconColor: "#FF9900",
   },
 ];
+
+// Remote signed catalog overlay (PRODUCT-07); the list above stays the default.
+registerPresetCatalog("openclaw", openclawProviderPresets);

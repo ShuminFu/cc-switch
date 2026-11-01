@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query/keys";
 import { useTranslation } from "react-i18next";
 import { Layers } from "lucide-react";
 import { toast } from "sonner";
@@ -7,14 +9,25 @@ import { UniversalProviderCard } from "./UniversalProviderCard";
 import { UniversalProviderFormModal } from "./UniversalProviderFormModal";
 import { universalProvidersApi } from "@/lib/api";
 import type { UniversalProvider, UniversalProvidersMap } from "@/types";
+
+const EMPTY_PROVIDERS: UniversalProvidersMap = {};
 import { deepClone } from "@/utils/deepClone";
+import { saveUniversalProvider } from "./saveUniversalProvider";
 
 export function UniversalProviderPanel() {
   const { t } = useTranslation();
 
-  // 状态
-  const [providers, setProviders] = useState<UniversalProvidersMap>({});
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  // FE-PROV-37: loaded through TanStack Query instead of ad-hoc state.
+  const {
+    data: providers = EMPTY_PROVIDERS,
+    isLoading: loading,
+    isError,
+    error,
+  } = useQuery({
+    queryKey: queryKeys.universalProviders.all,
+    queryFn: () => universalProvidersApi.getAll(),
+  });
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProvider, setEditingProvider] =
     useState<UniversalProvider | null>(null);
@@ -29,58 +42,38 @@ export function UniversalProviderPanel() {
     name: string;
   }>({ open: false, id: "", name: "" });
 
-  // 加载数据
-  const loadProviders = useCallback(async () => {
-    try {
-      setLoading(true);
-      const data = await universalProvidersApi.getAll();
-      setProviders(data);
-    } catch (error) {
-      console.error("Failed to load universal providers:", error);
-      toast.error(
-        t("universalProvider.loadError", {
-          defaultValue: "加载统一供应商失败",
-        }),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
   useEffect(() => {
-    loadProviders();
-  }, [loadProviders]);
+    if (!isError) return;
+    console.error("Failed to load universal providers:", error);
+    toast.error(
+      t("universalProvider.loadError", {
+        defaultValue: "加载统一供应商失败",
+      }),
+    );
+  }, [isError, error, t]);
 
-  // 添加/编辑供应商
+  const loadProviders = useCallback(
+    () =>
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.universalProviders.all,
+      }),
+    [queryClient],
+  );
+
+  // 添加/编辑供应商: new providers are synced into the apps right away.
+  // A sync failure after a successful upsert still refreshes the list
+  // (FE-PROV-47); only an upsert failure keeps the form open.
   const handleSave = useCallback(
     async (provider: UniversalProvider) => {
-      try {
-        await universalProvidersApi.upsert(provider);
-
-        // 新建模式下自动同步到各应用
-        if (!editingProvider) {
-          await universalProvidersApi.sync(provider.id);
-        }
-
-        toast.success(
-          editingProvider
-            ? t("universalProvider.updated", {
-                defaultValue: "统一供应商已更新",
-              })
-            : t("universalProvider.addedAndSynced", {
-                defaultValue: "统一供应商已添加并同步",
-              }),
-        );
-        loadProviders();
-        setEditingProvider(null);
-      } catch (error) {
-        console.error("Failed to save universal provider:", error);
-        toast.error(
-          t("universalProvider.saveError", {
-            defaultValue: "保存统一供应商失败",
-          }),
-        );
-      }
+      const result = await saveUniversalProvider(provider, {
+        sync: !editingProvider,
+        isEdit: Boolean(editingProvider),
+        t,
+      });
+      if (result === "saveFailed") return false;
+      void loadProviders();
+      setEditingProvider(null);
+      return true;
     },
     [editingProvider, loadProviders, t],
   );
@@ -88,24 +81,15 @@ export function UniversalProviderPanel() {
   // 保存并同步供应商
   const handleSaveAndSync = useCallback(
     async (provider: UniversalProvider) => {
-      try {
-        await universalProvidersApi.upsert(provider);
-        await universalProvidersApi.sync(provider.id);
-        toast.success(
-          t("universalProvider.savedAndSynced", {
-            defaultValue: "已保存并同步到所有应用",
-          }),
-        );
-        loadProviders();
-        setEditingProvider(null);
-      } catch (error) {
-        console.error("Failed to save and sync universal provider:", error);
-        toast.error(
-          t("universalProvider.saveAndSyncError", {
-            defaultValue: "保存并同步失败",
-          }),
-        );
-      }
+      const result = await saveUniversalProvider(provider, {
+        sync: true,
+        isEdit: true,
+        t,
+      });
+      if (result === "saveFailed") return false;
+      void loadProviders();
+      setEditingProvider(null);
+      return true;
     },
     [loadProviders, t],
   );
@@ -172,7 +156,11 @@ export function UniversalProviderPanel() {
       const duplicated: UniversalProvider = {
         ...deepClone(provider),
         id: crypto.randomUUID(),
-        name: `${provider.name} copy`,
+        // Localised copy suffix (FE-PROV-12).
+        name: t("provider.copyName", {
+          name: provider.name,
+          defaultValue: "{{name}} copy",
+        }),
         createdAt: Date.now(),
       };
       try {

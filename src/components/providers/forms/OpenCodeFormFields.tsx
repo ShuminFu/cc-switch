@@ -18,11 +18,9 @@ import {
 import { toast } from "sonner";
 import { Download, Plus, Trash2, ChevronRight, Loader2 } from "lucide-react";
 import { ApiKeySection, ModelDropdown } from "./shared";
-import {
-  fetchModelsForConfig,
-  showFetchModelsError,
-  type FetchedModel,
-} from "@/lib/api/model-fetch";
+import { useEndpointUrlError } from "./shared/useEndpointUrlError";
+import { fetchModelsForConfig, type FetchedModel } from "@/lib/api/model-fetch";
+import { showFetchModelsError } from "./shared/showFetchModelsError";
 import { opencodeNpmPackages } from "@/config/opencodeProviderPresets";
 import { cn } from "@/lib/utils";
 import {
@@ -30,6 +28,8 @@ import {
   isKnownModelKey,
   OPENCODE_EXTRA_OPTION_DRAFT_PREFIX,
   OPENCODE_HEADER_DRAFT_PREFIX,
+  OPENCODE_MODEL_DRAFT_PREFIX,
+  OPENCODE_MODEL_FIELD_DRAFT_PREFIX,
 } from "./helpers/opencodeFormUtils";
 import type { ProviderCategory, OpenCodeModel } from "@/types";
 
@@ -45,23 +45,28 @@ function ModelIdInput({
   placeholder,
 }: {
   modelId: string;
-  onChange: (newId: string) => void;
+  /** Return `false` to reject the new id (e.g. a duplicate). */
+  onChange: (newId: string) => boolean | void;
   placeholder?: string;
 }) {
-  const [localValue, setLocalValue] = useState(modelId);
+  const displayValue = modelId.startsWith(OPENCODE_MODEL_DRAFT_PREFIX)
+    ? ""
+    : modelId;
+  const [localValue, setLocalValue] = useState(displayValue);
 
   // Sync when external modelId changes (e.g., undo operation)
   useEffect(() => {
-    setLocalValue(modelId);
-  }, [modelId]);
+    setLocalValue(displayValue);
+  }, [displayValue]);
 
   return (
     <Input
       value={localValue}
       onChange={(e) => setLocalValue(e.target.value)}
       onBlur={() => {
-        if (localValue !== modelId && localValue.trim()) {
-          onChange(localValue);
+        const trimmed = localValue.trim();
+        if (trimmed && trimmed !== modelId) {
+          if (onChange(trimmed) === false) setLocalValue(displayValue);
         }
       }}
       placeholder={placeholder}
@@ -129,12 +134,16 @@ function ModelOptionKeyInput({
   onChange: (newKey: string) => void;
   placeholder?: string;
 }) {
-  const displayValue = optionKey.startsWith("option-") ? "" : optionKey;
+  // Only real draft rows render blank, so a key literally named `option-x`
+  // stays visible (FE-PROV-28).
+  const displayValue = optionKey.startsWith(OPENCODE_MODEL_FIELD_DRAFT_PREFIX)
+    ? ""
+    : optionKey;
   const [localValue, setLocalValue] = useState(displayValue);
 
   useEffect(() => {
-    setLocalValue(optionKey.startsWith("option-") ? "" : optionKey);
-  }, [optionKey]);
+    setLocalValue(displayValue);
+  }, [displayValue]);
 
   return (
     <Input
@@ -148,7 +157,52 @@ function ModelOptionKeyInput({
         // Reset to prop value: if parent accepted the rename, useEffect
         // will update localValue when the new optionKey prop arrives;
         // if parent rejected, this restores the correct display.
-        setLocalValue(optionKey.startsWith("option-") ? "" : optionKey);
+        setLocalValue(displayValue);
+      }}
+      placeholder={placeholder}
+      className="flex-1"
+    />
+  );
+}
+
+const formatOptionValue = (value: unknown) =>
+  typeof value === "string" ? value : JSON.stringify(value);
+
+const parseOptionValue = (raw: string): unknown => {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+};
+
+/**
+ * Option value input: edits stay text while typing and are interpreted as
+ * JSON (numbers, booleans, objects, quoted strings) only on blur, so typing
+ * `tru` or `"abc"` is not rewritten mid-keystroke (FE-PROV-28).
+ */
+function OptionValueInput({
+  value,
+  onCommit,
+  placeholder,
+}: {
+  value: unknown;
+  onCommit: (value: unknown) => void;
+  placeholder?: string;
+}) {
+  const formatted = formatOptionValue(value);
+  const [localValue, setLocalValue] = useState(formatted);
+
+  useEffect(() => {
+    setLocalValue(formatted);
+  }, [formatted]);
+
+  return (
+    <Input
+      value={localValue}
+      onChange={(e) => setLocalValue(e.target.value)}
+      onBlur={() => {
+        if (localValue !== formatted) onCommit(parseOptionValue(localValue));
       }}
       placeholder={placeholder}
       className="flex-1"
@@ -207,6 +261,7 @@ export function OpenCodeFormFields({
   onExtraOptionsChange,
 }: OpenCodeFormFieldsProps) {
   const { t } = useTranslation();
+  const baseUrlError = useEndpointUrlError(baseUrl);
 
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
@@ -262,7 +317,8 @@ export function OpenCodeFormFields({
 
   // Add a new model entry
   const handleAddModel = () => {
-    const newKey = `model-${Date.now()}`;
+    // Draft key: stripped on save until the user types a model id (FE-PROV-20).
+    const newKey = `${OPENCODE_MODEL_DRAFT_PREFIX}${Date.now()}`;
     onModelsChange({
       ...models,
       [newKey]: { name: "" },
@@ -285,6 +341,16 @@ export function OpenCodeFormFields({
   // Update model ID (key)
   const handleModelIdChange = (oldKey: string, newKey: string) => {
     if (oldKey === newKey || !newKey.trim()) return;
+    // Renaming onto an existing id would silently drop one of the models.
+    if (Object.prototype.hasOwnProperty.call(models, newKey)) {
+      toast.error(
+        t("opencode.modelIdDuplicate", {
+          defaultValue: "A model with ID {{id}} already exists",
+          id: newKey,
+        }),
+      );
+      return false;
+    }
     const newModels: Record<string, OpenCodeModel> = {};
     for (const [k, v] of Object.entries(models)) {
       if (k === oldKey) {
@@ -387,7 +453,7 @@ export function OpenCodeFormFields({
   // Model options handlers
   const handleAddModelOption = (modelKey: string) => {
     const model = models[modelKey];
-    const newOptionKey = `option-${Date.now()}`;
+    const newOptionKey = `${OPENCODE_MODEL_FIELD_DRAFT_PREFIX}${Date.now()}`;
     onModelsChange({
       ...models,
       [modelKey]: {
@@ -431,15 +497,9 @@ export function OpenCodeFormFields({
   const handleModelOptionValueChange = (
     modelKey: string,
     optionKey: string,
-    value: string,
+    parsedValue: unknown,
   ) => {
     const model = models[modelKey];
-    let parsedValue: unknown;
-    try {
-      parsedValue = JSON.parse(value);
-    } catch {
-      parsedValue = value;
-    }
     onModelsChange({
       ...models,
       [modelKey]: {
@@ -452,7 +512,7 @@ export function OpenCodeFormFields({
   // Model extra field handlers (top-level properties like variants, cost)
   const handleAddModelExtraField = (modelKey: string) => {
     const model = models[modelKey];
-    const newFieldKey = `option-${Date.now()}`;
+    const newFieldKey = `${OPENCODE_MODEL_FIELD_DRAFT_PREFIX}${Date.now()}`;
     onModelsChange({
       ...models,
       [modelKey]: { ...model, [newFieldKey]: "" },
@@ -493,15 +553,9 @@ export function OpenCodeFormFields({
   const handleModelExtraFieldValueChange = (
     modelKey: string,
     fieldKey: string,
-    value: string,
+    parsedValue: unknown,
   ) => {
     const model = models[modelKey];
-    let parsedValue: unknown;
-    try {
-      parsedValue = JSON.parse(value);
-    } catch {
-      parsedValue = value;
-    }
     onModelsChange({
       ...models,
       [modelKey]: { ...model, [fieldKey]: parsedValue },
@@ -549,7 +603,7 @@ export function OpenCodeFormFields({
       <div className="space-y-2">
         <FormLabel htmlFor="opencode-npm">
           {t("opencode.npmPackage", {
-            defaultValue: "接口格式",
+            defaultValue: "API Format",
           })}
         </FormLabel>
         <Select value={npm} onValueChange={onNpmChange}>
@@ -590,20 +644,25 @@ export function OpenCodeFormFields({
       {/* Base URL */}
       <div className="space-y-2">
         <FormLabel htmlFor="opencode-baseurl">
-          {t("opencode.baseUrl", { defaultValue: "Base URL" })}
+          {t("providerForm.apiEndpoint", { defaultValue: "API Endpoint" })}
         </FormLabel>
         <Input
           id="opencode-baseurl"
           value={baseUrl}
           onChange={(e) => onBaseUrlChange(e.target.value)}
           placeholder="https://api.example.com/v1"
+          {...baseUrlError.inputProps}
         />
-        <p className="text-xs text-muted-foreground">
-          {t("opencode.baseUrlHint", {
-            defaultValue:
-              "The base URL for the API endpoint. Leave empty to use the default endpoint for official SDKs.",
-          })}
-        </p>
+        {baseUrlError.message ? (
+          <p className="text-xs text-destructive">{baseUrlError.message}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t("opencode.baseUrlHint", {
+              defaultValue:
+                "The base URL for the API endpoint. Leave empty to use the default endpoint for official SDKs.",
+            })}
+          </p>
+        )}
       </div>
 
       {/* Headers Editor */}
@@ -781,6 +840,7 @@ export function OpenCodeFormFields({
                     type="button"
                     variant="ghost"
                     size="icon"
+                    aria-label={t("common.delete", { defaultValue: "Delete" })}
                     onClick={() => handleRemoveExtraOption(key)}
                     className="h-9 w-9 text-muted-foreground hover:text-destructive"
                   >
@@ -839,10 +899,10 @@ export function OpenCodeFormFields({
             <div className="flex items-center gap-2 text-xs text-muted-foreground px-1 mb-1">
               <span className="w-9" />
               <span className="flex-1">
-                {t("opencode.modelId", { defaultValue: "模型 ID" })}
+                {t("opencode.modelId", { defaultValue: "Model ID" })}
               </span>
               <span className="flex-1">
-                {t("opencode.modelName", { defaultValue: "显示名称" })}
+                {t("opencode.modelName", { defaultValue: "Display Name" })}
               </span>
               <span className="w-9" />
             </div>
@@ -894,6 +954,7 @@ export function OpenCodeFormFields({
                     type="button"
                     variant="ghost"
                     size="icon"
+                    aria-label={t("common.delete", { defaultValue: "Delete" })}
                     onClick={() => handleRemoveModel(key)}
                     className="h-9 w-9 text-muted-foreground hover:text-destructive"
                   >
@@ -970,7 +1031,7 @@ export function OpenCodeFormFields({
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-muted-foreground">
                           {t("opencode.modelExtraFields", {
-                            defaultValue: "模型属性",
+                            defaultValue: "Model Properties",
                           })}
                         </span>
                         <Button
@@ -987,7 +1048,7 @@ export function OpenCodeFormFields({
                         <p className="text-xs text-muted-foreground py-1">
                           {t("opencode.noModelExtraFields", {
                             defaultValue:
-                              "模型属性 (variants, cost 等)，点击 + 添加",
+                              "Model properties (variants, cost, etc.), click + to add",
                           })}
                         </p>
                       ) : (
@@ -1010,13 +1071,13 @@ export function OpenCodeFormFields({
                                   },
                                 )}
                               />
-                              <Input
+                              <OptionValueInput
                                 value={fValue}
-                                onChange={(e) =>
+                                onCommit={(value) =>
                                   handleModelExtraFieldValueChange(
                                     key,
                                     fKey,
-                                    e.target.value,
+                                    value,
                                   )
                                 }
                                 placeholder={t(
@@ -1025,12 +1086,14 @@ export function OpenCodeFormFields({
                                     defaultValue: '{"order": ["baseten"]}',
                                   },
                                 )}
-                                className="flex-1"
                               />
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="icon"
+                                aria-label={t("common.delete", {
+                                  defaultValue: "Delete",
+                                })}
                                 onClick={() =>
                                   handleRemoveModelExtraField(key, fKey)
                                 }
@@ -1049,7 +1112,7 @@ export function OpenCodeFormFields({
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-muted-foreground">
                           {t("opencode.sdkOptions", {
-                            defaultValue: "SDK 选项",
+                            defaultValue: "SDK Options",
                           })}
                         </span>
                         <Button
@@ -1065,7 +1128,7 @@ export function OpenCodeFormFields({
                       {Object.keys(model.options || {}).length === 0 ? (
                         <p className="text-xs text-muted-foreground py-1">
                           {t("opencode.noModelOptions", {
-                            defaultValue: "模型选项，点击 + 添加",
+                            defaultValue: "Model options, click + to add",
                           })}
                         </p>
                       ) : (
@@ -1091,17 +1154,13 @@ export function OpenCodeFormFields({
                                   },
                                 )}
                               />
-                              <Input
-                                value={
-                                  typeof optValue === "string"
-                                    ? optValue
-                                    : JSON.stringify(optValue)
-                                }
-                                onChange={(e) =>
+                              <OptionValueInput
+                                value={optValue}
+                                onCommit={(value) =>
                                   handleModelOptionValueChange(
                                     key,
                                     optKey,
-                                    e.target.value,
+                                    value,
                                   )
                                 }
                                 placeholder={t(
@@ -1110,12 +1169,14 @@ export function OpenCodeFormFields({
                                     defaultValue: '{"order": ["baseten"]}',
                                   },
                                 )}
-                                className="flex-1"
                               />
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="icon"
+                                aria-label={t("common.delete", {
+                                  defaultValue: "Delete",
+                                })}
                                 onClick={() =>
                                   handleRemoveModelOption(key, optKey)
                                 }

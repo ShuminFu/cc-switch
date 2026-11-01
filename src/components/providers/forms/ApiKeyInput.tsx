@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { normalizeApiKey } from "@/utils/providerInputValidation";
 
 interface ApiKeyInputProps {
   value: string;
@@ -45,9 +46,21 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
           id={id}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onPaste={(e) => {
+            // Strip quotes, a "Bearer " prefix and line breaks that often
+            // come along with a copied key (FE-PROV-36).
+            const pasted = e.clipboardData.getData("text");
+            const normalized = normalizeApiKey(pasted);
+            if (normalized === pasted) return;
+            e.preventDefault();
+            const target = e.currentTarget;
+            const start = target.selectionStart ?? value.length;
+            const end = target.selectionEnd ?? value.length;
+            onChange(value.slice(0, start) + normalized + value.slice(end));
+          }}
           placeholder={placeholder ?? t("apiKeyInput.placeholder")}
           disabled={disabled}
-          required={required}
+          aria-required={required || undefined}
           autoComplete="off"
           className={inputClass}
         />

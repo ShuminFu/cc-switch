@@ -1,15 +1,17 @@
 //! OpenAI Chat Completions SSE → OpenAI Responses SSE conversion.
 
+use super::chat_tool_call_slots::ChatToolCallSlots;
 use super::codex_responses_sse as sse;
 use super::{
     codex_chat_common::{
-        extract_reasoning_field_text, split_leading_think_block, strip_leading_think_open_tag,
+        extract_reasoning_field_text, find_think_close, leading_think_body_start,
+        partial_think_close_suffix_len, think_answer_after,
     },
     transform_codex_chat::{
         chat_usage_to_responses_usage, custom_tool_input_from_chat_arguments,
-        response_id_from_chat_id, response_status_from_finish_reason,
-        response_tool_call_item_from_chat_name, response_tool_call_item_id_from_chat_name,
-        CodexToolContext,
+        incomplete_reason_from_finish_reason, response_id_from_chat_id,
+        response_status_from_finish_reason, response_tool_call_item_from_chat_name,
+        response_tool_call_item_id_from_chat_name, CodexToolContext,
     },
 };
 use crate::proxy::json_canonical::canonicalize_tool_arguments_str;
@@ -49,6 +51,9 @@ enum InlineThinkMode {
 struct InlineThinkState {
     mode: InlineThinkMode,
     buffer: String,
+    /// Reasoning mode only: absolute byte offset in `buffer` up to which the
+    /// reasoning body has already been streamed (PROV-40).
+    emitted_end: usize,
 }
 
 #[derive(Debug, Default)]
@@ -75,6 +80,7 @@ struct ChatToResponsesState {
     reasoning: ReasoningItemState,
     inline_think: InlineThinkState,
     tools: BTreeMap<usize, ToolCallState>,
+    tool_slots: ChatToolCallSlots,
     next_tool_index_to_add: usize,
     output_items: Vec<(u32, Value)>,
     latest_usage: Option<Value>,
@@ -95,6 +101,7 @@ impl Default for ChatToResponsesState {
             reasoning: ReasoningItemState::default(),
             inline_think: InlineThinkState::default(),
             tools: BTreeMap::new(),
+            tool_slots: ChatToolCallSlots::default(),
             next_tool_index_to_add: 0,
             output_items: Vec::new(),
             latest_usage: None,
@@ -203,19 +210,53 @@ impl ChatToResponsesState {
         }
     }
 
+    /// Reasoning-body text in `buffer[from..to]` that has not been streamed
+    /// yet, with the leading whitespace of the body skipped and trailing
+    /// whitespace held back, so the streamed concatenation equals the trimmed
+    /// body that the buffered implementation used to emit.
+    fn unemitted_reasoning_range(&self, body_start: usize, to: usize) -> (usize, usize) {
+        let buffer = &self.inline_think.buffer;
+        let segment = &buffer[body_start..to];
+        let first_non_ws = body_start + (segment.len() - segment.trim_start().len());
+        let start = self.inline_think.emitted_end.max(first_non_ws);
+        let end = body_start + segment.trim_end().len();
+        (start, end.max(start))
+    }
+
     fn drain_complete_inline_think(&mut self) -> Vec<Bytes> {
-        let Some((reasoning, answer)) = split_leading_think_block(&self.inline_think.buffer) else {
+        let Some(body_start) = leading_think_body_start(&self.inline_think.buffer) else {
             return Vec::new();
         };
 
+        let Some(close_rel) = find_think_close(&self.inline_think.buffer, body_start) else {
+            // PROV-40: stream the reasoning seen so far instead of withholding it
+            // until `</think>`; keep back a possibly split closing tag.
+            let limit = self.inline_think.buffer.len()
+                - partial_think_close_suffix_len(&self.inline_think.buffer);
+            let limit = limit.max(body_start);
+            let (start, end) = self.unemitted_reasoning_range(body_start, limit);
+            if end <= start {
+                return Vec::new();
+            }
+            let chunk = self.inline_think.buffer[start..end].to_string();
+            self.inline_think.emitted_end = end;
+            return self.push_reasoning_delta(&chunk);
+        };
+
+        let close_start = body_start + close_rel;
+        let (start, end) = self.unemitted_reasoning_range(body_start, close_start);
+        let reasoning = self.inline_think.buffer[start..end].to_string();
+        let answer = think_answer_after(&self.inline_think.buffer, close_start).to_string();
+
         self.inline_think.mode = InlineThinkMode::Text;
         self.inline_think.buffer.clear();
+        self.inline_think.emitted_end = 0;
 
         let mut events = Vec::new();
         if !reasoning.is_empty() {
             events.extend(self.push_reasoning_delta(&reasoning));
-            events.extend(self.finalize_reasoning());
         }
+        events.extend(self.finalize_reasoning());
         if !answer.is_empty() {
             events.extend(self.push_text_delta(&answer));
         }
@@ -238,28 +279,36 @@ impl ChatToResponsesState {
                 }
             }
             InlineThinkMode::Reasoning => {
-                let buffered = std::mem::take(&mut self.inline_think.buffer);
-                self.inline_think.mode = InlineThinkMode::Text;
-                if let Some((reasoning, answer)) = split_leading_think_block(&buffered) {
-                    let mut events = Vec::new();
-                    if !reasoning.is_empty() {
-                        events.extend(self.push_reasoning_delta(&reasoning));
-                        events.extend(self.finalize_reasoning());
+                let Some(body_start) = leading_think_body_start(&self.inline_think.buffer) else {
+                    let buffered = std::mem::take(&mut self.inline_think.buffer);
+                    self.inline_think.mode = InlineThinkMode::Text;
+                    self.inline_think.emitted_end = 0;
+                    let reasoning = buffered.trim().to_string();
+                    if reasoning.is_empty() {
+                        return Vec::new();
                     }
-                    if !answer.is_empty() {
-                        events.extend(self.push_text_delta(&answer));
-                    }
-                    return events;
-                }
-
-                let reasoning = strip_leading_think_open_tag(&buffered).unwrap_or(buffered);
-                if reasoning.is_empty() {
-                    Vec::new()
-                } else {
                     let mut events = self.push_reasoning_delta(&reasoning);
                     events.extend(self.finalize_reasoning());
-                    events
+                    return events;
+                };
+                if find_think_close(&self.inline_think.buffer, body_start).is_some() {
+                    return self.drain_complete_inline_think();
                 }
+
+                // Unterminated reasoning at a boundary: release everything not
+                // streamed yet (including a held-back partial `</think>`).
+                let len = self.inline_think.buffer.len();
+                let (start, end) = self.unemitted_reasoning_range(body_start, len);
+                let reasoning = self.inline_think.buffer[start..end].to_string();
+                self.inline_think.buffer.clear();
+                self.inline_think.mode = InlineThinkMode::Text;
+                self.inline_think.emitted_end = 0;
+                let mut events = Vec::new();
+                if !reasoning.is_empty() {
+                    events.extend(self.push_reasoning_delta(&reasoning));
+                }
+                events.extend(self.finalize_reasoning());
+                events
             }
         }
     }
@@ -333,7 +382,6 @@ impl ChatToResponsesState {
     }
 
     fn push_tool_call_delta(&mut self, tool_call: &Value, reasoning: Option<&str>) -> Vec<Bytes> {
-        let chat_index = tool_call.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let id_delta = tool_call
             .get("id")
             .and_then(|v| v.as_str())
@@ -343,6 +391,16 @@ impl ChatToResponsesState {
             .get("name")
             .and_then(|v| v.as_str())
             .map(str::to_string);
+        // Index-less fragments are routed by id / position instead of all
+        // collapsing into slot 0 (PROV-02).
+        let chat_index = self.tool_slots.resolve(
+            tool_call
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize),
+            id_delta.as_deref(),
+            name_delta.as_deref(),
+        );
         let args_delta = function
             .get("arguments")
             .and_then(|v| v.as_str())
@@ -497,7 +555,9 @@ impl ChatToResponsesState {
         let status = response_status_from_finish_reason(self.finish_reason.as_deref());
         let mut response = self.base_response(status, self.completed_output_items());
         if status == "incomplete" {
-            response["incomplete_details"] = json!({ "reason": "max_output_tokens" });
+            let reason = incomplete_reason_from_finish_reason(self.finish_reason.as_deref())
+                .unwrap_or("max_output_tokens");
+            response["incomplete_details"] = json!({ "reason": reason });
         }
 
         events.push(sse::response_completed(&response));
@@ -931,6 +991,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inline_think_reasoning_streams_incrementally_before_close_tag() {
+        let output = collect(vec![
+            "data: {\"id\":\"c\",\"model\":\"qwen3\",\"choices\":[{\"delta\":{\"content\":\"<think>\\n\"}}]}\n\n",
+            "data: {\"id\":\"c\",\"model\":\"qwen3\",\"choices\":[{\"delta\":{\"content\":\"alpha \"}}]}\n\n",
+            "data: {\"id\":\"c\",\"model\":\"qwen3\",\"choices\":[{\"delta\":{\"content\":\"beta \"}}]}\n\n",
+            "data: {\"id\":\"c\",\"model\":\"qwen3\",\"choices\":[{\"delta\":{\"content\":\"gamma</thi\"}}]}\n\n",
+            "data: {\"id\":\"c\",\"model\":\"qwen3\",\"choices\":[{\"delta\":{\"content\":\"nk>\\n\\nanswer\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        ])
+        .await;
+        let events = parse_sse_events(&output);
+        let deltas: Vec<String> = events
+            .iter()
+            .filter(|e| e["type"] == "response.reasoning_summary_text.delta")
+            .map(|e| e["delta"].as_str().unwrap_or_default().to_string())
+            .collect();
+        assert!(deltas.len() >= 3, "expected incremental deltas: {deltas:?}");
+        assert_eq!(deltas[0], "alpha");
+        assert_eq!(deltas.concat(), "alpha beta gamma");
+        let done = events
+            .iter()
+            .find(|e| e["type"] == "response.reasoning_summary_text.done")
+            .expect("reasoning done");
+        assert_eq!(done["text"], "alpha beta gamma");
+        assert!(!output.contains("<think>"));
+        assert!(!output.contains("</thi"));
+        assert!(!output.contains("nk>"));
+        assert!(output.contains("\"text\":\"answer\""));
+        let first_reasoning = output.find("reasoning_summary_text.delta").unwrap();
+        let first_text = output.find("response.output_text.delta").unwrap();
+        assert!(first_reasoning < first_text);
+    }
+
+    #[tokio::test]
     async fn converts_tool_call_chat_sse_to_responses_sse() {
         let output = collect(vec![
             "data: {\"id\":\"chatcmpl_2\",\"model\":\"gpt-5.4\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\"}}]}}]}\n\n",
@@ -1009,6 +1103,36 @@ mod tests {
         assert_eq!(items[1]["name"], "second_tool");
         assert_eq!(items[1]["call_id"], "call_second");
         assert_eq!(items[1]["arguments"], r#"{"value":2}"#);
+    }
+
+    #[tokio::test]
+    async fn keeps_parallel_tool_calls_without_index_distinct() {
+        let output = collect(vec![
+            "data: {\"id\":\"chatcmpl_noidx\",\"model\":\"local\",\"choices\":[{\"delta\":{\"content\":\"Working\",\"tool_calls\":[{\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\"}}]}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_noidx\",\"model\":\"local\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"function\":{\"arguments\":\"\\\"a.md\\\"}\"}}]}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_noidx\",\"model\":\"local\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_b\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"date\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        ])
+        .await;
+        let events = parse_sse_events(&output);
+        let completed = events
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .unwrap();
+        let items = completed["response"]["output"].as_array().unwrap();
+        let calls = items
+            .iter()
+            .filter(|item| item["type"] == "function_call")
+            .collect::<Vec<_>>();
+
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["call_id"], "call_a");
+        assert_eq!(calls[0]["name"], "read_file");
+        assert_eq!(calls[0]["arguments"], r#"{"path":"a.md"}"#);
+        assert_eq!(calls[1]["call_id"], "call_b");
+        assert_eq!(calls[1]["name"], "exec_command");
+        assert_eq!(calls[1]["arguments"], r#"{"cmd":"date"}"#);
+        assert!(output.contains("Working"));
     }
 
     #[tokio::test]

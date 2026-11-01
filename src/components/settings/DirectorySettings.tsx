@@ -1,12 +1,62 @@
-import { useMemo } from "react";
 import { FolderSearch, Undo2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
-import type { AppId } from "@/lib/api";
+import type { TFunction } from "i18next";
 import type { ResolvedDirectories } from "@/hooks/useSettings";
+import type { AppConfigDirInfo } from "@/lib/bindings";
+import {
+  DIRECTORY_APP_IDS,
+  type DirectoryAppId,
+} from "@/hooks/settingsDirectoryFields";
 
-type DirectoryAppId = Exclude<AppId, "claude-desktop">;
+// i18n keys per app (kept literal so the key-usage check can see them).
+const DIRECTORY_LABELS: Record<
+  DirectoryAppId,
+  { label: string; placeholder: string }
+> = {
+  claude: {
+    label: "settings.claudeConfigDir",
+    placeholder: "settings.browsePlaceholderClaude",
+  },
+  codex: {
+    label: "settings.codexConfigDir",
+    placeholder: "settings.browsePlaceholderCodex",
+  },
+  gemini: {
+    label: "settings.geminiConfigDir",
+    placeholder: "settings.browsePlaceholderGemini",
+  },
+  grokbuild: {
+    label: "settings.grokConfigDir",
+    placeholder: "settings.browsePlaceholderGrok",
+  },
+  opencode: {
+    label: "settings.opencodeConfigDir",
+    placeholder: "settings.browsePlaceholderOpencode",
+  },
+  openclaw: {
+    label: "settings.openclawConfigDir",
+    placeholder: "settings.browsePlaceholderOpenclaw",
+  },
+  hermes: {
+    label: "settings.hermesConfigDir",
+    placeholder: "settings.browsePlaceholderHermes",
+  },
+};
+
+// Directory inputs keep the raw text while typing (so paths containing spaces
+// can be typed) and are only trimmed when the field loses focus. An empty
+// field means "no override": the resolved default is shown as placeholder.
+function commitTrimmed(
+  raw: string,
+  current: string | undefined,
+  onChange: (value?: string) => void,
+) {
+  const trimmed = raw.trim();
+  const next = trimmed.length > 0 ? trimmed : undefined;
+  if (next !== current) onChange(next);
+}
 
 interface DirectorySettingsProps {
   appConfigDir?: string;
@@ -14,16 +64,38 @@ interface DirectorySettingsProps {
   onAppConfigChange: (value?: string) => void;
   onBrowseAppConfig: () => Promise<void>;
   onResetAppConfig: () => Promise<void>;
-  claudeDir?: string;
-  codexDir?: string;
-  geminiDir?: string;
-  grokDir?: string;
-  opencodeDir?: string;
-  openclawDir?: string;
-  hermesDir?: string;
+  /** Per-app override drafts (raw text), e.g. from `directoryValuesByApp`. */
+  directories: Partial<Record<DirectoryAppId, string | undefined>>;
   onDirectoryChange: (app: DirectoryAppId, value?: string) => void;
   onBrowseDirectory: (app: DirectoryAppId) => Promise<void>;
   onResetDirectory: (app: DirectoryAppId) => Promise<void>;
+  /**
+   * The directory each tool actually uses and where it came from
+   * (`get_app_config_dirs`); shown under each input when given.
+   */
+  configDirInfo?: AppConfigDirInfo[];
+}
+
+/** "cc-switch setting" / "CODEX_HOME environment variable" / "Default". */
+export function configDirSourceLabel(
+  t: TFunction,
+  info: AppConfigDirInfo,
+): string {
+  switch (info.source.kind) {
+    case "override":
+      return t("settings.configDirSource.override", {
+        defaultValue: "cc-switch setting",
+      });
+    case "env":
+      return t("settings.configDirSource.env", {
+        defaultValue: "{{var}} environment variable",
+        var: info.source.var,
+      });
+    default:
+      return t("settings.configDirSource.default", {
+        defaultValue: "Default",
+      });
+  }
 }
 
 export function DirectorySettings({
@@ -32,16 +104,11 @@ export function DirectorySettings({
   onAppConfigChange,
   onBrowseAppConfig,
   onResetAppConfig,
-  claudeDir,
-  codexDir,
-  geminiDir,
-  grokDir,
-  opencodeDir,
-  openclawDir,
-  hermesDir,
+  directories,
   onDirectoryChange,
   onBrowseDirectory,
   onResetDirectory,
+  configDirInfo,
 }: DirectorySettingsProps) {
   const { t } = useTranslation();
 
@@ -58,10 +125,16 @@ export function DirectorySettings({
 
         <div className="flex items-center gap-2">
           <Input
-            value={appConfigDir ?? resolvedDirs.appConfig ?? ""}
-            placeholder={t("settings.browsePlaceholderApp")}
+            aria-label={t("settings.appConfigDir")}
+            value={appConfigDir ?? ""}
+            placeholder={
+              resolvedDirs.appConfig || t("settings.browsePlaceholderApp")
+            }
             className="text-xs"
             onChange={(event) => onAppConfigChange(event.target.value)}
+            onBlur={(event) =>
+              commitTrimmed(event.target.value, appConfigDir, onAppConfigChange)
+            }
           />
           <Button
             type="button"
@@ -95,82 +168,19 @@ export function DirectorySettings({
           </p>
         </header>
 
-        <DirectoryInput
-          label={t("settings.claudeConfigDir")}
-          description={undefined}
-          value={claudeDir}
-          resolvedValue={resolvedDirs.claude}
-          placeholder={t("settings.browsePlaceholderClaude")}
-          onChange={(val) => onDirectoryChange("claude", val)}
-          onBrowse={() => onBrowseDirectory("claude")}
-          onReset={() => onResetDirectory("claude")}
-        />
-
-        <DirectoryInput
-          label={t("settings.codexConfigDir")}
-          description={undefined}
-          value={codexDir}
-          resolvedValue={resolvedDirs.codex}
-          placeholder={t("settings.browsePlaceholderCodex")}
-          onChange={(val) => onDirectoryChange("codex", val)}
-          onBrowse={() => onBrowseDirectory("codex")}
-          onReset={() => onResetDirectory("codex")}
-        />
-
-        <DirectoryInput
-          label={t("settings.geminiConfigDir")}
-          description={undefined}
-          value={geminiDir}
-          resolvedValue={resolvedDirs.gemini}
-          placeholder={t("settings.browsePlaceholderGemini")}
-          onChange={(val) => onDirectoryChange("gemini", val)}
-          onBrowse={() => onBrowseDirectory("gemini")}
-          onReset={() => onResetDirectory("gemini")}
-        />
-
-        <DirectoryInput
-          label={t("settings.grokConfigDir")}
-          description={undefined}
-          value={grokDir}
-          resolvedValue={resolvedDirs.grokbuild}
-          placeholder={t("settings.browsePlaceholderGrok")}
-          onChange={(val) => onDirectoryChange("grokbuild", val)}
-          onBrowse={() => onBrowseDirectory("grokbuild")}
-          onReset={() => onResetDirectory("grokbuild")}
-        />
-
-        <DirectoryInput
-          label={t("settings.opencodeConfigDir")}
-          description={undefined}
-          value={opencodeDir}
-          resolvedValue={resolvedDirs.opencode}
-          placeholder={t("settings.browsePlaceholderOpencode")}
-          onChange={(val) => onDirectoryChange("opencode", val)}
-          onBrowse={() => onBrowseDirectory("opencode")}
-          onReset={() => onResetDirectory("opencode")}
-        />
-
-        <DirectoryInput
-          label={t("settings.openclawConfigDir")}
-          description={undefined}
-          value={openclawDir}
-          resolvedValue={resolvedDirs.openclaw}
-          placeholder={t("settings.browsePlaceholderOpenclaw")}
-          onChange={(val) => onDirectoryChange("openclaw", val)}
-          onBrowse={() => onBrowseDirectory("openclaw")}
-          onReset={() => onResetDirectory("openclaw")}
-        />
-
-        <DirectoryInput
-          label={t("settings.hermesConfigDir")}
-          description={undefined}
-          value={hermesDir}
-          resolvedValue={resolvedDirs.hermes}
-          placeholder={t("settings.browsePlaceholderHermes")}
-          onChange={(val) => onDirectoryChange("hermes", val)}
-          onBrowse={() => onBrowseDirectory("hermes")}
-          onReset={() => onResetDirectory("hermes")}
-        />
+        {DIRECTORY_APP_IDS.map((app) => (
+          <DirectoryInput
+            key={app}
+            label={t(DIRECTORY_LABELS[app].label)}
+            value={directories[app]}
+            resolvedValue={resolvedDirs[app]}
+            placeholder={t(DIRECTORY_LABELS[app].placeholder)}
+            onChange={(val) => onDirectoryChange(app, val)}
+            onBrowse={() => onBrowseDirectory(app)}
+            onReset={() => onResetDirectory(app)}
+            info={configDirInfo?.find((entry) => entry.app === app)}
+          />
+        ))}
       </section>
     </div>
   );
@@ -185,6 +195,7 @@ interface DirectoryInputProps {
   onChange: (value?: string) => void;
   onBrowse: () => Promise<void>;
   onReset: () => Promise<void>;
+  info?: AppConfigDirInfo;
 }
 
 function DirectoryInput({
@@ -196,12 +207,9 @@ function DirectoryInput({
   onChange,
   onBrowse,
   onReset,
+  info,
 }: DirectoryInputProps) {
   const { t } = useTranslation();
-  const displayValue = useMemo(
-    () => value ?? resolvedValue ?? "",
-    [value, resolvedValue],
-  );
 
   return (
     <div className="space-y-1.5">
@@ -213,10 +221,12 @@ function DirectoryInput({
       </div>
       <div className="flex items-center gap-2">
         <Input
-          value={displayValue}
-          placeholder={placeholder}
+          aria-label={label}
+          value={value ?? ""}
+          placeholder={resolvedValue || placeholder}
           className="text-xs"
           onChange={(event) => onChange(event.target.value)}
+          onBlur={(event) => commitTrimmed(event.target.value, value, onChange)}
         />
         <Button
           type="button"
@@ -237,6 +247,26 @@ function DirectoryInput({
           <Undo2 className="h-4 w-4" />
         </Button>
       </div>
+      {info ? (
+        <p
+          className="break-all text-[11px] text-muted-foreground"
+          data-testid={`config-dir-source-${info.app}`}
+        >
+          {t("settings.configDirSource.inUse", {
+            defaultValue: "In use: {{path}} ({{source}})",
+            path: info.path,
+            source: configDirSourceLabel(t, info),
+            interpolation: { escapeValue: false },
+          })}
+          {!info.exists ? (
+            <span className="ml-1 text-amber-600 dark:text-amber-400">
+              {t("settings.configDirSource.missing", {
+                defaultValue: "Directory does not exist yet",
+              })}
+            </span>
+          ) : null}
+        </p>
+      ) : null}
     </div>
   );
 }

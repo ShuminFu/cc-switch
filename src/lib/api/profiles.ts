@@ -1,4 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "./invoke";
+import { commands } from "@/lib/bindings";
+import type * as Bindings from "@/lib/bindings";
 
 /**
  * Profile 操作的应用分组（与后端 services/profile.rs 的 ProfileScope 严格对应）
@@ -6,7 +8,15 @@ import { invoke } from "@tauri-apps/api/core";
  * 项目实体全应用共享，但快照/应用/当前指针按组进行；Claude Code 与
  * Claude Desktop 的供应商独立切换，因此各自有独立分组。
  */
-export type ProfileScope = "claude" | "claude-desktop" | "codex";
+export type ProfileScope =
+  | "claude"
+  | "claude-desktop"
+  | "codex"
+  | "gemini"
+  | "grokbuild"
+  | "opencode"
+  | "openclaw"
+  | "hermes";
 
 /**
  * 按 app 分槽的载荷容器（与后端 services/profile.rs 的 PerApp<T> 严格对应）
@@ -15,6 +25,11 @@ export interface PerApp<T> {
   claude: T;
   "claude-desktop": T;
   codex: T;
+  gemini: T;
+  grokbuild: T;
+  opencode: T;
+  openclaw: T;
+  hermes: T;
 }
 
 /**
@@ -30,28 +45,24 @@ export interface ProfilePayload {
   prompts: PerApp<string | null>;
 }
 
-export interface Profile {
-  id: string;
-  name: string;
-  payload: ProfilePayload;
-  createdAt?: number;
-  updatedAt?: number;
-}
-
-/** 每个分组当前激活的项目 id（未使用项目时为 null）
- *
- * 注意：JSON key 是 camelCase（claudeDesktop），与 ProfileScope 的 kebab-case
- * 字符串不同——后者用于命令参数，前者用于响应字段。
+/**
+ * A profile as returned by the backend (`ProfileDto` in the bindings). The DTO
+ * types `payload` as JSON because `ProfilePayload` lives in services/profile.rs;
+ * its shape is the interface above.
  */
-export interface CurrentProfileIds {
-  claude: string | null;
-  claudeDesktop: string | null;
-  codex: string | null;
-}
+export type Profile = Omit<Bindings.ProfileDto, "payload"> & {
+  payload: ProfilePayload;
+};
 
-export interface ProfilesResponse {
+/** 每个分组当前激活的项目 id（未使用项目时为 null） */
+export type { CurrentProfileIds } from "@/lib/bindings";
+
+export type ProfilesResponse = Omit<Bindings.ProfilesResponse, "profiles"> & {
   profiles: Profile[];
-  currentIds: CurrentProfileIds;
+};
+
+function toProfile(dto: Bindings.ProfileDto): Profile {
+  return { ...dto, payload: dto.payload as unknown as ProfilePayload };
 }
 
 export const profilesApi = {
@@ -59,14 +70,15 @@ export const profilesApi = {
    * 获取所有项目及各分组当前激活项目 id
    */
   async list(): Promise<ProfilesResponse> {
-    return await invoke("list_profiles");
+    const response = await call(commands.listProfiles());
+    return { ...response, profiles: response.profiles.map(toProfile) };
   },
 
   /**
    * 创建新项目（只拍发起页所属分组的当前状态，其余分组槽位留空）
    */
   async create(name: string, scope: ProfileScope): Promise<Profile> {
-    return await invoke("create_profile", { name, scope });
+    return toProfile(await call(commands.createProfile(name, scope)));
   },
 
   /**
@@ -77,19 +89,23 @@ export const profilesApi = {
     id: string,
     options: { name?: string; resnapshot?: boolean; scope?: ProfileScope },
   ): Promise<Profile> {
-    return await invoke("update_profile", {
-      id,
-      name: options.name,
-      resnapshot: options.resnapshot,
-      scope: options.scope,
-    });
+    return toProfile(
+      await call(
+        commands.updateProfile(
+          id,
+          options.name ?? null,
+          options.resnapshot ?? null,
+          options.scope ?? null,
+        ),
+      ),
+    );
   },
 
   /**
    * 删除项目
    */
   async delete(id: string): Promise<void> {
-    return await invoke("delete_profile", { id });
+    return await call(commands.deleteProfile(id));
   },
 
   /**
@@ -97,13 +113,14 @@ export const profilesApi = {
    * （best-effort，部分失败不中断）
    */
   async apply(id: string, scope: ProfileScope): Promise<string[]> {
-    return await invoke("apply_profile", { id, scope });
+    return await call(commands.applyProfile(id, scope));
   },
 
   /**
-   * 不使用项目：仅清除某分组的激活标记，不改动任何配置
+   * 不使用项目：清除某分组的激活标记；若首次应用项目前保存过基线配置，
+   * 则恢复该基线。返回 warnings（best-effort）
    */
-  async clearCurrent(scope: ProfileScope): Promise<void> {
-    return await invoke("clear_current_profile", { scope });
+  async clearCurrent(scope: ProfileScope): Promise<string[]> {
+    return await call(commands.clearCurrentProfile(scope));
   },
 };

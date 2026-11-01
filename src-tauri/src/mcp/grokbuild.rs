@@ -151,8 +151,13 @@ pub fn sync_single_server_to_grokbuild(
     if !doc.contains_key("mcp_servers") {
         doc["mcp_servers"] = toml_edit::table();
     }
-    doc["mcp_servers"][id] = Item::Table(json_server_to_grokbuild_toml_table(server_spec)?);
-    crate::config::write_text_file(&path, &doc.to_string())
+    // keep Grok-native keys of an existing entry (CFG-42)
+    let merged = super::merge::merge_live_toml_table(
+        doc["mcp_servers"].get(id).and_then(Item::as_table),
+        json_server_to_grokbuild_toml_table(server_spec)?,
+    );
+    doc["mcp_servers"][id] = Item::Table(merged);
+    crate::config::write_text_file_secret(&path, &doc.to_string())
 }
 
 pub fn remove_server_from_grokbuild(id: &str) -> Result<(), AppError> {
@@ -164,20 +169,17 @@ pub fn remove_server_from_grokbuild(id: &str) -> Result<(), AppError> {
         return Ok(());
     }
     let text = read_config_text()?;
-    let mut doc = match text.parse::<toml_edit::DocumentMut>() {
-        Ok(doc) => doc,
-        Err(error) => {
-            log::warn!("解析 Grok Build config.toml 失败: {error}，跳过删除操作");
-            return Ok(());
-        }
-    };
+    // 解析失败必须报错而不是静默成功（CFG-45）
+    let mut doc = text.parse::<toml_edit::DocumentMut>().map_err(|error| {
+        AppError::McpValidation(format!("解析 Grok Build config.toml 失败: {error}"))
+    })?;
     if let Some(servers) = doc
         .get_mut("mcp_servers")
         .and_then(toml_edit::Item::as_table_mut)
     {
         servers.remove(id);
     }
-    crate::config::write_text_file(&path, &doc.to_string())
+    crate::config::write_text_file_secret(&path, &doc.to_string())
 }
 
 #[cfg(test)]

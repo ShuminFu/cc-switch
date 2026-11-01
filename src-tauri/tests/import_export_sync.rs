@@ -1,23 +1,42 @@
 use serde_json::json;
 use std::fs;
-use std::path::PathBuf;
 
 use cc_switch_lib::{
-    get_claude_settings_path, read_json_file, AppError, AppType, ConfigService, MultiAppConfig,
-    Provider, ProviderMeta,
+    get_claude_settings_path, read_json_file, AppError, AppState, AppType, ConfigService,
+    MultiAppConfig, Provider, ProviderMeta, ProviderService,
 };
 
 #[path = "support.rs"]
 mod support;
 use support::{
-    create_test_state, create_test_state_with_config, enable_codex_official_auth_preservation,
-    ensure_test_home, reset_test_fs, test_mutex,
+    create_disk_test_state, create_test_state, create_test_state_with_config,
+    enable_codex_official_auth_preservation, ensure_test_home, reset_test_fs, unwritable_path,
+    TestEnv,
 };
+
+/// Seed an in-memory state from `config` and project `app`'s current provider
+/// to its live file through the production path (SVC-31: these tests used to
+/// exercise the deleted legacy `ConfigService::sync_current_providers_to_live`).
+fn sync_via_provider_service(
+    config: &MultiAppConfig,
+    app: AppType,
+) -> (AppState, Result<(), AppError>) {
+    let state = create_test_state_with_config(config).expect("create test state");
+    let result = ProviderService::sync_current_provider_for_app(&state, app);
+    (state, result)
+}
+
+fn stored_provider(state: &AppState, app: AppType, id: &str) -> Provider {
+    state
+        .db
+        .get_provider_by_id(id, app.as_str())
+        .expect("read provider")
+        .expect("provider exists")
+}
 
 #[test]
 fn sync_claude_provider_writes_live_settings() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -44,7 +63,8 @@ fn sync_claude_provider_writes_live_settings() {
     manager.providers.insert("prov-1".to_string(), provider);
     manager.current = "prov-1".to_string();
 
-    ConfigService::sync_current_providers_to_live(&mut config).expect("sync live settings");
+    let (state, result) = sync_via_provider_service(&config, AppType::Claude);
+    result.expect("sync live settings");
 
     let settings_path = get_claude_settings_path();
     assert!(
@@ -57,10 +77,7 @@ fn sync_claude_provider_writes_live_settings() {
     assert_eq!(live_value, provider_config);
 
     // 确认 SSOT 中的供应商也同步了最新内容
-    let updated = config
-        .get_manager(&AppType::Claude)
-        .and_then(|m| m.providers.get("prov-1"))
-        .expect("provider in config");
+    let updated = stored_provider(&state, AppType::Claude, "prov-1");
     assert_eq!(updated.settings_config, provider_config);
 
     // 额外确认写入位置位于测试 HOME 下
@@ -72,8 +89,7 @@ fn sync_claude_provider_writes_live_settings() {
 
 #[test]
 fn sync_codex_provider_writes_config_without_touching_auth() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     enable_codex_official_auth_preservation();
 
     let mut config = MultiAppConfig::default();
@@ -101,7 +117,8 @@ fn sync_codex_provider_writes_config_without_touching_auth() {
     manager.providers.insert("codex-1".to_string(), provider);
     manager.current = "codex-1".to_string();
 
-    ConfigService::sync_current_providers_to_live(&mut config).expect("sync codex live");
+    let (state, result) = sync_via_provider_service(&config, AppType::Codex);
+    result.expect("sync codex live");
 
     let auth_path = cc_switch_lib::get_codex_auth_path();
     let config_path = cc_switch_lib::get_codex_config_path();
@@ -127,8 +144,7 @@ fn sync_codex_provider_writes_config_without_touching_auth() {
         "config.toml should contain provider-scoped bearer token"
     );
 
-    let manager = config.get_manager(&AppType::Codex).expect("codex manager");
-    let synced = manager.providers.get("codex-1").expect("codex provider");
+    let synced = stored_provider(&state, AppType::Codex, "codex-1");
     let synced_cfg = synced
         .settings_config
         .get("config")
@@ -149,8 +165,7 @@ fn sync_codex_provider_with_config_only_token_backfills_auth() {
     // P2-2 回归: stored provider 的 token 只藏在 config.toml 的 experimental_bearer_token 时,
     // sync 路径必须把 token 从 live config 提取并写回 stored auth.OPENAI_API_KEY,
     // 否则下一轮 sync 会在 cleaned config + 空 auth 之间丢失 token。
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
 
     let mut config = MultiAppConfig::default();
 
@@ -183,38 +198,39 @@ experimental_bearer_token = "stored-bearer-key"
         .insert("thirdparty-1".to_string(), provider);
     manager.current = "thirdparty-1".to_string();
 
-    ConfigService::sync_current_providers_to_live(&mut config).expect("sync codex live");
+    let (state, result) = sync_via_provider_service(&config, AppType::Codex);
+    result.expect("sync codex live");
 
-    let manager = config.get_manager(&AppType::Codex).expect("codex manager");
-    let synced = manager
-        .providers
-        .get("thirdparty-1")
-        .expect("provider survives sync");
-
-    assert_eq!(
-        synced
+    // SVC-31: the production sync path (ProviderService) projects the stored
+    // provider to live without rewriting the stored row; what matters is that
+    // the config-only token is neither lost from the SSOT nor from live.
+    let synced = stored_provider(&state, AppType::Codex, "thirdparty-1");
+    let stored_has_token = synced
+        .settings_config
+        .pointer("/auth/OPENAI_API_KEY")
+        .and_then(|v| v.as_str())
+        == Some("stored-bearer-key")
+        || synced
             .settings_config
-            .pointer("/auth/OPENAI_API_KEY")
-            .and_then(|v| v.as_str()),
-        Some("stored-bearer-key"),
-        "config-only bearer token must be backfilled into stored auth.OPENAI_API_KEY"
+            .get("config")
+            .and_then(|v| v.as_str())
+            .is_some_and(|c| c.contains("stored-bearer-key"));
+    assert!(
+        stored_has_token,
+        "the token must survive in the stored provider"
     );
 
-    let synced_cfg = synced
-        .settings_config
-        .get("config")
-        .and_then(|v| v.as_str())
-        .expect("config string");
+    let live_toml =
+        fs::read_to_string(cc_switch_lib::get_codex_config_path()).expect("read config.toml");
     assert!(
-        !synced_cfg.contains("experimental_bearer_token"),
-        "live-only bearer token should not be persisted in stored provider config"
+        live_toml.contains("stored-bearer-key"),
+        "the live config must carry the provider token: {live_toml}"
     );
 }
 
 #[test]
 fn sync_codex_provider_preserves_user_model_provider_id_after_migration() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
 
     let legacy_auth = json!({ "OPENAI_API_KEY": "rightcode-key" });
     let legacy_config = r#"model_provider = "rightcode"
@@ -258,7 +274,8 @@ requires_openai_auth = true
     manager.providers.insert("codex-1".to_string(), provider);
     manager.current = "codex-1".to_string();
 
-    ConfigService::sync_current_providers_to_live(&mut config).expect("sync codex live");
+    let (state, result) = sync_via_provider_service(&config, AppType::Codex);
+    result.expect("sync codex live");
 
     let toml_text =
         fs::read_to_string(cc_switch_lib::get_codex_config_path()).expect("read config.toml");
@@ -286,10 +303,10 @@ requires_openai_auth = true
         Some("https://aihubmix.example/v1")
     );
 
-    let synced_cfg = config
-        .get_manager(&AppType::Codex)
-        .and_then(|manager| manager.providers.get("codex-1"))
-        .and_then(|provider| provider.settings_config.get("config"))
+    let synced = stored_provider(&state, AppType::Codex, "codex-1");
+    let synced_cfg = synced
+        .settings_config
+        .get("config")
         .and_then(|v| v.as_str())
         .expect("synced config string");
     assert!(
@@ -300,8 +317,7 @@ requires_openai_auth = true
 
 #[test]
 fn sync_enabled_to_codex_writes_enabled_servers() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
 
     // 模拟 Codex 已安装/已初始化：存在 ~/.codex 目录
     let path = cc_switch_lib::get_codex_config_path();
@@ -335,8 +351,7 @@ fn sync_enabled_to_codex_writes_enabled_servers() {
 
 #[test]
 fn sync_enabled_to_codex_preserves_non_mcp_content_and_style() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
 
     // 预置含有顶层注释与非 MCP 键的 config.toml
     let path = cc_switch_lib::get_codex_config_path();
@@ -394,8 +409,7 @@ mode = "dev"
 
 #[test]
 fn sync_enabled_to_codex_migrates_erroneous_mcp_dot_servers_to_mcp_servers() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let path = cc_switch_lib::get_codex_config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create codex dir");
@@ -432,8 +446,7 @@ fn sync_enabled_to_codex_migrates_erroneous_mcp_dot_servers_to_mcp_servers() {
 
 #[test]
 fn sync_enabled_to_codex_removes_servers_when_none_enabled() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let path = cc_switch_lib::get_codex_config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create codex dir");
@@ -458,8 +471,7 @@ disabled = { type = "stdio", command = "noop" }
 
 #[test]
 fn sync_enabled_to_codex_returns_error_on_invalid_toml() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let path = cc_switch_lib::get_codex_config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create codex dir");
@@ -499,8 +511,7 @@ fn sync_enabled_to_codex_returns_error_on_invalid_toml() {
 
 #[test]
 fn sync_single_server_to_codex_fails_closed_on_invalid_toml() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let path = cc_switch_lib::get_codex_config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create codex dir");
@@ -535,8 +546,7 @@ fn sync_single_server_to_codex_fails_closed_on_invalid_toml() {
 
 #[test]
 fn sync_codex_provider_missing_auth_returns_error() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
 
     let mut config = MultiAppConfig::default();
     let provider = Provider::with_id(
@@ -553,8 +563,8 @@ fn sync_codex_provider_missing_auth_returns_error() {
     manager.providers.insert(provider.id.clone(), provider);
     manager.current = "codex-missing-auth".to_string();
 
-    let err = ConfigService::sync_current_providers_to_live(&mut config)
-        .expect_err("sync should fail when auth missing");
+    let (_state, result) = sync_via_provider_service(&config, AppType::Codex);
+    let err = result.expect_err("sync should fail when auth missing");
     match err {
         cc_switch_lib::AppError::Config(msg) => {
             assert!(msg.contains("auth"), "error message should mention auth");
@@ -575,8 +585,7 @@ fn sync_codex_provider_missing_auth_returns_error() {
 
 #[test]
 fn write_codex_live_atomic_persists_auth_and_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
 
     let auth = json!({ "OPENAI_API_KEY": "dev-key" });
     let config_text = r#"
@@ -607,8 +616,7 @@ args = ["ok"]
 
 #[test]
 fn write_codex_live_atomic_rolls_back_auth_when_config_write_fails() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
 
     let auth_path = cc_switch_lib::get_codex_auth_path();
     if let Some(parent) = auth_path.parent() {
@@ -658,8 +666,7 @@ command = "noop"
 
 #[test]
 fn import_from_codex_adds_servers_from_mcp_servers_table() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let path = cc_switch_lib::get_codex_config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create codex dir");
@@ -717,8 +724,7 @@ url = "https://example.com"
 
 #[test]
 fn import_from_codex_merges_into_existing_entries() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let path = cc_switch_lib::get_codex_config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create codex dir");
@@ -785,8 +791,7 @@ command = "echo"
 
 #[test]
 fn sync_claude_enabled_mcp_projects_to_user_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     // 模拟 Claude 已安装/已初始化：存在 ~/.claude 目录
@@ -842,8 +847,7 @@ fn sync_claude_enabled_mcp_projects_to_user_config() {
 
 #[test]
 fn import_from_claude_merges_into_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
     let claude_path = home.join(".claude.json");
 
@@ -918,8 +922,7 @@ fn import_from_claude_merges_into_config() {
 
 #[test]
 fn create_backup_skips_missing_file() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
     let config_path = home.join(".cc-switch").join("config.json");
 
@@ -933,8 +936,7 @@ fn create_backup_skips_missing_file() {
 
 #[test]
 fn create_backup_generates_snapshot_file() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
     let config_dir = home.join(".cc-switch");
     let config_path = config_dir.join("config.json");
@@ -963,8 +965,7 @@ fn create_backup_generates_snapshot_file() {
 
 #[test]
 fn create_backup_retains_only_latest_entries() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
     let config_dir = home.join(".cc-switch");
     let config_path = config_dir.join("config.json");
@@ -976,9 +977,16 @@ fn create_backup_retains_only_latest_entries() {
     for idx in 0..12 {
         let manual = backups_dir.join(format!("manual_{idx:02}.json"));
         fs::write(&manual, format!("{{\"idx\":{idx}}}")).expect("seed manual backup");
+        // TEST-10: backdate the seeds instead of sleeping so the new backup is
+        // strictly the newest by mtime (retention sorts by mtime).
+        let seeded_at =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(3600 - idx as u64);
+        fs::File::options()
+            .write(true)
+            .open(&manual)
+            .and_then(|f| f.set_modified(seeded_at))
+            .expect("backdate manual backup");
     }
-
-    std::thread::sleep(std::time::Duration::from_secs(1));
 
     let latest_backup_id =
         ConfigService::create_backup(&config_path).expect("create backup with cleanup");
@@ -1017,8 +1025,7 @@ fn create_backup_retains_only_latest_entries() {
 
 #[test]
 fn sync_gemini_packycode_sets_security_selected_type() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -1043,8 +1050,8 @@ fn sync_gemini_packycode_sets_security_selected_type() {
         );
     }
 
-    ConfigService::sync_current_providers_to_live(&mut config)
-        .expect("syncing gemini live should succeed");
+    let (_state, result) = sync_via_provider_service(&config, AppType::Gemini);
+    result.expect("syncing gemini live should succeed");
 
     // security field is written to ~/.gemini/settings.json, not ~/.cc-switch/settings.json
     let gemini_settings = home.join(".gemini").join("settings.json");
@@ -1067,8 +1074,7 @@ fn sync_gemini_packycode_sets_security_selected_type() {
 
 #[test]
 fn sync_gemini_google_official_sets_oauth_security() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -1094,8 +1100,8 @@ fn sync_gemini_google_official_sets_oauth_security() {
             .insert("google-official".to_string(), provider);
     }
 
-    ConfigService::sync_current_providers_to_live(&mut config)
-        .expect("syncing google official gemini should succeed");
+    let (_state, result) = sync_via_provider_service(&config, AppType::Gemini);
+    result.expect("syncing google official gemini should succeed");
 
     // security field is written to ~/.gemini/settings.json, not ~/.cc-switch/settings.json
     let gemini_settings = home.join(".gemini").join("settings.json");
@@ -1118,8 +1124,7 @@ fn sync_gemini_google_official_sets_oauth_security() {
 
 #[test]
 fn export_sql_writes_to_target_path() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     // Create test state with some data
@@ -1164,19 +1169,15 @@ fn export_sql_writes_to_target_path() {
 
 #[test]
 fn export_sql_returns_error_for_invalid_path() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
-    let _home = ensure_test_home();
+    let env = TestEnv::new();
 
     let state = create_test_state().expect("create test state");
 
-    // Try to export to an invalid path (nonexistent parent or invalid name on Windows)
-    let invalid_parent = if cfg!(windows) {
-        std::env::temp_dir().join("cc-switch-test-invalid<>dir")
-    } else {
-        PathBuf::from("/nonexistent/directory")
-    };
-    let invalid_path = invalid_parent.join("export.sql");
+    // Use a regular file as the parent directory. Unlike `/nonexistent/...`,
+    // this cannot be created even when the suite runs as root (root may
+    // create directories anywhere), and it behaves the same on Windows.
+    let invalid_path = unwritable_path(&env, "export.sql");
+    let invalid_parent = invalid_path.parent().expect("parent").to_path_buf();
     let err = state
         .db
         .export_sql(&invalid_path)
@@ -1199,12 +1200,15 @@ fn export_sql_returns_error_for_invalid_path() {
         }
         other => panic!("expected IoContext or Io error, got {other:?}"),
     }
+    assert!(
+        !invalid_path.exists(),
+        "no export file may be created under a non-directory parent"
+    );
 }
 
 #[test]
 fn import_sql_rejects_non_cc_switch_backup() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");
@@ -1227,8 +1231,7 @@ fn import_sql_rejects_non_cc_switch_backup() {
 
 #[test]
 fn import_sql_accepts_cc_switch_exported_backup() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     // Create a database with some data and export it.
@@ -1272,4 +1275,55 @@ fn import_sql_accepts_cc_switch_exported_backup() {
         providers.contains_key("test-provider"),
         "imported providers should contain test-provider"
     );
+}
+
+/// Regression: exports must not carry triggers (the import authorizer rejects
+/// CREATE TRIGGER), and import must recreate the app's own dedup triggers.
+#[test]
+fn sql_export_has_no_triggers_and_import_recreates_app_triggers() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+
+    let mut config = MultiAppConfig::default();
+    {
+        let manager = config
+            .get_manager_mut(&AppType::Claude)
+            .expect("claude manager");
+        manager.current = "p1".to_string();
+        manager.providers.insert(
+            "p1".to_string(),
+            Provider::with_id(
+                "p1".to_string(),
+                "P1".to_string(),
+                json!({"env": {"ANTHROPIC_API_KEY": "k"}}),
+                None,
+            ),
+        );
+    }
+    let state = create_test_state_with_config(&config).expect("create test state");
+    let dump = state.db.export_sql_string().expect("export sql");
+    assert!(
+        !dump.to_ascii_uppercase().contains("CREATE TRIGGER"),
+        "exported SQL must not contain triggers"
+    );
+
+    reset_test_fs();
+    // Disk-backed: the assertion below reopens the database file.
+    let state = create_disk_test_state().expect("create fresh state");
+    state
+        .db
+        .import_sql_string(&dump)
+        .expect("import own export");
+    drop(state);
+
+    let db_path = home.join(".cc-switch").join("cc-switch.db");
+    let conn = rusqlite::Connection::open(&db_path).expect("open imported db");
+    let triggers: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'trg_request_logs_dedup_%'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count triggers");
+    assert_eq!(triggers, 2, "dedup triggers must exist after import");
 }

@@ -25,10 +25,13 @@ export function FailoverPriorityBadge({
       )}
       title={t("failover.priority.tooltip", {
         priority,
-        defaultValue: `故障转移优先级 ${priority}`,
+        defaultValue: "Failover priority {{priority}}",
       })}
     >
-      P{priority}
+      {t("failover.priorityBadge", {
+        priority,
+        defaultValue: "P{{priority}}",
+      })}
     </div>
   );
 }

@@ -224,3 +224,16 @@ input[type="password"]::-ms-clear {
     flex: 1 1 0%;
   }
 }
+
+/* PRODUCT-28: honour prefers-reduced-motion for CSS animations and
+   transitions too (framer-motion is covered by MotionConfig in main.tsx). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

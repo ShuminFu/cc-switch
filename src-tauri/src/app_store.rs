@@ -6,7 +6,7 @@ use tauri_plugin_store::StoreExt;
 use crate::error::AppError;
 
 /// Store 中的键名
-const STORE_KEY_APP_CONFIG_DIR: &str = "app_config_dir_override";
+pub(crate) const STORE_KEY_APP_CONFIG_DIR: &str = "app_config_dir_override";
 
 /// 缓存当前的 app_config_dir 覆盖路径，避免存储 AppHandle
 static APP_CONFIG_DIR_OVERRIDE: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
@@ -24,6 +24,15 @@ fn update_cached_override(value: Option<PathBuf>) {
 /// 获取缓存中的 app_config_dir 覆盖路径
 pub fn get_app_config_dir_override() -> Option<PathBuf> {
     override_cache().read().ok()?.clone()
+}
+
+/// Set the cached override for this process without a Tauri `AppHandle`.
+///
+/// Used by the `ccs` CLI and the headless proxy (PRODUCT-10/11), which resolve
+/// the override from the same `app_paths.json` store file (or a flag/env var)
+/// before any path lookup happens.
+pub(crate) fn set_app_config_dir_override_for_process(value: Option<PathBuf>) {
+    update_cached_override(value);
 }
 
 fn read_override_from_store(app: &tauri::AppHandle) -> Option<PathBuf> {
@@ -49,6 +58,15 @@ fn read_override_from_store(app: &tauri::AppHandle) -> Option<PathBuf> {
                     "Store 中配置的 app_config_dir 不存在: {path:?}\n\
                      将使用默认路径。"
                 );
+                // Explain the empty provider list instead of falling back silently (CMD-38).
+                crate::init_status::push_startup_warning(crate::init_status::StartupWarning {
+                    kind: "config_dir_unavailable".to_string(),
+                    app_type: None,
+                    path: Some(path.display().to_string()),
+                    message:
+                        "The configured data directory does not exist; using the default directory."
+                            .to_string(),
+                });
                 return None;
             }
 
@@ -68,6 +86,18 @@ pub fn refresh_app_config_dir_override(app: &tauri::AppHandle) -> Option<PathBuf
     let value = read_override_from_store(app);
     update_cached_override(value.clone());
     value
+}
+
+/// The override string as stored, without touching the process-wide cache
+/// and without dropping it when the directory is momentarily missing.
+pub fn read_stored_app_config_dir(app: &tauri::AppHandle) -> Option<String> {
+    let store = app.store_builder("app_paths.json").build().ok()?;
+    match store.get(STORE_KEY_APP_CONFIG_DIR) {
+        Some(Value::String(path_str)) if !path_str.trim().is_empty() => {
+            Some(resolve_path(path_str.trim()).to_string_lossy().to_string())
+        }
+        _ => None,
+    }
 }
 
 /// 写入 app_config_dir 到 Tauri Store
@@ -101,35 +131,13 @@ pub fn set_app_config_dir_to_store(
         .save()
         .map_err(|e| AppError::Message(format!("保存 Store 失败: {e}")))?;
 
-    refresh_app_config_dir_override(app);
+    // Deliberately no `refresh_app_config_dir_override` here: the new path
+    // applies from the next start. Switching it in-process split the open
+    // database from backups/skills resolved per call (CMD-43).
     Ok(())
 }
 
 /// 解析路径，支持 ~ 开头的相对路径
-fn resolve_path(raw: &str) -> PathBuf {
-    if raw == "~" {
-        if let Some(home) = dirs::home_dir() {
-            return home;
-        }
-    } else if let Some(stripped) = raw.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    } else if let Some(stripped) = raw.strip_prefix("~\\") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    }
-
-    PathBuf::from(raw)
-}
-
-/// 从旧的 settings.json 迁移 app_config_dir 到 Store
-pub fn migrate_app_config_dir_from_settings(app: &tauri::AppHandle) -> Result<(), AppError> {
-    // app_config_dir 已从 settings.json 移除，此函数保留但不再执行迁移
-    // 如果用户在旧版本设置过 app_config_dir，需要在 Store 中手动配置
-    log::info!("app_config_dir 迁移功能已移除，请在设置中重新配置");
-
-    let _ = refresh_app_config_dir_override(app);
-    Ok(())
+pub(crate) fn resolve_path(raw: &str) -> PathBuf {
+    crate::config::expand_tilde(raw)
 }

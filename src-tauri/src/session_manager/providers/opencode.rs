@@ -1,11 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
 use serde_json::Value;
 
+use crate::session_manager::cache::ScanCache;
+use crate::session_manager::resume::resume_command;
+use crate::session_manager::source::SessionSource;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
-use super::utils::{parse_timestamp_to_ms, path_basename, truncate_summary};
+use super::utils::{open_tool_db, parse_timestamp_to_ms, path_basename, truncate_summary};
 
 const PROVIDER_ID: &str = "opencode";
 
@@ -19,9 +21,7 @@ pub(crate) fn get_opencode_base_dir() -> PathBuf {
             return PathBuf::from(xdg).join("opencode");
         }
     }
-    dirs::home_dir()
-        .map(|h| h.join(".local/share/opencode"))
-        .unwrap_or_else(|| PathBuf::from(".local/share/opencode"))
+    crate::config::get_home_dir().join(".local/share/opencode")
 }
 
 /// Return the OpenCode JSON storage directory (legacy flat-file layout).
@@ -35,7 +35,7 @@ fn get_opencode_db_path() -> PathBuf {
 
 /// Scan sessions from both the legacy JSON files and the newer SQLite database,
 /// merging results with SQLite taking precedence on ID conflicts.
-pub fn scan_sessions() -> Vec<SessionMeta> {
+pub fn scan_sessions(_cache: &ScanCache) -> Vec<SessionMeta> {
     let json_sessions = scan_sessions_json();
     let sqlite_sessions = scan_sessions_sqlite();
 
@@ -80,17 +80,13 @@ fn scan_sessions_json() -> Vec<SessionMeta> {
     sessions
 }
 
-/// Parse a SQLite source reference in the format `sqlite:<db_path>:<session_id>`.
-///
-/// Uses `rfind(":ses_")` to split the path from the session ID because the
-/// db path itself may contain colons (e.g. `C:\Users\...` on Windows).
-/// This relies on the OpenCode convention that session IDs start with `ses_`.
+/// Parse a SQLite source reference (`sqlite:<db_path>:<ses_id>`); see
+/// [`SessionSource::from_legacy`] for the single implementation.
 fn parse_sqlite_source(source: &str) -> Option<(PathBuf, String)> {
-    let rest = source.strip_prefix("sqlite:")?;
-    let sep = rest.rfind(":ses_")?;
-    let db_path = PathBuf::from(&rest[..sep]);
-    let session_id = rest[sep + 1..].to_string();
-    Some((db_path, session_id))
+    match SessionSource::from_legacy(PROVIDER_ID, source).ok()? {
+        SessionSource::Sqlite { db, id } => Some((PathBuf::from(db), id)),
+        _ => None,
+    }
 }
 
 fn scan_sessions_sqlite() -> Vec<SessionMeta> {
@@ -99,19 +95,25 @@ fn scan_sessions_sqlite() -> Vec<SessionMeta> {
         return Vec::new();
     }
 
-    let conn = match Connection::open_with_flags(
-        &db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) {
+    let conn = match open_tool_db(&db_path, false) {
         Ok(c) => c,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            log::warn!(
+                "Failed to open OpenCode database {}: {e}",
+                db_path.display()
+            );
+            return Vec::new();
+        }
     };
 
     let mut stmt = match conn.prepare(
         "SELECT id, title, directory, time_created, time_updated FROM session ORDER BY time_updated DESC",
     ) {
         Ok(s) => s,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            log::warn!("Failed to query OpenCode sessions in {}: {e}", db_path.display());
+            return Vec::new();
+        }
     };
 
     let db_display = db_path.display().to_string();
@@ -137,6 +139,8 @@ fn scan_sessions_sqlite() -> Vec<SessionMeta> {
             Some(title)
         };
         sessions.push(SessionMeta {
+            source: None,
+            session_key: None,
             provider_id: PROVIDER_ID.to_string(),
             session_id: session_id.clone(),
             title: display_title.clone(),
@@ -149,7 +153,7 @@ fn scan_sessions_sqlite() -> Vec<SessionMeta> {
             created_at: Some(created),
             last_active_at: Some(updated),
             source_path: Some(format!("sqlite:{db_display}:{session_id}")),
-            resume_command: Some(format!("opencode -s {session_id}")),
+            resume_command: resume_command("opencode", &session_id),
         });
     }
     sessions
@@ -230,11 +234,8 @@ pub fn load_messages_sqlite(source: &str) -> Result<Vec<SessionMessage>, String>
     let (db_path, session_id) = parse_sqlite_source(source)
         .ok_or_else(|| format!("Invalid SQLite source reference: {source}"))?;
 
-    let conn = Connection::open_with_flags(
-        &db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|e| format!("Failed to open OpenCode database: {e}"))?;
+    let conn = open_tool_db(&db_path, false)
+        .map_err(|e| format!("Failed to open OpenCode database: {e}"))?;
 
     let mut msg_stmt = conn
         .prepare(
@@ -313,6 +314,17 @@ pub fn load_messages_sqlite(source: &str) -> Result<Vec<SessionMessage>, String>
     Ok(messages)
 }
 
+/// Message ids are OpenCode-generated (`msg_<base62>`); accept only a single
+/// plain path component of `[A-Za-z0-9_-]` so a crafted message file cannot
+/// redirect part-directory deletion (`..`, `/`, `\\`, absolute paths).
+fn is_safe_message_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 pub fn delete_session(storage: &Path, path: &Path, session_id: &str) -> Result<bool, String> {
     if path.file_name().and_then(|name| name.to_str()) != Some(session_id) {
         return Err(format!(
@@ -335,45 +347,38 @@ pub fn delete_session(storage: &Path, path: &Path, session_id: &str) -> Result<b
             Err(_) => continue,
         };
         if let Some(message_id) = value.get("id").and_then(Value::as_str) {
-            message_ids.push(message_id.to_string());
+            if is_safe_message_id(message_id) {
+                message_ids.push(message_id.to_string());
+            } else {
+                // SEC-32: the id comes from file contents; never let it steer
+                // remove_dir_all outside `<storage>/part`.
+                log::warn!(
+                    "[OpenCode] ignoring unsafe message id {message_id:?} in {}",
+                    message_path.display()
+                );
+            }
         }
     }
 
-    for message_id in &message_ids {
-        let part_dir = storage.join("part").join(message_id);
-        remove_dir_all_if_exists(&part_dir).map_err(|e| {
-            format!(
-                "Failed to delete OpenCode part directory {}: {e}",
-                part_dir.display()
-            )
-        })?;
-    }
-
-    let session_diff_path = storage
-        .join("session_diff")
-        .join(format!("{session_id}.json"));
-    remove_file_if_exists(&session_diff_path).map_err(|e| {
-        format!(
-            "Failed to delete OpenCode session diff {}: {e}",
-            session_diff_path.display()
-        )
-    })?;
-
-    remove_dir_all_if_exists(path).map_err(|e| {
-        format!(
-            "Failed to delete OpenCode message directory {}: {e}",
-            path.display()
-        )
-    })?;
-
+    // SESS-41: everything belonging to the session moves to the trash as one
+    // restorable entry instead of being deleted.
+    let part_root = storage.join("part");
+    let mut doomed: Vec<std::path::PathBuf> = message_ids
+        .iter()
+        .map(|message_id| part_root.join(message_id))
+        .filter(|part_dir| part_dir.parent() == Some(part_root.as_path()))
+        .collect();
+    doomed.push(
+        storage
+            .join("session_diff")
+            .join(format!("{session_id}.json")),
+    );
+    doomed.push(path.to_path_buf());
     if let Some(session_file) = find_session_file(storage, session_id) {
-        remove_file_if_exists(&session_file).map_err(|e| {
-            format!(
-                "Failed to delete OpenCode session file {}: {e}",
-                session_file.display()
-            )
-        })?;
+        doomed.push(session_file);
     }
+    let refs: Vec<&Path> = doomed.iter().map(|p| p.as_path()).collect();
+    crate::session_manager::trash::move_to_trash("opencode", session_id, &refs)?;
 
     Ok(true)
 }
@@ -398,8 +403,8 @@ pub fn delete_session_sqlite(session_id: &str, source: &str) -> Result<bool, Str
         return Err("SQLite path does not match expected OpenCode database".to_string());
     }
 
-    let conn =
-        Connection::open(&db_path).map_err(|e| format!("Failed to open OpenCode database: {e}"))?;
+    let conn = open_tool_db(&db_path, true)
+        .map_err(|e| format!("Failed to open OpenCode database: {e}"))?;
 
     let tx = conn
         .unchecked_transaction()
@@ -416,6 +421,19 @@ pub fn delete_session_sqlite(session_id: &str, source: &str) -> Result<bool, Str
 
     tx.commit()
         .map_err(|e| format!("Failed to commit session deletion: {e}"))?;
+
+    // Sessions migrated from the legacy JSON storage keep their old files; the
+    // scan would list them again once the SQLite row is gone (SESS-40).
+    let storage = get_opencode_data_dir();
+    if find_session_file(&storage, session_id).is_some()
+        || storage.join("message").join(session_id).exists()
+    {
+        delete_session(
+            &storage,
+            &storage.join("message").join(session_id),
+            session_id,
+        )?;
+    }
 
     Ok(deleted > 0)
 }
@@ -465,6 +483,8 @@ fn parse_session(storage: &Path, path: &Path) -> Option<SessionMeta> {
     };
 
     Some(SessionMeta {
+        source: None,
+        session_key: None,
         provider_id: PROVIDER_ID.to_string(),
         session_id: session_id.clone(),
         title: display_title,
@@ -473,7 +493,7 @@ fn parse_session(storage: &Path, path: &Path) -> Option<SessionMeta> {
         created_at,
         last_active_at: updated_at.or(created_at),
         source_path: Some(source_path),
-        resume_command: Some(format!("opencode -s {session_id}")),
+        resume_command: resume_command("opencode", &session_id),
     })
 }
 
@@ -606,22 +626,6 @@ fn find_session_file(storage: &Path, session_id: &str) -> Option<PathBuf> {
         .find(|path| path.file_name().and_then(|name| name.to_str()) == Some(expected.as_str()))
 }
 
-fn remove_file_if_exists(path: &Path) -> std::io::Result<()> {
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
-    }
-}
-
-fn remove_dir_all_if_exists(path: &Path) -> std::io::Result<()> {
-    match std::fs::remove_dir_all(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -664,6 +668,56 @@ mod tests {
             ",
         )
         .expect("create sqlite schema");
+    }
+
+    #[test]
+    fn delete_session_ignores_traversal_message_ids() {
+        let temp = tempdir().expect("tempdir");
+        let storage = temp.path().join("storage");
+        let session_id = "ses_evil";
+        let message_dir = storage.join("message").join(session_id);
+        std::fs::create_dir_all(&message_dir).unwrap();
+        std::fs::create_dir_all(storage.join("part")).unwrap();
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep.txt"), "x").unwrap();
+        let abs_target = temp.path().join("abs_target");
+        std::fs::create_dir_all(&abs_target).unwrap();
+
+        for (i, id) in [
+            "../../outside".to_string(),
+            "../outside".to_string(),
+            abs_target.to_string_lossy().to_string(),
+            "a/b".to_string(),
+            "a\\b".to_string(),
+            "..".to_string(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            std::fs::write(
+                message_dir.join(format!("msg_{i}.json")),
+                serde_json::json!({ "id": id }).to_string(),
+            )
+            .unwrap();
+        }
+
+        delete_session(&storage, &message_dir, session_id).expect("delete session");
+
+        assert!(!message_dir.exists());
+        assert!(outside.join("keep.txt").exists());
+        assert!(abs_target.exists());
+        assert!(storage.join("part").exists());
+    }
+
+    #[test]
+    fn message_id_validation() {
+        assert!(is_safe_message_id("msg_01HXYZabc"));
+        assert!(!is_safe_message_id(""));
+        assert!(!is_safe_message_id(".."));
+        assert!(!is_safe_message_id("../x"));
+        assert!(!is_safe_message_id("/home/user"));
+        assert!(!is_safe_message_id("a\\b"));
     }
 
     #[test]
@@ -925,9 +979,31 @@ mod tests {
         .expect("insert part");
         drop(conn);
 
+        // Legacy JSON copy of the same session (migrated storage).
+        let storage = base_dir.join("storage");
+        std::fs::create_dir_all(storage.join("session/global")).unwrap();
+        std::fs::create_dir_all(storage.join("message/ses_1")).unwrap();
+        std::fs::write(
+            storage.join("session/global/ses_1.json"),
+            r#"{"id":"ses_1","title":"Session","directory":"/tmp/project-a","time":{"created":1000,"updated":3000}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            storage.join("message/ses_1/msg_1.json"),
+            r#"{"id":"msg_1","role":"user"}"#,
+        )
+        .unwrap();
+
         let source = format!("sqlite:{}:ses_1", db_path.display());
         let deleted = delete_session_sqlite("ses_1", &source).expect("delete sqlite session");
         assert!(deleted);
+        assert!(
+            scan_sessions(&ScanCache::disabled())
+                .iter()
+                .all(|s| s.session_id != "ses_1"),
+            "legacy JSON copy must not resurrect the deleted session"
+        );
+        assert!(!storage.join("session/global/ses_1.json").exists());
 
         let conn = Connection::open(&db_path).expect("re-open sqlite db");
         let remaining_sessions: i64 = conn

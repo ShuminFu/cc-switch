@@ -1,0 +1,35 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "What is 6 * 7?"
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "parts": [
+        {
+          "text": "42"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "And 6 * 8?"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 8192,
+    "thinkingConfig": {
+      "thinkingBudget": 4096,
+      "includeThoughts": true
+    }
+  }
+}

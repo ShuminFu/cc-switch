@@ -189,7 +189,10 @@
 						  Target="[System64Folder]msiexec.exe"
 						  Arguments="/x [ProductCode]" />
 
-                <RemoveFile Id="RemoveUserProgramsFiles" Directory="TauriLocalAppDataPrograms" Name="*" On="uninstall" />
+                <!-- %LOCALAPPDATA%\Programs is shared by every per-user app: never
+                     remove files from it (CI-24). RemoveFolder only deletes the
+                     folder when it is empty, and its RemoveFile-table entry keeps
+                     ICE64 satisfied for this user-profile directory. -->
                 <RemoveFolder Id="RemoveUserProgramsFolder" Directory="TauriLocalAppDataPrograms" On="uninstall" />
 
 				<RemoveFolder Id="INSTALLDIR"

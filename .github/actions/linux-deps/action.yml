@@ -1,0 +1,25 @@
+name: Install Linux build dependencies
+description: >-
+  Installs the Tauri/WebKitGTK system packages via scripts/install-linux-deps.sh,
+  the same script contributors and the devcontainer use (CI-29).
+
+inputs:
+  bundle:
+    description: Also install the packaging tools needed by `tauri build` (rpm, patchelf, ...)
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Install Linux system deps
+      shell: bash
+      env:
+        WITH_BUNDLE_TOOLS: ${{ inputs.bundle }}
+      run: |
+        set -euo pipefail
+        if [ "$WITH_BUNDLE_TOOLS" = "true" ]; then
+          bash "$GITHUB_WORKSPACE/scripts/install-linux-deps.sh" --bundle
+        else
+          bash "$GITHUB_WORKSPACE/scripts/install-linux-deps.sh"
+        fi

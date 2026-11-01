@@ -1,0 +1,52 @@
+# git-cliff configuration (CI-21): drafts the CHANGELOG [Unreleased] section
+# from Conventional Commit subjects.
+#
+#   git cliff --unreleased                 # print the draft
+#   git cliff --unreleased --tag v3.18.0   # draft headed with the next version
+#
+# The output is a starting point: edit it into user-facing language before it
+# goes into CHANGELOG.md (RELEASING.md, step 2).
+
+[changelog]
+header = ""
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{{ commit.message | split(pat="\n") | first | upper_first | trim }}\
+{% endfor %}
+{% endfor %}
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+protect_breaking_commits = true
+tag_pattern = "v[0-9]+\\.[0-9]+\\.[0-9]+$"
+sort_commits = "oldest"
+commit_preprocessors = [
+  # Drop trailing PR numbers such as "(#5508)"; they are in the git history.
+  { pattern = '\s*\(#[0-9]+\)$', replace = "" },
+]
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->Added" },
+  { message = "^fix\\(security\\)", group = "<!-- 4 -->Security" },
+  { message = "^fix", group = "<!-- 2 -->Fixed" },
+  { message = "^perf", group = "<!-- 1 -->Changed" },
+  { message = "^refactor", group = "<!-- 1 -->Changed" },
+  { message = "^revert", group = "<!-- 3 -->Removed" },
+  { message = "^docs", skip = true },
+  { message = "^test", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^build", skip = true },
+  { message = "^style", skip = true },
+  { message = "^chore", skip = true },
+]

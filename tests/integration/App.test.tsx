@@ -10,6 +10,8 @@ import {
   setProviders,
 } from "../msw/state";
 import { emitTauriEvent } from "../msw/tauriMocks";
+import { server } from "../msw/server";
+import { http, HttpResponse } from "msw";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -31,6 +33,8 @@ vi.mock("@/components/providers/ProviderList", () => ({
     onConfigureUsage,
     onOpenWebsite,
     onCreate,
+    onDelete,
+    onRemoveFromConfig,
   }: any) => (
     <div>
       <div data-testid="provider-list">{JSON.stringify(providers)}</div>
@@ -49,6 +53,14 @@ vi.mock("@/components/providers/ProviderList", () => ({
         open-website
       </button>
       <button onClick={() => onCreate?.()}>create</button>
+      <button onClick={() => onDelete?.(providers[currentProviderId])}>
+        delete
+      </button>
+      <button
+        onClick={() => onRemoveFromConfig?.(providers[currentProviderId])}
+      >
+        remove-from-config
+      </button>
     </div>
   ),
 }));
@@ -145,8 +157,35 @@ vi.mock("@/components/mcp/McpPanel", () => ({
     ),
 }));
 
-const renderApp = (AppComponent: ComponentType) => {
-  const client = new QueryClient();
+const mcpOpenAddMock = vi.fn();
+const mcpOpenImportMock = vi.fn();
+
+vi.mock("@/components/mcp/UnifiedMcpPanel", async () => {
+  const React = await import("react");
+  return {
+    default: React.forwardRef((_props: unknown, ref) => {
+      React.useImperativeHandle(ref, () => ({
+        openAdd: mcpOpenAddMock,
+        openImport: mcpOpenImportMock,
+      }));
+      return <div data-testid="mcp-page" />;
+    }),
+  };
+});
+
+vi.mock("@/components/settings/SettingsPage", () => ({
+  SettingsPage: ({ defaultTab, onOpenChange }: any) => (
+    <div data-testid="settings-page">
+      <span data-testid="settings-tab">{defaultTab}</span>
+      <button onClick={() => onOpenChange(false)}>close-settings</button>
+    </div>
+  ),
+}));
+
+const renderApp = (
+  AppComponent: ComponentType,
+  client: QueryClient = new QueryClient(),
+) => {
   return render(
     <QueryClientProvider client={client}>
       <Suspense fallback={<div data-testid="loading">loading</div>}>
@@ -156,8 +195,12 @@ const renderApp = (AppComponent: ComponentType) => {
   );
 };
 
-describe("App integration with MSW", () => {
+// The full App mounts every page and query; under a busy full-suite run it can
+// exceed the 5 s default even though it passes comfortably when run alone.
+describe("App integration with MSW", { timeout: 20_000 }, () => {
   beforeEach(() => {
+    // The shell persists the active app / page; start every test fresh.
+    localStorage.clear();
     resetProviderState();
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
@@ -181,12 +224,14 @@ describe("App integration with MSW", () => {
     );
 
     fireEvent.click(screen.getByText("usage"));
-    expect(screen.getByTestId("usage-modal")).toBeInTheDocument();
+    expect(await screen.findByTestId("usage-modal")).toBeInTheDocument();
     fireEvent.click(screen.getByText("save-script"));
     fireEvent.click(screen.getByText("close-usage"));
 
     fireEvent.click(screen.getByText("create"));
-    expect(screen.getByTestId("add-provider-dialog")).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("add-provider-dialog"),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByText("confirm-add"));
     await waitFor(() =>
       expect(screen.getByTestId("provider-list").textContent).toMatch(
@@ -195,7 +240,9 @@ describe("App integration with MSW", () => {
     );
 
     fireEvent.click(screen.getByText("edit"));
-    expect(screen.getByTestId("edit-provider-dialog")).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("edit-provider-dialog"),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByText("confirm-edit"));
     await waitFor(() =>
       expect(screen.getByTestId("provider-list").textContent).toMatch(
@@ -342,7 +389,7 @@ describe("App integration with MSW", () => {
 
     await waitFor(() => {
       expect(toastErrorMock).toHaveBeenCalledWith(
-        expect.stringContaining("读取配置中的供应商标识失败"),
+        expect.stringContaining("Failed to read provider keys from the config"),
       );
     });
 
@@ -351,5 +398,183 @@ describe("App integration with MSW", () => {
     );
 
     liveIdsSpy.mockRestore();
+  });
+
+  it("closes the confirm dialog and toasts when remove-from-config fails (PRODUCT-73)", async () => {
+    setProviders("openclaw", {
+      deepseek: {
+        id: "deepseek",
+        name: "DeepSeek",
+        settingsConfig: { baseUrl: "https://api.deepseek.com", models: [] },
+        category: "custom",
+        sortIndex: 0,
+        createdAt: Date.now(),
+      },
+    });
+    setCurrentProviderId("openclaw", "deepseek");
+    const removeSpy = vi
+      .spyOn(providersApi, "removeFromLiveConfig")
+      .mockRejectedValueOnce(new Error("unparsable openclaw.json"));
+
+    const { default: App } = await import("@/App");
+    renderApp(App);
+    fireEvent.click(screen.getByText("switch-openclaw"));
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "deepseek",
+      ),
+    );
+
+    fireEvent.click(screen.getByText("remove-from-config"));
+    expect(await screen.findByTestId("confirm-dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("confirm-delete"));
+    // A second click while the first call is pending is ignored.
+    fireEvent.click(screen.getByText("confirm-delete"));
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        expect.stringContaining("unparsable openclaw.json"),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("confirm-dialog")).not.toBeInTheDocument(),
+    );
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    removeSpy.mockRestore();
+  });
+
+  it("closes the confirm dialog when deleting a provider fails (PRODUCT-73)", async () => {
+    server.use(
+      http.post("http://tauri.local/delete_provider", () =>
+        HttpResponse.json("cannot delete current provider", { status: 400 }),
+      ),
+    );
+    const { default: App } = await import("@/App");
+    renderApp(App);
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "claude-1",
+      ),
+    );
+
+    fireEvent.click(screen.getByText("delete"));
+    expect(await screen.findByTestId("confirm-dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("confirm-delete"));
+
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.queryByTestId("confirm-dialog")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("provider-list").textContent).toContain(
+      "claude-1",
+    );
+  });
+
+  it("shows an error state with retry, not the empty list, when get_providers fails", async () => {
+    let fail = true;
+    server.use(
+      http.post("http://tauri.local/get_providers", () =>
+        fail
+          ? HttpResponse.text("database is locked", { status: 500 })
+          : undefined,
+      ),
+    );
+
+    const { default: App } = await import("@/App");
+    renderApp(
+      App,
+      new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+    );
+
+    expect(await screen.findByTestId("providers-error")).toHaveTextContent(
+      "database is locked",
+    );
+    expect(screen.queryByTestId("provider-list")).not.toBeInTheDocument();
+
+    fail = false;
+    fireEvent.click(screen.getByText("Retry"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "claude-1",
+      ),
+    );
+  });
+
+  it("navigates to pages that own their header actions, and back", async () => {
+    const { default: App } = await import("@/App");
+    renderApp(App);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "claude-1",
+      ),
+    );
+
+    // Toolbar shortcut from the app registry opens the MCP page.
+    fireEvent.click(screen.getByTitle("MCP Management"));
+    expect(await screen.findByTestId("mcp-page")).toBeInTheDocument();
+    expect(screen.getByText("MCP Server Management").tagName).toBe("H1");
+    // Sub-page headers link to their manual page (DOCS-16).
+    expect(
+      screen.getByRole("button", { name: "Open the manual", hidden: true }),
+    ).toBeInTheDocument();
+    expect(localStorage.getItem("cc-switch-last-view")).toBe("mcp");
+
+    // Header actions are rendered by the page and reach its panel handle.
+    fireEvent.click(await screen.findByText("Add MCP"));
+    expect(mcpOpenAddMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText("Import Existing"));
+    expect(mcpOpenImportMock).toHaveBeenCalledTimes(1);
+
+    // Escape returns to the providers page.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(await screen.findByTestId("provider-list")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText("Add MCP")).not.toBeInTheDocument(),
+    );
+
+    // The update badge deep-links into the settings "about" tab.
+    fireEvent.click(screen.getByText("update-badge"));
+    expect(await screen.findByTestId("settings-tab")).toHaveTextContent(
+      "about",
+    );
+    fireEvent.click(screen.getByText("close-settings"));
+    expect(await screen.findByTestId("provider-list")).toBeInTheDocument();
+
+    // PRODUCT-55: with the routing toggle off, the header still offers routing.
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Local routing and failover",
+        hidden: true,
+      }),
+    );
+    expect(await screen.findByTestId("settings-tab")).toHaveTextContent(
+      "proxy",
+    );
+    fireEvent.click(screen.getByText("close-settings"));
+    expect(await screen.findByTestId("provider-list")).toBeInTheDocument();
+
+    // Cmd/Ctrl+, opens settings on the general tab.
+    fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+    expect(await screen.findByTestId("settings-tab")).toHaveTextContent(
+      "general",
+    );
+  });
+
+  it("restores the last page and app from storage", async () => {
+    localStorage.setItem("cc-switch-last-app", "codex");
+    localStorage.setItem("cc-switch-last-view", "mcp");
+
+    const { default: App } = await import("@/App");
+    renderApp(App);
+
+    expect(await screen.findByTestId("mcp-page")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Back"));
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "codex-1",
+      ),
+    );
   });
 });

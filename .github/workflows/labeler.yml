@@ -1,5 +1,10 @@
 name: Label PRs
 
+# SECURITY: this workflow runs on `pull_request_target`, i.e. with a token that
+# can write to the base repository, for PRs from forks. It must NEVER check out
+# or execute the PR's code: do not add `actions/checkout` (or any step that
+# runs files from the PR) to this workflow. actions/labeler only reads the
+# list of changed paths through the API (CI-18).
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
@@ -12,6 +17,6 @@ jobs:
   label:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/labeler@v5
+      - uses: actions/labeler@8558fd74291d67161a8a78ce36a881fa63b766a9 # v5.0.0
         with:
           sync-labels: true

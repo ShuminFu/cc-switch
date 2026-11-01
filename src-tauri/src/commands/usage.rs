@@ -1,187 +1,174 @@
 //! 使用统计相关命令
+//!
+//! 所有命令都会持有 SQLite 全局连接锁做聚合查询或扫描会话日志，因此统一
+//! 是 `async` 命令，并把 DB 工作放进阻塞线程池（CMD-08 / PERF-12），
+//! 避免仪表盘查询卡住 UI 线程。
 
+use super::timed_blocking_with_state;
 use crate::error::AppError;
+pub use crate::services::usage_stats::ModelPricingInfo;
 use crate::services::usage_stats::*;
 use crate::store::AppState;
 use rust_decimal::Decimal;
 use std::str::FromStr;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 /// 获取使用量汇总
 #[tauri::command]
-pub fn get_usage_summary(
-    state: State<'_, AppState>,
+pub async fn get_usage_summary(
+    handle: AppHandle,
     start_date: Option<i64>,
     end_date: Option<i64>,
     app_type: Option<String>,
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<UsageSummary, AppError> {
-    state.db.get_usage_summary(
-        start_date,
-        end_date,
-        app_type.as_deref(),
-        provider_name.as_deref(),
-        model.as_deref(),
-    )
+    timed_blocking_with_state("get_usage_summary", handle, move |state| {
+        state.db.get_usage_summary(
+            start_date,
+            end_date,
+            app_type.as_deref(),
+            provider_name.as_deref(),
+            model.as_deref(),
+        )
+    })
+    .await
 }
 
 /// 获取按 app_type 拆分的使用量汇总
 #[tauri::command]
-pub fn get_usage_summary_by_app(
-    state: State<'_, AppState>,
+pub async fn get_usage_summary_by_app(
+    handle: AppHandle,
     start_date: Option<i64>,
     end_date: Option<i64>,
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<Vec<UsageSummaryByApp>, AppError> {
-    state.db.get_usage_summary_by_app(
-        start_date,
-        end_date,
-        provider_name.as_deref(),
-        model.as_deref(),
-    )
+    timed_blocking_with_state("get_usage_summary_by_app", handle, move |state| {
+        state.db.get_usage_summary_by_app(
+            start_date,
+            end_date,
+            provider_name.as_deref(),
+            model.as_deref(),
+        )
+    })
+    .await
 }
 
 /// 获取每日趋势
 #[tauri::command]
-pub fn get_usage_trends(
-    state: State<'_, AppState>,
+pub async fn get_usage_trends(
+    handle: AppHandle,
     start_date: Option<i64>,
     end_date: Option<i64>,
     app_type: Option<String>,
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<Vec<DailyStats>, AppError> {
-    state.db.get_daily_trends(
-        start_date,
-        end_date,
-        app_type.as_deref(),
-        provider_name.as_deref(),
-        model.as_deref(),
-    )
+    timed_blocking_with_state("get_usage_trends", handle, move |state| {
+        state.db.get_daily_trends(
+            start_date,
+            end_date,
+            app_type.as_deref(),
+            provider_name.as_deref(),
+            model.as_deref(),
+        )
+    })
+    .await
 }
 
 /// 获取 Provider 统计
 #[tauri::command]
-pub fn get_provider_stats(
-    state: State<'_, AppState>,
+pub async fn get_provider_stats(
+    handle: AppHandle,
     start_date: Option<i64>,
     end_date: Option<i64>,
     app_type: Option<String>,
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<Vec<ProviderStats>, AppError> {
-    state.db.get_provider_stats(
-        start_date,
-        end_date,
-        app_type.as_deref(),
-        provider_name.as_deref(),
-        model.as_deref(),
-    )
+    timed_blocking_with_state("get_provider_stats", handle, move |state| {
+        state.db.get_provider_stats(
+            start_date,
+            end_date,
+            app_type.as_deref(),
+            provider_name.as_deref(),
+            model.as_deref(),
+        )
+    })
+    .await
 }
 
 /// 获取模型统计
 #[tauri::command]
-pub fn get_model_stats(
-    state: State<'_, AppState>,
+pub async fn get_model_stats(
+    handle: AppHandle,
     start_date: Option<i64>,
     end_date: Option<i64>,
     app_type: Option<String>,
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<Vec<ModelStats>, AppError> {
-    state.db.get_model_stats(
-        start_date,
-        end_date,
-        app_type.as_deref(),
-        provider_name.as_deref(),
-        model.as_deref(),
-    )
+    timed_blocking_with_state("get_model_stats", handle, move |state| {
+        state.db.get_model_stats(
+            start_date,
+            end_date,
+            app_type.as_deref(),
+            provider_name.as_deref(),
+            model.as_deref(),
+        )
+    })
+    .await
 }
 
 /// 获取请求日志列表
 #[tauri::command]
-pub fn get_request_logs(
-    state: State<'_, AppState>,
+pub async fn get_request_logs(
+    handle: AppHandle,
     filters: LogFilters,
     page: u32,
     page_size: u32,
 ) -> Result<PaginatedLogs, AppError> {
-    state.db.get_request_logs(&filters, page, page_size)
+    timed_blocking_with_state("get_request_logs", handle, move |state| {
+        state.db.get_request_logs(&filters, page, page_size)
+    })
+    .await
 }
 
 /// 获取单个请求详情
 #[tauri::command]
-pub fn get_request_detail(
-    state: State<'_, AppState>,
+pub async fn get_request_detail(
+    handle: AppHandle,
     request_id: String,
 ) -> Result<Option<RequestLogDetail>, AppError> {
-    state.db.get_request_detail(&request_id)
+    timed_blocking_with_state("get_request_detail", handle, move |state| {
+        state.db.get_request_detail(&request_id)
+    })
+    .await
 }
 
 /// 获取模型定价列表
 #[tauri::command]
-pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingInfo>, AppError> {
-    log::info!("获取模型定价列表");
-    state.db.ensure_model_pricing_seeded()?;
-
-    let db = state.db.clone();
-    let conn = crate::database::lock_conn!(db.conn);
-
-    // 检查表是否存在
-    let table_exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='model_pricing'",
-            [],
-            |row| row.get::<_, i64>(0).map(|count| count > 0),
-        )
-        .unwrap_or(false);
-
-    if !table_exists {
-        log::error!("model_pricing 表不存在,可能需要重启应用以触发数据库迁移");
-        return Ok(Vec::new());
-    }
-
-    let mut stmt = conn.prepare(
-        "SELECT model_id, display_name, input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million
-         FROM model_pricing
-         ORDER BY display_name",
-    )?;
-
-    let rows = stmt.query_map([], |row| {
-        Ok(ModelPricingInfo {
-            model_id: row.get(0)?,
-            display_name: row.get(1)?,
-            input_cost_per_million: row.get(2)?,
-            output_cost_per_million: row.get(3)?,
-            cache_read_cost_per_million: row.get(4)?,
-            cache_creation_cost_per_million: row.get(5)?,
-        })
-    })?;
-
-    let mut pricing = Vec::new();
-    for row in rows {
-        pricing.push(row?);
-    }
-
-    log::info!("成功获取 {} 条模型定价数据", pricing.len());
-    Ok(pricing)
+pub async fn get_model_pricing(handle: AppHandle) -> Result<Vec<ModelPricingInfo>, AppError> {
+    timed_blocking_with_state("get_model_pricing", handle, |state| {
+        log::info!("获取模型定价列表");
+        state.db.ensure_model_pricing_seeded()?;
+        let pricing = state.db.list_model_pricing()?;
+        log::info!("成功获取 {} 条模型定价数据", pricing.len());
+        Ok(pricing)
+    })
+    .await
 }
 
-/// 更新模型定价
-#[tauri::command]
-pub fn update_model_pricing(
-    state: State<'_, AppState>,
+/// 校验并规范化前端提交的模型定价。
+fn validate_model_pricing_input(
     model_id: String,
     display_name: String,
     input_cost: String,
     output_cost: String,
     cache_read_cost: String,
     cache_creation_cost: String,
-) -> Result<(), AppError> {
-    let db = state.db.clone();
+) -> Result<ModelPricingInfo, AppError> {
     let model_id = model_id.trim().to_string();
     let display_name = display_name.trim().to_string();
     if model_id.is_empty() {
@@ -221,124 +208,186 @@ pub fn update_model_pricing(
         }
     }
 
-    {
-        let conn = crate::database::lock_conn!(db.conn);
-        conn.execute(
-            "INSERT OR REPLACE INTO model_pricing (
-                model_id, display_name, input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![
-                model_id,
-                display_name,
-                input_cost.trim(),
-                output_cost.trim(),
-                cache_read_cost.trim(),
-                cache_creation_cost.trim()
-            ],
-        )
-        .map_err(|e| AppError::Database(format!("更新模型定价失败: {e}")))?;
-    }
+    Ok(ModelPricingInfo {
+        model_id,
+        display_name,
+        input_cost_per_million: input_cost.trim().to_string(),
+        output_cost_per_million: output_cost.trim().to_string(),
+        cache_read_cost_per_million: cache_read_cost.trim().to_string(),
+        cache_creation_cost_per_million: cache_creation_cost.trim().to_string(),
+        currency: crate::database::model_catalog::BASE_CURRENCY.to_string(),
+        input_modalities: None,
+    })
+}
 
-    if let Err(e) = db.backfill_missing_usage_costs_for_model(&model_id) {
-        log::warn!("模型定价更新后回填历史用量成本失败 (model_id={model_id}): {e}");
-    }
+/// 更新模型定价
+#[tauri::command]
+#[specta::specta]
+pub async fn update_model_pricing(
+    handle: AppHandle,
+    model_id: String,
+    display_name: String,
+    input_cost: String,
+    output_cost: String,
+    cache_read_cost: String,
+    cache_creation_cost: String,
+) -> Result<(), AppError> {
+    let pricing = validate_model_pricing_input(
+        model_id,
+        display_name,
+        input_cost,
+        output_cost,
+        cache_read_cost,
+        cache_creation_cost,
+    )?;
 
-    Ok(())
+    timed_blocking_with_state("update_model_pricing", handle, move |state| {
+        state.db.upsert_model_pricing(&pricing)?;
+
+        let model_id = &pricing.model_id;
+        if let Err(e) = state.db.backfill_missing_usage_costs_for_model(model_id) {
+            log::warn!("模型定价更新后回填历史用量成本失败 (model_id={model_id}): {e}");
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// 检查 Provider 使用限额
 #[tauri::command]
-pub fn check_provider_limits(
-    state: State<'_, AppState>,
+pub async fn check_provider_limits(
+    handle: AppHandle,
     provider_id: String,
     app_type: String,
 ) -> Result<crate::services::usage_stats::ProviderLimitStatus, AppError> {
-    state.db.check_provider_limits(&provider_id, &app_type)
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = crate::app_config::AppType::from_str(&app_type)?
+        .as_str()
+        .to_string();
+    timed_blocking_with_state("check_provider_limits", handle, move |state| {
+        state.db.check_provider_limits(&provider_id, &app_type)
+    })
+    .await
 }
 
 /// 删除模型定价
 #[tauri::command]
-pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Result<(), AppError> {
-    let db = state.db.clone();
-    let conn = crate::database::lock_conn!(db.conn);
+#[specta::specta]
+pub async fn delete_model_pricing(handle: AppHandle, model_id: String) -> Result<(), AppError> {
+    timed_blocking_with_state("delete_model_pricing", handle, move |state| {
+        state.db.delete_model_pricing(&model_id)?;
+        log::info!("已删除模型定价: {model_id}");
+        Ok(())
+    })
+    .await
+}
 
-    conn.execute(
-        "DELETE FROM model_pricing WHERE model_id = ?1",
-        rusqlite::params![model_id],
-    )
-    .map_err(|e| AppError::Database(format!("删除模型定价失败: {e}")))?;
+/// Set a pricing row's currency and declared input modalities
+/// (PRODUCT-40, PROV-33). `input_modalities: None` means unknown.
+#[tauri::command]
+pub async fn set_model_pricing_metadata(
+    handle: AppHandle,
+    model_id: String,
+    currency: String,
+    input_modalities: Option<Vec<String>>,
+) -> Result<(), AppError> {
+    timed_blocking_with_state("set_model_pricing_metadata", handle, move |state| {
+        state
+            .db
+            .set_model_pricing_metadata(&model_id, &currency, input_modalities.as_deref())?;
+        if let Err(e) = state.db.backfill_missing_usage_costs_for_model(&model_id) {
+            log::warn!("模型定价货币更新后回填历史用量成本失败 (model_id={model_id}): {e}");
+        }
+        Ok(())
+    })
+    .await
+}
 
-    log::info!("已删除模型定价: {model_id}");
-    Ok(())
+/// Effective FX rates for pricing rows not quoted in USD (units per 1 USD).
+#[tauri::command]
+pub async fn get_pricing_fx_rates(
+    handle: AppHandle,
+) -> Result<std::collections::BTreeMap<String, String>, AppError> {
+    timed_blocking_with_state("get_pricing_fx_rates", handle, |state| {
+        state.db.get_pricing_fx_rates()
+    })
+    .await
+}
+
+/// Store FX rates (units per 1 USD) used to convert non-USD pricing rows.
+#[tauri::command]
+pub async fn set_pricing_fx_rates(
+    handle: AppHandle,
+    rates: std::collections::BTreeMap<String, String>,
+) -> Result<(), AppError> {
+    timed_blocking_with_state("set_pricing_fx_rates", handle, move |state| {
+        state.db.set_pricing_fx_rates(&rates)
+    })
+    .await
 }
 
 /// 手动触发会话日志同步
 #[tauri::command]
-pub fn sync_session_usage(
+pub async fn sync_session_usage(
     state: State<'_, AppState>,
 ) -> Result<crate::services::session_usage::SessionSyncResult, AppError> {
-    // 同步 Claude 会话日志
-    let mut result = crate::services::session_usage::sync_claude_session_logs(&state.db)?;
-
-    // 同步 Codex 使用数据
-    match crate::services::session_usage_codex::sync_codex_usage(&state.db) {
-        Ok(codex_result) => {
-            result.imported += codex_result.imported;
-            result.skipped += codex_result.skipped;
-            result.files_scanned += codex_result.files_scanned;
-            result.errors.extend(codex_result.errors);
-        }
-        Err(e) => {
-            result.errors.push(format!("Codex 同步失败: {e}"));
-        }
-    }
-
-    // 同步 Gemini 使用数据
-    match crate::services::session_usage_gemini::sync_gemini_usage(&state.db) {
-        Ok(gemini_result) => {
-            result.imported += gemini_result.imported;
-            result.skipped += gemini_result.skipped;
-            result.files_scanned += gemini_result.files_scanned;
-            result.errors.extend(gemini_result.errors);
-        }
-        Err(e) => {
-            result.errors.push(format!("Gemini 同步失败: {e}"));
-        }
-    }
-
-    // 同步 OpenCode 使用数据
-    match crate::services::session_usage_opencode::sync_opencode_usage(&state.db) {
-        Ok(opencode_result) => {
-            result.imported += opencode_result.imported;
-            result.skipped += opencode_result.skipped;
-            result.files_scanned += opencode_result.files_scanned;
-            result.errors.extend(opencode_result.errors);
-        }
-        Err(e) => {
-            result.errors.push(format!("OpenCode 同步失败: {e}"));
-        }
-    }
-
-    Ok(result)
+    use crate::services::session_usage::{sync_all_session_usage, SyncTrigger};
+    // 文件扫描是阻塞操作：放到 blocking 线程池；与后台同步单飞（等待其完成后再跑）
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sync_all_session_usage(&db, SyncTrigger::Manual).unwrap_or_default()
+    })
+    .await
+    .map_err(|e| AppError::Database(format!("会话用量同步任务失败: {e}")))
 }
 
 /// 获取数据来源分布
 #[tauri::command]
-pub fn get_usage_data_sources(
-    state: State<'_, AppState>,
+pub async fn get_usage_data_sources(
+    handle: AppHandle,
 ) -> Result<Vec<crate::services::session_usage::DataSourceSummary>, AppError> {
-    crate::services::session_usage::get_data_source_breakdown(&state.db)
+    timed_blocking_with_state("get_usage_data_sources", handle, |state| {
+        crate::services::session_usage::get_data_source_breakdown(&state.db)
+    })
+    .await
 }
 
-/// 模型定价信息
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelPricingInfo {
-    pub model_id: String,
-    pub display_name: String,
-    pub input_cost_per_million: String,
-    pub output_cost_per_million: String,
-    pub cache_read_cost_per_million: String,
-    pub cache_creation_cost_per_million: String,
+#[cfg(test)]
+mod tests {
+    use super::validate_model_pricing_input;
+
+    #[test]
+    fn pricing_input_is_trimmed_and_validated() {
+        let ok = validate_model_pricing_input(
+            " m ".into(),
+            " M ".into(),
+            " 1 ".into(),
+            "2".into(),
+            "0".into(),
+            "0.5".into(),
+        )
+        .expect("valid input");
+        assert_eq!(ok.model_id, "m");
+        assert_eq!(ok.display_name, "M");
+        assert_eq!(ok.input_cost_per_million, "1");
+
+        assert!(validate_model_pricing_input(
+            " ".into(),
+            "M".into(),
+            "1".into(),
+            "1".into(),
+            "1".into(),
+            "1".into()
+        )
+        .is_err());
+        assert!(validate_model_pricing_input(
+            "m".into(),
+            "M".into(),
+            "-1".into(),
+            "1".into(),
+            "1".into(),
+            "1".into()
+        )
+        .is_err());
+    }
 }

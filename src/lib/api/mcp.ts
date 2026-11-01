@@ -1,87 +1,37 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, call } from "./invoke";
+import { commands, type JsonValue } from "@/lib/bindings";
 import type {
-  McpConfigResponse,
   McpServer,
   McpServerSpec,
   McpServersMap,
   McpStatus,
 } from "@/types";
 import type { AppId } from "./types";
+import type { McpSyncSkip } from "@/lib/bindings";
 
 export const mcpApi = {
   async getStatus(): Promise<McpStatus> {
-    return await invoke("get_claude_mcp_status");
+    return await call(commands.getClaudeMcpStatus());
   },
 
   async readConfig(): Promise<string | null> {
-    return await invoke("read_claude_mcp_config");
+    return await call(commands.readClaudeMcpConfig());
   },
 
   async upsertServer(
     id: string,
-    spec: McpServerSpec | Record<string, any>,
+    spec: McpServerSpec | Record<string, unknown>,
   ): Promise<boolean> {
-    return await invoke("upsert_claude_mcp_server", { id, spec });
+    // The spec is plain JSON from the MCP form (FE-ARCH-28).
+    return await call(commands.upsertClaudeMcpServer(id, spec as JsonValue));
   },
 
   async deleteServer(id: string): Promise<boolean> {
-    return await invoke("delete_claude_mcp_server", { id });
+    return await call(commands.deleteClaudeMcpServer(id));
   },
 
   async validateCommand(cmd: string): Promise<boolean> {
-    return await invoke("validate_mcp_command", { cmd });
-  },
-
-  /**
-   * @deprecated 使用 getAllServers() 代替（v3.7.0+）
-   */
-  async getConfig(app: AppId = "claude"): Promise<McpConfigResponse> {
-    return await invoke("get_mcp_config", { app });
-  },
-
-  /**
-   * @deprecated 使用 upsertUnifiedServer() 代替（v3.7.0+）
-   */
-  async upsertServerInConfig(
-    app: AppId,
-    id: string,
-    spec: McpServer,
-    options?: { syncOtherSide?: boolean },
-  ): Promise<boolean> {
-    const payload = {
-      app,
-      id,
-      spec,
-      ...(options?.syncOtherSide !== undefined
-        ? { syncOtherSide: options.syncOtherSide }
-        : {}),
-    };
-    return await invoke("upsert_mcp_server_in_config", payload);
-  },
-
-  /**
-   * @deprecated 使用 deleteUnifiedServer() 代替（v3.7.0+）
-   */
-  async deleteServerInConfig(
-    app: AppId,
-    id: string,
-    options?: { syncOtherSide?: boolean },
-  ): Promise<boolean> {
-    const payload = {
-      app,
-      id,
-      ...(options?.syncOtherSide !== undefined
-        ? { syncOtherSide: options.syncOtherSide }
-        : {}),
-    };
-    return await invoke("delete_mcp_server_in_config", payload);
-  },
-
-  /**
-   * @deprecated 使用 toggleApp() 代替（v3.7.0+）
-   */
-  async setEnabled(app: AppId, id: string, enabled: boolean): Promise<boolean> {
-    return await invoke("set_mcp_enabled", { app, id, enabled });
+    return await call(commands.validateMcpCommand(cmd));
   },
 
   // ========================================================================
@@ -97,16 +47,26 @@ export const mcpApi = {
 
   /**
    * 添加或更新 MCP 服务器（统一结构）
+   * Resolves to the enabled apps whose config directory is missing (nothing
+   * was written for them).
    */
-  async upsertUnifiedServer(server: McpServer): Promise<void> {
-    return await invoke("upsert_mcp_server", { server });
+  async upsertUnifiedServer(server: McpServer): Promise<McpSyncSkip[]> {
+    return (
+      (await invoke<McpSyncSkip[] | null>("upsert_mcp_server", { server })) ??
+      []
+    );
+  },
+
+  /** MCP-capable apps whose config directory is missing (CFG-46). */
+  async getSyncSkips(): Promise<McpSyncSkip[]> {
+    return await call(commands.getMcpSyncSkips());
   },
 
   /**
    * 删除 MCP 服务器
    */
   async deleteUnifiedServer(id: string): Promise<boolean> {
-    return await invoke("delete_mcp_server", { id });
+    return await call(commands.deleteMcpServer(id));
   },
 
   /**
@@ -116,14 +76,14 @@ export const mcpApi = {
     serverId: string,
     app: AppId,
     enabled: boolean,
-  ): Promise<void> {
-    return await invoke("toggle_mcp_app", { serverId, app, enabled });
+  ): Promise<McpSyncSkip[]> {
+    return (await call(commands.toggleMcpApp(serverId, app, enabled))) ?? [];
   },
 
   /**
    * 从所有应用导入 MCP 服务器
    */
   async importFromApps(): Promise<number> {
-    return await invoke("import_mcp_from_apps");
+    return await call(commands.importMcpFromApps());
   },
 };

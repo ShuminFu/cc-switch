@@ -17,28 +17,29 @@ pub async fn get_claude_config_status() -> Result<ConfigStatus, String> {
 
 use std::str::FromStr;
 
-fn invalid_json_format_error(error: serde_json::Error) -> String {
-    let lang = settings::get_settings()
+/// 当前提示语言：优先用户设置，未设置（首次安装）时按系统区域推断，
+/// 未知区域回退到英文（与前端 `getInitialLanguage` 和托盘一致）。
+fn current_message_language() -> String {
+    settings::get_settings()
         .language
-        .unwrap_or_else(|| "zh".to_string());
+        .unwrap_or_else(|| crate::tray::detect_system_tray_language().to_string())
+}
 
-    match lang.as_str() {
-        "en" => format!("Invalid JSON format: {error}"),
-        "ja" => format!("JSON形式が無効です: {error}"),
-        _ => format!("无效的 JSON 格式: {error}"),
+fn format_error_message(lang: &str, format: &str, error: &dyn std::fmt::Display) -> String {
+    match lang {
+        "zh" => format!("无效的 {format} 格式: {error}"),
+        "zh-TW" => format!("無效的 {format} 格式: {error}"),
+        "ja" => format!("{format}形式が無効です: {error}"),
+        _ => format!("Invalid {format} format: {error}"),
     }
 }
 
-fn invalid_toml_format_error(error: toml_edit::TomlError) -> String {
-    let lang = settings::get_settings()
-        .language
-        .unwrap_or_else(|| "zh".to_string());
+fn invalid_json_format_error(error: serde_json::Error) -> String {
+    format_error_message(&current_message_language(), "JSON", &error)
+}
 
-    match lang.as_str() {
-        "en" => format!("Invalid TOML format: {error}"),
-        "ja" => format!("TOML形式が無効です: {error}"),
-        _ => format!("无效的 TOML 格式: {error}"),
-    }
+fn invalid_toml_format_error(error: toml_edit::TomlError) -> String {
+    format_error_message(&current_message_language(), "TOML", &error)
 }
 
 fn validate_common_config_snippet(app_type: &str, snippet: &str) -> Result<(), String> {
@@ -139,11 +140,13 @@ pub async fn get_config_status(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_claude_code_config_path() -> Result<String, String> {
     Ok(get_claude_settings_path().to_string_lossy().to_string())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_config_dir(app: String) -> Result<String, String> {
     let dir = match AppType::from_str(&app).map_err(|e| e.to_string())? {
         AppType::Claude => config::get_claude_config_dir(),
@@ -162,6 +165,7 @@ pub async fn get_config_dir(app: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, String> {
     let config_dir = match AppType::from_str(&app).map_err(|e| e.to_string())? {
         AppType::Claude => config::get_claude_config_dir(),
@@ -189,6 +193,7 @@ pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn pick_directory(
     app: AppHandle,
     #[allow(non_snake_case)] defaultPath: Option<String>,
@@ -220,12 +225,14 @@ pub async fn pick_directory(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_app_config_path() -> Result<String, String> {
     let config_path = config::get_app_config_path();
     Ok(config_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn open_app_config_folder(handle: AppHandle) -> Result<bool, String> {
     let config_dir = config::get_app_config_dir();
 
@@ -242,6 +249,7 @@ pub async fn open_app_config_folder(handle: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_claude_common_config_snippet(
     state: tauri::State<'_, crate::store::AppState>,
 ) -> Result<Option<String>, String> {
@@ -252,6 +260,7 @@ pub async fn get_claude_common_config_snippet(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_claude_common_config_snippet(
     snippet: String,
     state: tauri::State<'_, crate::store::AppState>,
@@ -276,10 +285,13 @@ pub async fn set_claude_common_config_snippet(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_common_config_snippet(
     app_type: String,
     state: tauri::State<'_, crate::store::AppState>,
 ) -> Result<Option<String>, String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     state
         .db
         .get_config_snippet(&app_type)
@@ -290,6 +302,7 @@ pub async fn get_common_config_snippet(
 /// 放后端是为了走 toml_edit（保注释、保键序）；前端 smol-toml 的
 /// 整文档重序列化会破坏用户手写格式。
 #[tauri::command]
+#[specta::specta]
 pub async fn update_toml_common_config_snippet(
     config_toml: String,
     snippet_toml: String,
@@ -303,30 +316,55 @@ pub async fn update_toml_common_config_snippet(
     .map_err(|e| e.to_string())
 }
 
+/// 保存通用配置片段。会迁移旧片段、重写当前供应商的 live 文件（接管期间
+/// 改写备份，需要等待代理的切换锁），整体放到阻塞线程池执行。
 #[tauri::command]
+#[specta::specta]
 pub async fn set_common_config_snippet(
     app_type: String,
     snippet: String,
-    state: tauri::State<'_, crate::store::AppState>,
+    handle: tauri::AppHandle,
+) -> Result<(), String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
+    super::timed_blocking_with_state("set_common_config_snippet", handle, move |state| {
+        apply_common_config_snippet(state, &app_type, snippet)
+    })
+    .await
+}
+
+/// Save `snippet` for `app_type` and re-project the live files that use it.
+///
+/// The DB steps run first; when a live write then fails, the stored snippet
+/// and its cleared flag are put back so the DB and the live files do not
+/// disagree (CMD-25).
+fn apply_common_config_snippet(
+    state: &crate::store::AppState,
+    app_type: &str,
+    snippet: String,
 ) -> Result<(), String> {
     let is_cleared = snippet.trim().is_empty();
     let old_snippet = state
         .db
-        .get_config_snippet(&app_type)
+        .get_config_snippet(app_type)
+        .map_err(|e| e.to_string())?;
+    let old_cleared = state
+        .db
+        .is_config_snippet_cleared(app_type)
         .map_err(|e| e.to_string())?;
 
-    validate_common_config_snippet(&app_type, &snippet)?;
+    validate_common_config_snippet(app_type, &snippet)?;
 
     let value = if is_cleared { None } else { Some(snippet) };
 
-    if matches!(app_type.as_str(), "claude" | "codex" | "gemini") {
+    if matches!(app_type, "claude" | "codex" | "gemini") {
         if let Some(legacy_snippet) = old_snippet
             .as_deref()
             .filter(|value| !value.trim().is_empty())
         {
-            let app = AppType::from_str(&app_type).map_err(|e| e.to_string())?;
+            let app = AppType::from_str(app_type).map_err(|e| e.to_string())?;
             crate::services::provider::ProviderService::migrate_legacy_common_config_usage(
-                state.inner(),
+                state,
                 app,
                 legacy_snippet,
             )
@@ -336,20 +374,35 @@ pub async fn set_common_config_snippet(
 
     state
         .db
-        .set_config_snippet(&app_type, value)
+        .set_config_snippet(app_type, value)
         .map_err(|e| e.to_string())?;
     state
         .db
-        .set_config_snippet_cleared(&app_type, is_cleared)
+        .set_config_snippet_cleared(app_type, is_cleared)
         .map_err(|e| e.to_string())?;
 
-    if matches!(app_type.as_str(), "claude" | "codex" | "gemini") {
-        let app = AppType::from_str(&app_type).map_err(|e| e.to_string())?;
-        crate::services::provider::ProviderService::sync_current_provider_for_app(
-            state.inner(),
-            app,
-        )
-        .map_err(|e| e.to_string())?;
+    if let Err(err) = project_common_config_snippet(state, app_type) {
+        let reverted = state
+            .db
+            .set_config_snippet(app_type, old_snippet)
+            .and_then(|_| state.db.set_config_snippet_cleared(app_type, old_cleared));
+        if let Err(revert_err) = reverted {
+            log::warn!("Reverting the {app_type} common config snippet failed: {revert_err}");
+        }
+        return Err(err);
+    }
+    Ok(())
+}
+
+/// The live writes that follow a snippet change.
+fn project_common_config_snippet(
+    state: &crate::store::AppState,
+    app_type: &str,
+) -> Result<(), String> {
+    if matches!(app_type, "claude" | "codex" | "gemini") {
+        let app = AppType::from_str(app_type).map_err(|e| e.to_string())?;
+        crate::services::provider::ProviderService::sync_current_provider_for_app(state, app)
+            .map_err(|e| e.to_string())?;
     }
 
     if app_type == "omo"
@@ -359,11 +412,8 @@ pub async fn set_common_config_snippet(
             .map_err(|e| e.to_string())?
             .is_some()
     {
-        crate::services::OmoService::write_config_to_file(
-            state.inner(),
-            &crate::services::omo::STANDARD,
-        )
-        .map_err(|e| e.to_string())?;
+        crate::services::OmoService::write_config_to_file(state, &crate::services::omo::STANDARD)
+            .map_err(|e| e.to_string())?;
     }
     if app_type == "omo-slim"
         && state
@@ -372,18 +422,83 @@ pub async fn set_common_config_snippet(
             .map_err(|e| e.to_string())?
             .is_some()
     {
-        crate::services::OmoService::write_config_to_file(
-            state.inner(),
-            &crate::services::omo::SLIM,
-        )
-        .map_err(|e| e.to_string())?;
+        crate::services::OmoService::write_config_to_file(state, &crate::services::omo::SLIM)
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::validate_common_config_snippet;
+    use super::{format_error_message, validate_common_config_snippet};
+
+    /// A failed live write leaves the stored snippet unchanged (CMD-25).
+    #[test]
+    // Provider writes update the process-wide settings cache.
+    #[serial_test::serial]
+    fn snippet_is_reverted_when_the_live_write_fails() {
+        use crate::database::Database;
+        use crate::provider::Provider;
+        use crate::store::AppState;
+        use std::sync::Arc;
+
+        let _home = crate::test_support::isolated_home();
+        let db = Arc::new(Database::memory().unwrap());
+        let provider = Provider::with_id(
+            "p1".into(),
+            "P1".into(),
+            serde_json::json!({ "env": { "ANTHROPIC_BASE_URL": "https://example.test" } }),
+            None,
+        );
+        db.save_provider("claude", &provider).unwrap();
+        db.set_current_provider("claude", "p1").unwrap();
+        db.set_config_snippet("claude", Some(r#"{"a":1}"#.to_string()))
+            .unwrap();
+        // settings.json is a directory: the live write fails
+        std::fs::create_dir_all(crate::config::get_claude_settings_path()).unwrap();
+
+        let state = AppState::new(db.clone());
+        let result = super::apply_common_config_snippet(&state, "claude", r#"{"b":2}"#.to_string());
+        assert!(result.is_err());
+        assert_eq!(
+            db.get_config_snippet("claude").unwrap().as_deref(),
+            Some(r#"{"a":1}"#)
+        );
+        assert!(!db.is_config_snippet_cleared("claude").unwrap());
+
+        // with a writable live file the snippet is saved
+        std::fs::remove_dir_all(crate::config::get_claude_settings_path()).unwrap();
+        super::apply_common_config_snippet(&state, "claude", r#"{"b":2}"#.to_string()).unwrap();
+        assert_eq!(
+            db.get_config_snippet("claude").unwrap().as_deref(),
+            Some(r#"{"b":2}"#)
+        );
+    }
+
+    #[test]
+    fn format_error_message_localizes_and_falls_back_to_english() {
+        assert_eq!(
+            format_error_message("en", "JSON", &"boom"),
+            "Invalid JSON format: boom"
+        );
+        assert_eq!(
+            format_error_message("zh", "TOML", &"boom"),
+            "无效的 TOML 格式: boom"
+        );
+        assert_eq!(
+            format_error_message("zh-TW", "JSON", &"boom"),
+            "無效的 JSON 格式: boom"
+        );
+        assert_eq!(
+            format_error_message("ja", "JSON", &"boom"),
+            "JSON形式が無効です: boom"
+        );
+        // 未知语言码回退到英文，而不是简体中文
+        assert_eq!(
+            format_error_message("de", "JSON", &"boom"),
+            "Invalid JSON format: boom"
+        );
+    }
 
     #[test]
     fn validate_common_config_snippet_accepts_comment_only_codex_snippet() {
@@ -403,6 +518,7 @@ mod tests {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn extract_common_config_snippet(
     appType: String,
     settingsConfig: Option<String>,

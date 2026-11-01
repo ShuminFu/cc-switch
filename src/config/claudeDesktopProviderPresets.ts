@@ -8,8 +8,9 @@
  *
  * 翻译来源：src/config/claudeProviderPresets.ts（排除 OAuth 与不兼容预设）
  */
-import { ProviderCategory } from "../types";
+import type { ProviderCategory } from "../types";
 import type { PresetTheme } from "./claudeProviderPresets";
+import { registerPresetCatalog } from "./presetCatalog";
 
 export type ClaudeDesktopApiFormat =
   | "anthropic"
@@ -1143,3 +1144,6 @@ export const claudeDesktopProviderPresets: ClaudeDesktopProviderPreset[] = [
     iconColor: "#000000",
   },
 ];
+
+// Remote signed catalog overlay (PRODUCT-07); the list above stays the default.
+registerPresetCatalog("claudeDesktop", claudeDesktopProviderPresets);

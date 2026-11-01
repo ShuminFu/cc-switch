@@ -1,0 +1,96 @@
+name: Flatpak (community build smoke test)
+
+# The Flatpak is not an official release asset (flatpak/README.md). This
+# monthly job keeps the manifest building on the current GNOME runtime by
+# turning a freshly built .deb into a .flatpak bundle (CI-23).
+
+on:
+  schedule:
+    - cron: "41 4 3 * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "flatpak/**"
+      - ".github/workflows/flatpak.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flatpak-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  deb:
+    name: Build .deb
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Linux system deps
+        uses: ./.github/actions/linux-deps
+        with:
+          bundle: "true"
+
+      - name: Setup Rust (from rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Setup Node.js and pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri -> target
+          key: flatpak-deb
+
+      - name: Build .deb (unsigned, no updater artifacts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' '{"bundle":{"createUpdaterArtifacts":false}}' > "$RUNNER_TEMP/no-updater.json"
+          pnpm tauri build --bundles deb --config "$RUNNER_TEMP/no-updater.json"
+          cp "$(find src-tauri/target/release/bundle -name '*.deb' | head -n 1)" cc-switch.deb
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: flatpak-input-deb
+          path: cc-switch.deb
+          if-no-files-found: error
+          retention-days: 3
+
+  flatpak:
+    name: Build .flatpak
+    needs: deb
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-48
+      options: --privileged
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Download .deb
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: flatpak-input-deb
+          path: flatpak
+
+      - name: Validate desktop file and metainfo
+        run: |
+          desktop-file-validate flatpak/com.ccswitch.desktop.desktop
+          appstreamcli validate --no-net --explain flatpak/com.ccswitch.desktop.metainfo.xml || true
+
+      - name: Build Flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
+        with:
+          bundle: CC-Switch-Linux-x86_64.flatpak
+          manifest-path: flatpak/com.ccswitch.desktop.yml
+          cache: false
+          upload-artifact: true

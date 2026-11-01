@@ -57,9 +57,17 @@ impl Database {
     pub fn save_prompt(&self, app_type: &str, prompt: &Prompt) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         conn.execute(
-            "INSERT OR REPLACE INTO prompts (
+            // DB-23: a real upsert (REPLACE would delete + re-insert the row).
+            "INSERT INTO prompts (
                 id, app_type, name, content, description, enabled, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(id, app_type) DO UPDATE SET
+                name = excluded.name,
+                content = excluded.content,
+                description = excluded.description,
+                enabled = excluded.enabled,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at",
             params![
                 prompt.id,
                 app_type,
@@ -73,6 +81,21 @@ impl Database {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
+    }
+
+    /// Make `id` the only enabled prompt of `app_type` in one statement (SVC-11).
+    ///
+    /// Only rows whose flag changes are touched; a failure leaves every row as
+    /// it was, so two prompts can never end up enabled.
+    pub fn set_enabled_prompt(&self, app_type: &str, id: &str) -> Result<usize, AppError> {
+        self.with_transaction(|tx| {
+            let changed = tx.execute(
+                "UPDATE prompts SET enabled = (id = ?1)
+                 WHERE app_type = ?2 AND enabled IS NOT (id = ?1)",
+                params![id, app_type],
+            )?;
+            Ok(changed)
+        })
     }
 
     /// 删除提示词

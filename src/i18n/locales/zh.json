@@ -40,7 +40,14 @@
     "deleting": "删除中...",
     "auto": "自动",
     "enabled": "已开启",
-    "notSet": "未设置"
+    "notSet": "未设置",
+    "retry": "重试",
+    "unsavedChanges": "有未保存的更改",
+    "copyFailed": "复制失败",
+    "unsavedChangesTitle": "放弃未保存的更改？",
+    "unsavedChangesMessage": "你的编辑尚未保存，将会丢失。",
+    "discard": "放弃",
+    "undo": "撤销"
   },
   "firstRunNotice": {
     "title": "欢迎使用 CC Switch",
@@ -166,6 +173,7 @@
     "usageSaveFailed": "用量查询配置保存失败",
     "geminiConfig": "Gemini 配置",
     "geminiConfigHint": "使用 .env 格式配置 Gemini",
+    "duplicateLiveIdsLoadFailed": "读取配置中的供应商标识失败，请先修复配置后再试",
     "form": {
       "gemini": {
         "model": "模型",
@@ -173,6 +181,52 @@
         "oauthHint": "Google 官方使用 OAuth 个人认证，无需填写 API Key。首次使用时会自动打开浏览器进行登录。",
         "apiKeyPlaceholder": "请输入 Gemini API Key"
       }
+    },
+    "loadFailed": "加载供应商失败",
+    "tabProviderFor": "{{app}} 供应商",
+    "configStatusLoading": "正在检查应用配置…",
+    "copyName": "{{name}} 副本",
+    "copyShareLink": "复制分享链接（不含 API Key）",
+    "shareLinkCopied": "分享链接已复制（未包含 API Key）",
+    "shareLinkCopyFailed": "复制分享链接失败：{{error}}",
+    "searchShortcut": "搜索供应商",
+    "searchCloseShortcut": "关闭供应商搜索",
+    "duplicateName": "{{name}} 副本",
+    "filter": {
+      "label": "筛选供应商",
+      "all": "全部",
+      "inQueue": "在故障转移队列中"
+    },
+    "importPicker": {
+      "done": "已导入 {{count}} 个供应商",
+      "failed": "导入 {{count}} 个供应商后失败",
+      "title": "从实时配置导入",
+      "description": "该应用当前配置文件中定义的供应商。选择要添加到 CC Switch 的项。",
+      "readFailed": "无法读取实时配置。",
+      "none": "实时配置中未找到供应商。",
+      "alreadyAdded": "已在列表中",
+      "import": "导入所选（{{count}}）",
+      "open": "从实时配置中选择供应商…"
+    },
+    "preview": {
+      "title": "预览更改",
+      "description": "切换到 {{name}} 时将写入实时配置文件的内容。切换前不会写入任何内容。",
+      "failed": "无法生成预览：{{error}}",
+      "unsupported": "该应用暂不支持预览。",
+      "noChanges": "切换不会更改任何实时文件。",
+      "newFile": "新文件"
+    },
+    "health": {
+      "title": "供应商健康状态",
+      "description": "各供应商端点的可达性，以及本地路由记录到的失败情况。",
+      "notCheckable": "官方：不探测",
+      "checkFailed": "检测失败",
+      "notChecked": "尚未检测",
+      "failures": "连续失败 {{count}} 次",
+      "lastSuccess": "{{time}} 正常",
+      "noTraffic": "无路由请求",
+      "checkAll": "全部检测（{{count}}）",
+      "open": "供应商健康状态…"
     }
   },
   "claudeCode": {
@@ -222,7 +276,9 @@
       "tooltip": {
         "active": "Claude Desktop 本地路由已开启 - {{address}}:{{port}}",
         "inactive": "开启 Claude Desktop 本地路由，用于需要模型映射或格式转换的供应商。当前配置地址：{{address}}:{{port}}"
-      }
+      },
+      "stopBlockedByTakeover": "其它应用正在使用代理接管。请先在设置中关闭对应应用接管，再停止本地路由。",
+      "stopBlockedByDesktop": "Claude Desktop 仍通过本地路由发送请求。请先将 Claude Desktop 切换到直连供应商，再停止本地路由。"
     }
   },
   "notifications": {
@@ -269,7 +325,12 @@
     "backfillWarning": "切换成功，但旧供应商配置回填失败，您手动修改的配置可能未保存",
     "windowControlFailed": "窗口控制失败：{{error}}",
     "officialBlockedByProxy": "本地路由模式下不能切换到官方供应商，使用路由访问官方 API 可能导致账号被封禁",
-    "proxyOfficialWarning": "当前供应商 {{name}} 是官方供应商，建议切换到第三方供应商后再使用本地路由"
+    "proxyOfficialWarning": "当前供应商 {{name}} 是官方供应商，建议切换到第三方供应商后再使用本地路由",
+    "proxyReasonClaudeDesktop": "使用 Claude Desktop 本地路由模式",
+    "openclawModelsRegisterFailed": "供应商已添加，但其模型无法注册到 OpenClaw：{{error}}",
+    "undoDeleteFailed": "无法恢复供应商：{{error}}",
+    "removeFromConfigFailed": "从配置中移除失败：{{error}}",
+    "switchUndone": "已切换回去"
   },
   "confirm": {
     "deleteProvider": "删除供应商",
@@ -473,7 +534,18 @@
       "deleteSuccess": "备份已删除",
       "deleteFailed": "删除失败",
       "deleteConfirmTitle": "确认删除备份",
-      "deleteConfirmMessage": "此备份将被永久删除，此操作无法撤消。"
+      "deleteConfirmMessage": "此备份将被永久删除，此操作无法撤消。",
+      "openFolderFailed": "无法打开备份文件夹",
+      "showInFolder": "在文件夹中显示",
+      "keepUsageHistory": "保留本设备自该备份以来记录的使用历史",
+      "kind": {
+        "manual": "手动",
+        "manualHint": "通过“立即备份”创建，不会被自动轮换清理",
+        "premigration": "迁移前",
+        "premigrationHint": "在数据库升级或重建前自动创建",
+        "safety": "安全备份",
+        "safetyHint": "在导入、恢复或同步下载替换数据库前自动创建"
+      }
     },
     "webdavSync": {
       "title": "WebDAV 云同步",
@@ -707,7 +779,9 @@
       "confirmTitle": "迁移技能存储",
       "confirmMessage": "将移动 {{count}} 个技能到新位置，是否继续？",
       "migrationSuccess": "已成功迁移 {{count}} 个技能",
-      "migrationPartial": "迁移了 {{migrated}} 个技能，{{errors}} 个失败，请查看日志"
+      "migrationPartial": "迁移了 {{migrated}} 个技能，{{errors}} 个失败，请查看日志",
+      "migrationMoreErrors": "…以及另外 {{count}} 项",
+      "migrationErrorsTitle": "以下技能仍保留在原位置，需要手动移动："
     },
     "skillSync": {
       "title": "Skills 同步方式",
@@ -868,9 +942,109 @@
       "pricingSaveFailed": "保存计费配置失败：{{error}}",
       "pricingLoadFailed": "加载计费配置失败：{{error}}",
       "defaultCostMultiplierRequired": "默认倍率不能为空",
-      "defaultCostMultiplierInvalid": "默认倍率格式不正确"
+      "defaultCostMultiplierInvalid": "默认倍率格式不正确",
+      "urlLabel": "代理 URL",
+      "hidePassword": "隐藏密码",
+      "showPassword": "显示密码",
+      "appFieldError": "{{app}}：{{message}}",
+      "pricingSaveFailedBadge": "（未保存）"
     },
-    "saveFailedGeneric": "保存失败，请重试"
+    "saveFailedGeneric": "保存失败，请重试",
+    "installScriptSourcesHint": "部分命令会下载并运行以下安装脚本，运行前请先检查：",
+    "configLoadFailed": "无法加载当前设置，已禁用编辑。{{detail}}",
+    "revertImport": "撤销导入",
+    "importConfirmTitle": "替换所有当前数据？",
+    "importConfirmMessage": "导入 {{file}} 将替换所有供应商、MCP 服务器、提示词和设置，并重写生效中的 CLI 配置文件。导入前会先创建安全备份，以便撤销导入。",
+    "revertImportConfirmTitle": "撤销此次导入？",
+    "revertImportConfirmMessage": "恢复导入前创建的备份 {{backupId}}？导入后所做的更改将丢失。",
+    "revertImportSuccess": "已撤销导入",
+    "revertImportFailed": "撤销导入失败：{{message}}",
+    "unsavedChanges": "有未保存的更改",
+    "discardChanges": "放弃",
+    "preserveCodexOfficialAuthOnSwitchDefaultOnDescription": "默认开启。控制未开启本地路由时切换第三方供应商的行为；路由接管期间始终保留 Codex 官方登录。",
+    "cloudSync": {
+      "conflict": {
+        "localChanged": "自上次同步以来，本地数据已发生变化。现在下载将用云端数据替换这些本地更改。如需保留，请取消并先上传。",
+        "overwriteLocal": "覆盖本地数据",
+        "overwriteRemote": "覆盖云端数据",
+        "remoteChanged": "自本设备上次同步以来，云端数据已被其他设备更新。现在上传将用本设备的数据替换云端数据。如需保留，请取消并先下载。",
+        "title": "同步冲突"
+      },
+      "insecureTransport": "该端点使用明文 HTTP：凭据和同步数据将以未加密形式传输。除非是在受信任的本地网络中，否则请使用 HTTPS。",
+      "remoteChangedNotice": "自本设备上次同步以来，其他设备已上传过数据。覆盖这些数据前会先征求你的确认。"
+    },
+    "healthProbe": {
+      "description": "路由服务运行期间，定期向故障转移队列中处于熔断状态的供应商发送轻量请求，使其无需占用你的真实请求即可恢复",
+      "interval": "探测间隔",
+      "minutes": "{{count}} 分钟",
+      "seconds": "{{count}} 秒",
+      "title": "后台健康探测"
+    },
+    "notifications": {
+      "budgetExceeded": "已达到预算上限",
+      "budgetExceededDescription": "当供应商超出每日或每月上限时通知",
+      "circuitOpen": "熔断器已打开",
+      "circuitOpenDescription": "当供应商因连续失败被暂停时通知",
+      "failover": "故障转移切换",
+      "failoverDescription": "当路由服务故障转移到其他供应商时通知",
+      "hint": "即使窗口已关闭也会显示。每个供应商的每类通知每 5 分钟最多触发一次。",
+      "quotaExhausted": "订阅额度已用尽",
+      "quotaExhaustedDescription": "当订阅用量窗口达到 100% 时通知",
+      "syncError": "同步错误",
+      "syncErrorDescription": "当 WebDAV 或 S3 自动同步失败时通知",
+      "title": "系统通知"
+    },
+    "syncEncryption": {
+      "change": "更改密码短语",
+      "confirm": "再次输入密码短语",
+      "description": "上传前使用密码短语加密同步的数据库（包括 API 密钥）和技能。每台设备都需要使用相同的密码短语。一旦丢失，云端副本将无法恢复。请先在所有设备上更新 CC Switch。",
+      "disabled": "同步加密已关闭。",
+      "mismatch": "两次输入的密码短语不一致。",
+      "passphrase": "密码短语",
+      "save": "保存密码短语",
+      "saved": "同步加密已开启。下次上传将被加密。",
+      "storedInFile": "系统钥匙串不可用：密码短语已保存在 settings.json 中（仅所有者可访问）。",
+      "storedInKeychain": "密码短语已保存在系统钥匙串中。",
+      "title": "端到端加密",
+      "tooShort": "请至少使用 {{count}} 个字符。",
+      "unavailable": "无法从系统钥匙串读取密码短语。在你重新输入之前，上传将暂停。"
+    },
+    "secretsVault": {
+      "enabled": "供应商 API Key 现已存储在系统钥匙串中。",
+      "disabled": "供应商 API Key 已重新存储在数据库中。",
+      "title": "将 API Key 存储在系统钥匙串中",
+      "description": "将供应商 API Key 和令牌从 CC Switch 数据库移至系统钥匙串。之后数据库、其备份、SQL 导出和云同步中仅保留占位符。Claude Code、Codex 等工具的配置文件中仍包含当前生效的密钥。",
+      "unavailable": "此设备上没有可用的系统钥匙串，因此无法开启此选项。在 Linux 上，请运行 Secret Service 提供程序，如 GNOME Keyring 或 KWallet。",
+      "exportWarning": "开启此选项后，SQL 导出和云同步不包含密钥。在其他设备上需要重新输入 API Key；已有该供应商的设备会保留自己的密钥。",
+      "unresolved": "{{count}} 个 API Key 不在此设备的钥匙串中。请编辑以下供应商并重新输入密钥：",
+      "pendingIn": "仍有 {{count}} 个密钥存储在数据库中。",
+      "pendingOut": "部分密钥仍在钥匙串中。",
+      "retry": "重试"
+    },
+    "search": {
+      "shortcut": "搜索设置",
+      "placeholder": "搜索设置…",
+      "label": "搜索设置",
+      "noResults": "没有匹配的设置"
+    },
+    "codexHistoryBackups": {
+      "purged": "已删除 {{size}} 的 Codex 历史备份",
+      "purgeFailed": "删除 Codex 历史备份失败",
+      "title": "历史迁移备份",
+      "empty": "磁盘上没有备份。",
+      "usage": "磁盘占用 {{total}}：{{purgeable}} 可安全删除，{{ledger}} 为恢复记录。",
+      "purge": "删除备份",
+      "confirmTitle": "删除 Codex 历史备份？",
+      "confirmMessage": "这将删除 Codex 历史迁移时创建的备份（{{size}}）。你的会话不受影响。",
+      "includeLedger": "同时删除恢复记录（{{size}}）。删除后关闭历史统一将无法再恢复原始历史。"
+    },
+    "configDirSource": {
+      "override": "cc-switch 设置",
+      "env": "{{var}} 环境变量",
+      "default": "默认",
+      "inUse": "使用中：{{path}}（{{source}}）",
+      "missing": "目录尚不存在"
+    }
   },
   "apps": {
     "claude": "Claude",
@@ -890,7 +1064,14 @@
     "contextWindowInvalid": "上下文窗口必须是正整数",
     "profile": "客户端模型档位",
     "rawConfig": "config.toml",
-    "invalidToml": "config.toml 格式错误：{{error}}"
+    "invalidToml": "config.toml 格式错误：{{error}}",
+    "validation": {
+      "configEmpty": "config.toml 不能为空",
+      "missingDefaultModel": "缺少 [models] 默认模型表",
+      "missingField": "缺少 {{field}}",
+      "missingKey": "缺少 api_key 或 env_key",
+      "contextWindow": "context_window 必须是正整数"
+    }
   },
   "sessionManager": {
     "title": "会话管理",
@@ -972,7 +1153,35 @@
     "messageCopied": "已复制消息内容",
     "conversationHistory": "对话记录",
     "expandContent": "展开完整内容",
-    "collapseContent": "收起"
+    "collapseContent": "收起",
+    "searchTranscripts": "搜索消息内容",
+    "searchIndexing": "正在索引会话内容…结果会陆续增加",
+    "scanErrors": "部分会话无法读取",
+    "messagesLoadFailed": "加载此会话失败",
+    "showMore": "显示更多（剩余 {{count}} 条）",
+    "undoDelete": "撤销",
+    "restoreFailed": "无法恢复会话",
+    "annotations": {
+      "pinned": "已置顶",
+      "archivedBadge": "已归档",
+      "unpin": "取消置顶会话",
+      "pin": "置顶会话",
+      "unarchive": "取消归档会话",
+      "archive": "归档会话",
+      "showArchived": "显示已归档（{{count}}）",
+      "saveFailed": "无法保存会话标签",
+      "editTags": "编辑标签",
+      "tagsInput": "标签，用逗号分隔",
+      "tagsPlaceholder": "bugfix, client-a"
+    },
+    "trash": {
+      "restored": "会话已恢复",
+      "open": "最近删除",
+      "title": "最近删除的会话",
+      "description": "已删除的会话会保留 30 天。恢复后会回到原来的位置。",
+      "empty": "没有最近删除的会话",
+      "restore": "恢复"
+    }
   },
   "console": {
     "providerSwitchReceived": "收到供应商切换事件:",
@@ -1163,7 +1372,34 @@
     "fetchModelsAuthFailed": "API Key 无效或无权限",
     "fetchModelsNotSupported": "该供应商不支持获取模型列表",
     "fetchModelsEndpointNotFound": "未找到可用的模型列表端点，请检查 Base URL 或确认供应商是否开放该接口",
-    "fetchModelsTimeout": "请求超时，请检查网络连接"
+    "fetchModelsTimeout": "请求超时，请检查网络连接",
+    "providerKeyStatusLoading": "正在加载供应商标识状态，请稍后再试",
+    "requiredFields": "请填写供应商名称、API 地址、API Key 和模型",
+    "validation": {
+      "invalidUrl": "请输入有效的网址",
+      "configJsonInvalid": "配置 JSON 格式错误",
+      "jsonError": "JSON 格式错误：{{detail}}",
+      "jsonErrorAtPosition": "JSON 格式错误：{{detail}}（位置：{{position}}）",
+      "jsonErrorAtLineColumn": "JSON 格式错误：第 {{line}} 行，第 {{column}} 列",
+      "fieldConfig": "配置",
+      "fieldCommonConfigSnippet": "通用配置片段",
+      "fieldExtractedConfig": "提取的配置",
+      "fieldMustBeObject": "{{field}}必须是 JSON 对象",
+      "fieldJsonSyntaxError": "{{field}} JSON 格式错误，请检查语法",
+      "commonConfigParseFailed": "配置 JSON 解析失败，无法应用通用配置",
+      "fieldUnsafeKey": "{{field}} 不能包含 __proto__、constructor 或 prototype 键"
+    },
+    "codexAuthInvalid": "auth.json 不是有效的 JSON，请修正后再保存。",
+    "codexAuthNotObject": "auth.json 必须是 JSON 对象。",
+    "codexConfigInvalid": "config.toml 存在语法错误，请修正后再保存。",
+    "geminiConfigInvalid": "Gemini config.json 不是有效的 JSON，请修正后再保存。",
+    "geminiConfigNotObject": "Gemini config.json 必须是 JSON 对象。",
+    "settingsConfigInvalid": "供应商配置不是有效的 JSON 对象。",
+    "removeModel": "删除模型",
+    "providerKeyStatusUnavailable": "无法检查此供应商标识是否已被使用。请重新加载后重试。",
+    "moveModelUp": "上移模型",
+    "moveModelDown": "下移模型",
+    "chooseModel": "选择模型"
   },
   "copilot": {
     "authSection": "GitHub Copilot 认证",
@@ -1246,7 +1482,9 @@
     "testUnavailable": "测速功能不可用",
     "noResult": "未返回结果",
     "testFailed": "测速失败: {{error}}",
-    "empty": "暂无端点"
+    "empty": "暂无端点",
+    "endpointCount": "{{count}} 个端点",
+    "removeEndpoint": "删除端点"
   },
   "providerAdvanced": {
     "pricingConfig": "计费配置",
@@ -1335,7 +1573,10 @@
     "reasoningEffortHint": "上游支持 low/high/max 等思考深度控制时启用。启用后会自动启用思考模式，并把 Codex 的 reasoning.effort 转成上游 Chat 参数。",
     "reasoningGroupTitle": "思考能力",
     "reasoningSectionHint": "预设供应商已自动配置；自定义供应商会按名称/地址自动推断。仅当自动识别不准时才需手动覆盖。",
-    "advancedSectionHint": "包含上游格式、模型映射、思考能力与自定义 User-Agent。使用 Chat Completions 协议的供应商需开启路由接管才能使用。"
+    "advancedSectionHint": "包含上游格式、模型映射、思考能力与自定义 User-Agent。使用 Chat Completions 协议的供应商需开启路由接管才能使用。",
+    "noCommonConfigToApply": "通用配置片段为空或没有可写入的内容",
+    "fixSmartQuotes": "替换用作字符串分隔符的智能引号",
+    "tomlInvalid": "TOML 格式无效"
   },
   "geminiConfig": {
     "envFile": "环境变量 (.env)",
@@ -1405,7 +1646,8 @@
     "modelExtraFieldKeyPlaceholder": "variants",
     "sdkOptions": "SDK 选项",
     "modelOptionKeyPlaceholder": "provider",
-    "modelOptionValuePlaceholder": "{\"order\": [\"baseten\"]}"
+    "modelOptionValuePlaceholder": "{\"order\": [\"baseten\"]}",
+    "modelIdDuplicate": "ID 为 {{id}} 的模型已存在"
   },
   "providerPreset": {
     "label": "预设供应商",
@@ -1418,7 +1660,13 @@
     "sortAriaLabel": "切换预设排序",
     "sortNameAscTooltip": "按名称 A-Z 排序",
     "sortOriginalTooltip": "恢复原始顺序",
-    "noSearchResults": "没有匹配的预设供应商。"
+    "noSearchResults": "没有匹配的预设供应商。",
+    "hideSponsoredAriaLabel": "隐藏赞助预设",
+    "hideSponsoredTooltip": "隐藏赞助预设",
+    "showSponsoredTooltip": "显示赞助预设",
+    "sponsorDisclosure": "带有星标或爱心标记的预设为赞助推广位；通过其注册链接注册，CC Switch 可能获得推荐佣金。",
+    "sponsorPolicyLink": "赞助政策",
+    "sponsoredTooltip": "赞助推广位：该合作伙伴支持 CC Switch，通过其注册链接注册，CC Switch 可能获得推荐佣金。"
   },
   "usage": {
     "title": "使用统计",
@@ -1591,7 +1839,41 @@
     "modelsDevTruncated": "仅显示前 {{shown}} 条，共 {{total}} 条结果，请缩小搜索范围",
     "modelsDevDefaultHint": "默认展示最新发布的 {{shown}} 个模型（共 {{total}} 个），输入关键字可全量搜索",
     "cacheReadCostPerMillion": "缓存读取成本 (每百万 tokens, USD)",
-    "cacheCreationCostPerMillion": "缓存写入成本 (每百万 tokens, USD)"
+    "cacheCreationCostPerMillion": "缓存写入成本 (每百万 tokens, USD)",
+    "unpriced": "未定价",
+    "modelIdDuplicate": "{{id}} 的定价已存在。",
+    "modelIdNormalizedHint": "将保存为 {{id}}",
+    "statusErrors": "错误（≥400）",
+    "rangeTooLong": "时间范围最多为 {{days}} 天。",
+    "customRangeMaxHint": "支持日期和时间，最多 {{days}} 天",
+    "exportSuccess": "已将 {{count}} 条请求导出到 {{path}}",
+    "exportFailed": "导出失败：{{message}}",
+    "export": "导出",
+    "exportCsv": "请求日志（CSV）",
+    "exportJson": "请求日志（JSON）",
+    "budget": {
+      "daily": "每日上限（USD）",
+      "dailyTooltip": "每日：{{usage}} / {{limit}}",
+      "description": "为每个供应商设置每日和每月支出上限，并可选择在达到上限后拦截请求。",
+      "enforceDescription": "关闭：上限仅以进度形式显示。开启：当供应商达到每日或每月上限后，本地路由服务将停止向其发送请求并返回明确的错误（或故障转移到队列中的下一个供应商）。成本为基于你的定价表的估算值。",
+      "enforceTitle": "达到上限时拦截请求",
+      "exceededTooltip": "已达到预算上限",
+      "invalid": "请输入大于 0 的美元金额，或留空表示不设上限。",
+      "monthLabel": "本月",
+      "monthly": "每月上限（USD）",
+      "monthlyTooltip": "每月：{{usage}} / {{limit}}",
+      "noProviders": "此应用尚未配置供应商。",
+      "saveFailed": "保存预算上限失败：{{error}}",
+      "saved": "预算上限已保存",
+      "thisMonth": "本月",
+      "title": "预算上限",
+      "today": "今日",
+      "todayLabel": "今日",
+      "exceededToast": "{{provider}} 已达到{{period}}预算上限",
+      "exceededBadge": "已超出",
+      "periodDaily": "每日",
+      "periodMonthly": "每月"
+    }
   },
   "usageScript": {
     "title": "配置用量查询",
@@ -1696,12 +1978,16 @@
     "retry": "重试升级",
     "openReleases": "打开发布页",
     "openConfigDir": "打开配置目录",
-    "quit": "退出"
+    "quit": "退出",
+    "checkFailed": "无法检查更新（可能处于离线状态）。你可以重试升级，或恢复一个备份。"
   },
   "errors": {
     "usage_query_failed": "用量查询失败",
     "configLoadFailedTitle": "配置加载失败",
-    "configLoadFailedMessage": "无法读取配置文件：\n{{path}}\n\n错误详情：\n{{detail}}\n\n请手动检查 JSON 是否有效，或从同目录的备份文件（如 config.json.bak）恢复。\n\n应用将退出以便您进行修复。"
+    "configLoadFailedMessage": "无法读取配置文件：\n{{path}}\n\n错误详情：\n{{detail}}\n\n请手动检查 JSON 是否有效，或从同目录的备份文件（如 config.json.bak）恢复。\n\n应用将退出以便您进行修复。",
+    "detailsCopied": "已复制详情",
+    "copyDetails": "复制详情",
+    "configLoadFailedRestoreGuide": "如何手动恢复备份：\n{{url}}"
   },
   "presetSelector": {
     "title": "选择配置类型",
@@ -1802,7 +2088,10 @@
       "headers": "请求头（可选）",
       "headersPlaceholder": "Authorization: Bearer your_token_here\nContent-Type: application/json",
       "preview": "配置预览",
-      "apply": "应用配置"
+      "apply": "应用配置",
+      "invalidLines": "部分行无法解析，请先修正。",
+      "cwd": "工作目录",
+      "unparsedLines": "无法解析：{{lines}}"
     },
     "id": "标识 (唯一)",
     "type": "类型",
@@ -1828,7 +2117,8 @@
       "commandRequired": "请填写命令",
       "singleServerObjectRequired": "此处只需单个服务器对象，请不要粘贴包含 mcpServers 的整份配置",
       "saveFailed": "保存失败",
-      "deleteFailed": "删除失败"
+      "deleteFailed": "删除失败",
+      "jsonInvalidDetail": "JSON 无效：{{error}}"
     },
     "validation": {
       "ok": "命令可用",
@@ -1865,6 +2155,10 @@
         "name": "@upstash/context7-mcp",
         "description": "Context7 文档搜索工具，提供最新的库文档和代码示例，配置 key 会有更高限额"
       }
+    },
+    "syncSkip": {
+      "hint": "{{app}} 未同步：其配置目录 {{dir}} 不存在。请先运行一次 {{app}}，再重新切换该服务器。",
+      "badge": "{{app}}：未同步"
     }
   },
   "prompts": {
@@ -1903,6 +2197,8 @@
     "disableFailed": "禁用失败",
     "importSuccess": "导入成功",
     "importFailed": "导入失败",
+    "liveFileDiffers": "当前生效的提示词文件已在 CC Switch 之外被修改，与已启用的提示词不一致。重新启用或编辑该提示词将覆盖这些修改。",
+    "importLiveChanges": "导入外部修改",
     "confirm": {
       "deleteTitle": "确认删除",
       "deleteMessage": "确定要删除提示词 \"{{name}}\" 吗？"
@@ -1941,7 +2237,9 @@
     "applySuccess": "项目已应用",
     "applyFailed": "应用项目失败: {{detail}}",
     "applyWarnings": "项目已应用，{{warningCount}} 条警告：\n{{details}}",
-    "clearSuccess": "已切换为不使用项目"
+    "clearSuccess": "已切换为不使用项目",
+    "previewMcp": "{{count}} 个 MCP",
+    "previewTitle": "应用后将启用：{{summary}}"
   },
   "workspace": {
     "title": "Workspace 文件管理",
@@ -2077,7 +2375,9 @@
       "legacyTimeoutDescription": "当前配置仍在使用 agents.defaults.timeout。保存本页面时会迁移为 timeoutSeconds。",
       "saveSuccess": "Agents 配置已保存",
       "saveFailed": "保存 Agents 配置失败",
-      "loadFailed": "读取 Agents 配置失败"
+      "loadFailed": "读取 Agents 配置失败",
+      "primaryRequired": "添加回退模型前请先选择主模型。",
+      "positiveInteger": "请输入不小于 {{min}} 的整数。"
     },
     "health": {
       "title": "检测到 OpenClaw 配置警告",
@@ -2088,7 +2388,10 @@
       "parseFailed": "openclaw.json 不是合法 JSON5。请先修复文件，再通过这里编辑。"
     },
     "primaryModel": "默认模型",
-    "fallbackModel": "回退模型"
+    "fallbackModel": "回退模型",
+    "externalChange": "此配置已在磁盘上被修改。你未保存的编辑已保留。",
+    "reloadFromDisk": "放弃编辑并重新加载",
+    "modelsOrderHint": "第一个模型为默认模型（Primary），其余为回退模型。使用箭头调整顺序。"
   },
   "hermes": {
     "form": {
@@ -2164,7 +2467,9 @@
       "selectAll": "全选",
       "clearSelection": "取消选择",
       "deleteSelected": "删除选中 ({{count}})",
-      "deleting": "删除中..."
+      "deleting": "删除中...",
+      "hideValue": "隐藏值",
+      "showValue": "显示值"
     },
     "field": {
       "value": "值",
@@ -2177,7 +2482,10 @@
     },
     "delete": {
       "success": "环境变量已成功删除",
-      "error": "删除环境变量失败"
+      "error": "删除环境变量失败",
+      "undo": "撤销",
+      "skippedTitle": "有 {{count}} 个变量无法由 CC Switch 移除",
+      "skippedDescription": "{{names}} 来自进程环境（launchd、systemd、~/.zshenv 或父 shell）。请在设置它们的位置移除，然后重启 CC Switch。"
     },
     "backup": {
       "location": "备份位置: {{path}}"
@@ -2190,6 +2498,15 @@
     },
     "error": {
       "noSelection": "请选择要删除的环境变量"
+    },
+    "restore": {
+      "success": "环境变量已恢复",
+      "error": "恢复环境变量失败"
+    },
+    "profile": {
+      "copy": "复制为 shell 配置",
+      "copied": "已复制环境变量（包含 API 密钥）",
+      "copyFailed": "无法导出环境变量"
     }
   },
   "skills": {
@@ -2317,6 +2634,10 @@
     "uninstallConfirm": "确定要卸载技能 \"{{name}}\" 吗？这将从所有应用中移除该技能，并在删除前自动创建本地备份。",
     "uninstallInMainPanel": "请在主面板中卸载技能",
     "notFound": "未找到技能",
+    "openReadme": "打开 README",
+    "uninstallWarnings": "部分文件无法删除，请手动删除",
+    "unmanagedConflictHint": "已存在名为 {{name}} 的受管技能，但未对此应用启用，且此文件夹不是 CC Switch 的副本。导入前请确认你需要哪个版本。",
+    "unmanagedConflict": "名称冲突",
     "backup": {
       "location": "备份位置: {{path}}"
     },
@@ -2400,7 +2721,16 @@
       "title": "批量导入 MCP Servers",
       "targetApps": "目标应用",
       "serverCount": "MCP Servers ({{count}} 个)",
-      "enabledWarning": "导入后将立即写入所有指定应用的配置文件"
+      "enabledWarning": "导入后将立即写入所有指定应用的配置文件",
+      "executionWarning": "MCP 服务器会在目标应用启动时，以你的用户权限在本机运行命令。请逐一检查下方的命令、参数和环境变量，只导入来自可信来源的服务器。",
+      "parseFailed": "无法解码 MCP 配置。",
+      "command": "命令",
+      "env": "环境变量",
+      "headers": "请求头",
+      "riskyCommand": "此服务器会运行 shell 或下载工具，或其参数包含 shell 元字符，可以执行任意代码。",
+      "enableNowLabel": "立即为目标应用启用（写入其配置文件）",
+      "linkRequestedEnable": "该链接要求立即启用这些服务器。只有勾选上方选项后才会启用。",
+      "disabledHint": "服务器将以禁用状态保存到 CC Switch，不会修改任何应用的配置文件；你可以在 MCP 页面按应用启用。"
     },
     "prompt": {
       "title": "导入系统提示词",
@@ -2408,7 +2738,9 @@
       "name": "名称",
       "description": "描述",
       "contentPreview": "内容预览",
-      "enabledWarning": "导入后将立即启用此提示词，其他提示词将被禁用"
+      "enabledWarning": "导入后将立即启用此提示词，其他提示词将被禁用",
+      "lineCount": "{{count}} 行，{{chars}} 个字符",
+      "enableNowLabel": "立即启用：用此内容替换 {{app}} 当前生效的提示词文件（当前文件会保存为备份提示词）"
     },
     "skill": {
       "title": "添加 Claude Skill 仓库",
@@ -2425,7 +2757,36 @@
     "usageApiKey": "用量 API Key",
     "usageBaseUrl": "用量查询地址",
     "usageAutoInterval": "自动查询",
-    "usageAutoIntervalValue": "每 {{minutes}} 分钟"
+    "usageAutoIntervalValue": "每 {{minutes}} 分钟",
+    "endpointHostLabel": "请求将发送到",
+    "usageScriptSource": "脚本源码",
+    "usageScriptDecodeFailed": "（脚本无法解码）",
+    "usageScriptEnableLabel": "启用此用量脚本（每次查询用量时都会在 CC Switch 内运行）",
+    "switchRequestedWarning": "此链接要求立即将该供应商设为当前供应商，这会把 {{app}} 的全部流量发送到 {{host}}。只有勾选下方选项后才会切换。",
+    "switchNowLabel": "立即切换到此供应商（将 {{app}} 的全部流量发送到 {{host}}）",
+    "switchNowWarning": "导入后，{{app}} 的全部流量（包括你的提示词和文件内容）将立即发送到 {{host}}。",
+    "firstProviderNotice": "{{app}} 当前还没有启用的供应商，因此该供应商将成为当前供应商。",
+    "bundleProvider": "供应商",
+    "bundleMcp": "MCP 服务器",
+    "bundlePrompt": "提示词",
+    "bundleSkill": "Skill 仓库",
+    "bundleDescription": "此链接包含 {{count}} 项内容。请逐项检查，并取消勾选不想导入的项目。",
+    "bundlePartial": "已导入 {{ok}}/{{total}} 项",
+    "bundleSuccess": "已导入 {{count}} 项",
+    "importBundle": "导入合集",
+    "trustPublisher": "将此密钥记为“{{publisher}}”，用于以后的链接",
+    "queuedRequests": "此请求之后还有 {{count}} 个导入请求待显示。",
+    "unsignedLink": "未签名链接",
+    "unsignedLinkHint": "任何人都可以创建此链接。仅在信任其来源时导入。",
+    "signedBy": "由 {{publisher}} 签名",
+    "signedByUnverified": "由自称“{{publisher}}”的密钥签名",
+    "signatureKeyId": "密钥 ID {{keyId}}",
+    "publisherMismatch": "此名称属于你已知的发布者，但该链接使用了不同的密钥签名，可能是冒充。",
+    "publisherNew": "签名有效，但 CC Switch 之前未见过此密钥。",
+    "usageScriptSendsKeyTo": "启用后，此脚本可能会将你的 API Key 发送至：{{hosts}}",
+    "usageScriptContacts": "启用后，此脚本将访问：{{hosts}}",
+    "usageScriptNoHosts": "此脚本在运行时构建请求 URL，请查看源码以确认其发送数据的目标。",
+    "usageScriptPrivateHosts": "它还会访问本地或私有网络地址：{{hosts}}"
   },
   "iconPicker": {
     "search": "搜索图标",
@@ -2454,14 +2815,34 @@
     "skillsFailedDescription": "请打开 Skills 页面点击“导入已有”手动导入（或重启后再试）。"
   },
   "agents": {
-    "title": "智能体"
+    "title": "智能体",
+    "created": "已创建智能体 {{name}}",
+    "description": "来自 ~/.claude/agents 的 Claude Code 子智能体。Claude Code 下次启动时会加载它们。",
+    "new": "新建智能体",
+    "empty": "暂无子智能体，创建一个开始使用。",
+    "invalidHint": "frontmatter 需要包含 name 和 description，否则 Claude Code 会忽略此文件。",
+    "invalid": "frontmatter 无效",
+    "create": "创建智能体",
+    "comingSoon": {
+      "title": "即将推出",
+      "description": "智能体管理功能正在开发中，敬请期待强大的自主能力。"
+    },
+    "field": {
+      "name": "名称",
+      "nameInvalid": "请使用小写字母、数字和连字符。",
+      "description": "何时使用此智能体",
+      "model": "模型",
+      "tools": "工具",
+      "prompt": "系统提示词"
+    }
   },
   "health": {
     "operational": "正常",
     "degraded": "降级",
     "failed": "失败",
     "circuitOpen": "熔断",
-    "consecutiveFailures": "连续失败 {{count}} 次"
+    "consecutiveFailures": "连续失败 {{count}} 次",
+    "responseTimeSuffix": "（{{ms}} ms）"
   },
   "failover": {
     "enabled": "{{app}} 故障转移已启用",
@@ -2469,12 +2850,15 @@
     "toggleFailed": "操作失败: {{detail}}",
     "inQueue": "已加入",
     "addQueue": "加入",
+    "priorityBadge": "P{{priority}}",
+    "toggleLabel": "{{app}} 故障转移",
     "priority": {
       "tooltip": "故障转移优先级 {{priority}}"
     },
     "tooltip": {
       "enabled": "{{app}} 故障转移已启用\n按队列优先级（P1→P2→...）选择供应商",
-      "disabled": "启用 {{app}} 故障转移\n将立即切换到队列 P1，并在失败时自动切换到下一个"
+      "disabled": "启用 {{app}} 故障转移\n将立即切换到队列 P1，并在失败时自动切换到下一个",
+      "takeoverRequired": "请先接管 {{app}}，再启用故障转移"
     }
   },
   "proxy": {
@@ -2572,7 +2956,13 @@
       "invalidAddress": "地址无效，请输入 IPv4（如 127.0.0.1）、IPv6（如 ::1）或 localhost",
       "configSaved": "路由配置已保存",
       "configSaveFailed": "保存配置失败",
-      "restartRequired": "修改地址或端口后需要重启路由服务才能生效"
+      "restartRequired": "修改地址或端口后需要重启路由服务才能生效",
+      "lanExposure": {
+        "tokenCopied": "已复制访问令牌",
+        "title": "此地址会将路由服务暴露给其他设备",
+        "description": "任何能访问此地址的人都可能消耗你的供应商额度。来自其他设备的请求必须以 \"Authorization: Bearer <token>\"（或 x-api-key / x-goog-api-key）携带下方的访问令牌；本机上的应用无需令牌即可继续使用。请仅在可信网络中使用。",
+        "tokenLabel": "访问令牌"
+      }
     },
     "switchFailed": "切换失败: {{error}}",
     "takeover": {
@@ -2583,7 +2973,8 @@
       "tooltip": {
         "active": "{{appLabel}} 路由中 - {{address}}:{{port}}\n切换该应用供应商为热切换",
         "broken": "{{appLabel}} 路由中，但路由服务未运行",
-        "inactive": "路由 {{appLabel}} 的请求，让该应用请求走本地路由"
+        "inactive": "路由 {{appLabel}} 的请求，让该应用请求走本地路由",
+        "lanExposed": "正在监听网络地址：其他设备需要访问令牌"
       }
     },
     "failover": {
@@ -2607,7 +2998,13 @@
       "removeFailed": "移除失败",
       "reorderSuccess": "队列顺序已更新",
       "reorderFailed": "更新顺序失败",
-      "toggleFailed": "状态更新失败"
+      "toggleFailed": "状态更新失败",
+      "circuitReset": "熔断器已重置",
+      "lastFailure": "最近失败 {{time}}：{{error}}",
+      "moveUp": "上移",
+      "moveDown": "下移",
+      "test": "测试连通性",
+      "resetCircuit": "重置熔断器"
     },
     "autoFailover": {
       "info": "当故障转移队列中配置了多个供应商时，系统会在请求失败时按优先级顺序依次尝试。当某个供应商连续失败达到阈值时，熔断器会打开并在一段时间内跳过该供应商。",
@@ -2643,7 +3040,8 @@
       "maxRetriesHint": "请求失败时的重试次数（0-10）",
       "streamingFirstByteHint": "等待首个数据块的最大时间，范围 1-120 秒，默认 60 秒",
       "streamingIdleHint": "数据块之间的最大间隔，范围 60-600 秒，填 0 禁用（防止中途卡住）",
-      "nonStreamingHint": "非流式请求的总超时时间，范围 60-1200 秒，默认 600 秒（10 分钟）"
+      "nonStreamingHint": "非流式请求的总超时时间，范围 60-1200 秒，默认 600 秒（10 分钟）",
+      "rangeError": "请输入 {{min}} 到 {{max}} 之间的整数。"
     },
     "logging": {
       "enabled": "日志记录已启用",
@@ -2652,10 +3050,56 @@
     },
     "server": {
       "started": "路由服务已启动 - {{address}}:{{port}}",
-      "startFailed": "启动路由服务失败: {{detail}}"
+      "startFailed": "启动路由服务失败: {{detail}}",
+      "stopped": "路由服务已停止",
+      "stopFailed": "停止路由服务失败: {{detail}}"
     },
     "stoppedWithRestore": "路由服务已关闭，已恢复所有路由配置",
-    "stopWithRestoreFailed": "停止失败: {{detail}}"
+    "stopWithRestoreFailed": "停止失败: {{detail}}",
+    "inspector": {
+      "title": "最近请求",
+      "errorsOnly": "仅显示错误",
+      "lastError": "最近错误：{{error}}",
+      "lastRequestAt": "最近请求：{{time}}",
+      "empty": "今日暂无请求",
+      "openDetail": "{{time}} 的请求 {{status}} {{model}}",
+      "view": "请求视图",
+      "tabLog": "请求日志",
+      "tabAttempts": "供应商尝试"
+    },
+    "flightRecorder": {
+      "served": "已响应",
+      "failover": "已故障转移",
+      "aborted": "已中止",
+      "skipped": "已跳过",
+      "copied": "最近请求已复制为 JSON Lines",
+      "copyFailed": "复制最近请求失败",
+      "hint": "代理启动以来每个请求尝试过的所有供应商。仅保存在内存中。",
+      "export": "复制为 JSON Lines",
+      "empty": "代理启动以来暂无请求",
+      "ok": "成功",
+      "fail": "失败"
+    },
+    "routing": {
+      "saved": "路由设置已保存",
+      "saveFailed": "保存路由设置失败",
+      "title": "路由",
+      "description": "请求优先尝试队列中的哪个供应商。故障转移仍会依次尝试队列中的其余供应商。",
+      "strategyLabel": "路由策略",
+      "weightsHint": "权重越高，越常被优先尝试。0 表示从不优先。",
+      "sticky": "粘性会话",
+      "stickyHint": "让同一对话保持在处理其首个请求的供应商上，以保持提示缓存有效。",
+      "stickyTtl": "最后使用后的固定时长（秒，0 = 默认）",
+      "maxConcurrent": "每个供应商的最大并发请求数（0 = 不限）；繁忙的供应商将被跳过",
+      "strategy": {
+        "priority": "优先级",
+        "roundRobin": "轮询",
+        "weighted": "加权"
+      }
+    },
+    "discover": {
+      "open": "本地路由与故障转移"
+    }
   },
   "streamCheck": {
     "reachable": "{{providerName}} 连通正常 ({{responseTimeMs}}ms)",
@@ -2669,7 +3113,8 @@
     "timeout": "超时时间（秒）",
     "maxRetries": "最大重试次数",
     "degradedThreshold": "较慢阈值（毫秒）",
-    "error": "{{providerName}} 检查出错: {{error}}"
+    "error": "{{providerName}} 检查出错: {{error}}",
+    "rangeError": "请输入 {{min}} 到 {{max}} 之间的整数。"
   },
   "proxyConfig": {
     "proxyEnabled": "路由总开关",
@@ -2760,7 +3205,8 @@
     "savedAndSynced": "已保存并同步到所有应用",
     "saveAndSyncError": "保存并同步失败",
     "configJsonPreview": "配置 JSON 预览",
-    "configJsonPreviewHint": "以下是将要同步到各应用的配置内容（仅覆盖显示的字段，保留其他自定义配置）"
+    "configJsonPreviewHint": "以下是将要同步到各应用的配置内容（仅覆盖显示的字段，保留其他自定义配置）",
+    "savedButSyncFailed": "统一供应商已保存，但同步失败"
   },
   "omo": {
     "editProfile": "编辑 OMO 配置",
@@ -2971,5 +3417,255 @@
     "expiredHint": "请运行 {{tool}} 命令刷新登录",
     "queryFailed": "查询失败",
     "refresh": "刷新"
+  },
+  "errorBoundary": {
+    "copyDiagnostics": "复制诊断信息",
+    "description": "CC Switch 的这部分界面渲染失败。你的配置未被更改。",
+    "openConfigFolder": "打开配置目录",
+    "restart": "重启",
+    "retry": "重试",
+    "title": "出错了"
+  },
+  "onboarding": {
+    "back": "上一步",
+    "done": {
+      "description": "设置完成。请重启已打开的终端会话，以便各工具加载新配置。",
+      "manual": "打开用户手册",
+      "mcp": "MCP、提示词与技能：统一管理一次，即可同步到所有工具。",
+      "proxy": "路由与故障转移：通过本地路由服务转发请求，并在失败时自动切换到下一个供应商。",
+      "usage": "用量：按供应商统计成本，并设置每日或每月预算上限。"
+    },
+    "finish": "完成",
+    "next": "下一步",
+    "providers": {
+      "add": "添加供应商",
+      "count": "已配置 {{count}} 个供应商",
+      "description": "导入你正在使用的配置，或从预设添加供应商。每个工具至少需要一个供应商才能进行切换。",
+      "import": "导入当前配置",
+      "imported": "你现有的配置已保存为名为“default”的供应商。",
+      "none": "还没有供应商",
+      "nothingToImport": "未找到现有配置。"
+    },
+    "reopen": "设置向导",
+    "skip": "跳过设置",
+    "start": "开始设置",
+    "stepOf": "第 {{current}} 步，共 {{total}} 步",
+    "tools": {
+      "description": "选择你使用的工具。首页只会显示这些工具，之后可在设置中修改。",
+      "detected": "已安装",
+      "detecting": "检测中…",
+      "notDetected": "未找到",
+      "pickOne": "请至少选择一个工具。"
+    },
+    "welcome": {
+      "body": "CC Switch 可为 Claude Code、Claude Desktop、Codex、Gemini CLI、Grok Build、OpenCode、OpenClaw 和 Hermes 管理供应商、MCP 服务器、提示词和技能。如果你之前已配置过其中某个工具，CC Switch 已将该配置保存为名为“default”的供应商，不会有任何丢失。",
+      "wizardHint": "这个简短的设置会帮你选择所用的工具、导入现有配置，并添加第一个供应商。你可以跳过，之后在 设置 → 关于 中重新打开。"
+    }
+  },
+  "projects": {
+    "missingProfile": "（已删除的项目）",
+    "actionFailed": "目录绑定失败：{{detail}}",
+    "bindSuccess": "已绑定 {{path}}",
+    "applyWarnings": "已应用，{{count}} 条警告：\n{{details}}",
+    "applySuccessFiles": "已应用。已更新的文件：\n{{details}}",
+    "applySuccess": "目录绑定已应用",
+    "bindingsTitle": "目录绑定",
+    "bindingsDescription": "将文件夹（其 git 仓库根目录）绑定到项目，然后一键应用。开启项目文件后，{{apps}} 仅在该文件夹内的文件中使用该项目的供应商，其他文件夹保留各自的供应商。",
+    "noBindings": "尚未绑定文件夹",
+    "projectFilesBadge": "项目文件",
+    "apply": "立即应用",
+    "unbind": "解除绑定",
+    "selectProfile": "要绑定的项目",
+    "projectLevel": "写入项目文件",
+    "bindFolder": "绑定文件夹…"
+  },
+  "palette": {
+    "openSettings": "打开设置",
+    "goBack": "返回上一页",
+    "shortcut": "打开命令面板",
+    "title": "命令面板",
+    "placeholder": "切换供应商、应用或页面...",
+    "empty": "无匹配结果",
+    "apps": "切换应用",
+    "pages": "打开页面",
+    "shortcuts": "键盘快捷键"
+  },
+  "deeplinkAction": {
+    "failed": "无法处理深度链接：{{error}}",
+    "providerNotFound": "{{app}} 中没有名为“{{provider}}”的供应商",
+    "profileNotFound": "没有名为“{{name}}”的项目",
+    "switchTitle": "切换供应商？",
+    "switchMessage": "某个链接请求将 {{app}} 切换到“{{provider}}”。",
+    "switchConfirm": "切换",
+    "profileTitle": "应用项目？",
+    "profileMessage": "某个链接请求应用项目“{{name}}”。",
+    "profileConfirm": "应用"
+  },
+  "logRetention": {
+    "pruned": "已删除 {{count}} 条请求日志，用量汇总已保留",
+    "title": "请求日志保留期限",
+    "description": "每次请求的元数据（模型、Token、状态、会话 ID、错误）会保留这么久，之后合并到每日用量汇总中。请求和响应内容从不存储。",
+    "days": "{{count}} 天",
+    "deleteNow": "立即删除请求日志",
+    "dbSize": "数据库大小：{{size}}",
+    "confirmTitle": "删除请求日志？",
+    "confirmMessage": "所有请求日志的 Token 和成本计入每日汇总后，这些日志将被删除。用量图表会保留汇总数据，但请求详情将不再可用。",
+    "streamCheckTitle": "连通性检查日志保留期限",
+    "streamCheckDescription": "供应商连通性检查的结果将在设定天数后删除。",
+    "keepForever": "永久保留"
+  },
+  "policy": {
+    "signatureInvalid": "由于无法验证签名，已忽略一个托管策略文件。",
+    "invalid": "由于无法读取，已忽略一个托管策略文件。",
+    "defaultName": "你的组织",
+    "allowedEndpoints": "允许的端点：",
+    "deniedEndpoints": "禁止的端点：",
+    "disabledFeatures": "已禁用的功能：",
+    "managedBy": "由策略管理：{{name}}",
+    "signed": "已签名"
+  },
+  "sessionExport": {
+    "saved": "会话已导出到 {{path}}",
+    "failed": "导出失败：{{error}}",
+    "export": "导出",
+    "markdown": "Markdown (.md)",
+    "json": "JSON (.json)"
+  },
+  "helpLink": {
+    "open": "打开使用手册"
+  },
+  "shortcuts": {
+    "show": "显示键盘快捷键",
+    "title": "键盘快捷键",
+    "description": "当前页面可用的快捷键。"
+  },
+  "startupWarnings": {
+    "settingsCorrupt": {
+      "title": "无法读取设置文件",
+      "description": "settings.json 无效，已被移至 {{path}}。当前使用默认设置，请在设置中检查。"
+    },
+    "configDirUnavailable": {
+      "title": "数据目录不可用",
+      "description": "配置的数据目录 {{path}} 不存在。CC Switch 正在使用默认目录，请检查 设置 > 高级 > 配置文件目录。"
+    },
+    "proxyRestoreFailed": {
+      "title": "无法恢复代理接管",
+      "description": "恢复 {{app}} 的代理接管失败：{{error}}。请打开 设置 > 路由 重新启用。"
+    },
+    "generic": {
+      "title": "启动警告"
+    }
+  },
+  "workbench": {
+    "promptCopy": {
+      "title": "用于其他应用",
+      "done": "已将提示词复制到 {{count}} 个应用",
+      "description": "将“{{name}}”复制到其他应用的提示词列表。若现有提示词文件在 CC Switch 之外被修改过，会保留为一个备份提示词。",
+      "activate": "设为对应应用的当前提示词",
+      "copy": "复制"
+    },
+    "audit": {
+      "exported": "审计日志已保存到 {{path}}",
+      "filter": "按操作、来源或 ID 筛选",
+      "export": "导出 JSONL",
+      "empty": "暂无记录的事件。",
+      "time": "时间",
+      "actor": "来源",
+      "action": "操作",
+      "entity": "对象"
+    },
+    "history": {
+      "restoredMissingKeys": "已恢复版本。请重新输入 API 密钥：历史记录中不保存密钥。",
+      "restored": "已恢复版本",
+      "description": "每个供应商的最近 50 个版本，包括切换时从正在使用的配置回写的更改。API 密钥永远不会保存在历史记录中。",
+      "empty": "暂无记录的更改。",
+      "entities": "有历史记录的供应商",
+      "versions": "{{count}} 个版本",
+      "deleted": "已删除",
+      "pick": "选择一个供应商以查看其版本。",
+      "restore": "恢复此版本",
+      "moreChanges": "+{{count}} 项",
+      "restoreConfirm": "用 {{when}} 的版本替换此供应商？如果它是当前供应商，其正在使用的配置会被重写。当前的 API 密钥会保留。",
+      "title": "变更历史与审计日志",
+      "subtitle": "查看变更内容及来源，并可回滚"
+    },
+    "tools": {
+      "activated": "配置已写入该工具的配置文件",
+      "importedName": "当前配置",
+      "description": "为没有独立标签页的 CLI 工具切换端点、密钥和模型。仅修改列出的键，其他设置和注释保持不变，并会备份原文件。将 JSON 描述文件放入 {{dir}} 即可添加更多工具。",
+      "detected": "已检测到",
+      "notDetected": "未检测到",
+      "importLive": "导入当前配置",
+      "addProfile": "添加配置",
+      "noProfiles": "暂无配置。",
+      "active": "当前使用",
+      "apply": "应用",
+      "editProfile": "编辑配置",
+      "deleteProfile": "删除配置",
+      "profileName": "配置名称",
+      "secretKept": "已保存 — 留空则保持不变",
+      "deleteConfirm": "删除配置“{{name}}”？该工具的配置文件不会被修改。",
+      "title": "其他 CLI 工具",
+      "subtitle": "为 Qwen Code、Aider 等工具管理端点、密钥和模型配置"
+    },
+    "projectUsage": {
+      "title": "按项目统计用量",
+      "description": "请求会匹配到会话，并按会话所在的 Git 仓库分组。",
+      "range": "时间范围",
+      "lastDays": "最近 {{count}} 天",
+      "empty": "此期间没有记录的请求。",
+      "project": "项目",
+      "sessions": "会话",
+      "requests": "请求",
+      "tokens": "Token",
+      "cost": "费用",
+      "unattributed": "未归属",
+      "total": "合计"
+    },
+    "recovery": {
+      "title": "或恢复一个此版本可以打开的备份",
+      "description": "当前数据库会保留在备份文件夹中，你之后仍可升级。备份之后所做的更改不包含在备份中。",
+      "restore": "恢复并重启"
+    },
+    "sessionCost": {
+      "title": "已记录 {{requests}} 次请求 · 输入 {{input}} / 输出 {{output}} Token"
+    },
+    "bundle": {
+      "exported": "已保存 {{providers}} 个供应商、{{mcp}} 个 MCP 服务器和 {{prompts}} 个提示词（已移除 {{secrets}} 个密钥）",
+      "applied": "已导入：新增 {{added}} 项，更新 {{updated}} 项，跳过 {{skipped}} 项",
+      "statusNew": "新增",
+      "statusIdentical": "无变化",
+      "statusConflict": "已存在 — 有差异",
+      "exportTitle": "导出分享包",
+      "mcp": "MCP 服务器",
+      "prompts": "提示词",
+      "stripSecrets": "移除 API 密钥和令牌",
+      "secretsWarning": "该文件将包含你的 API 密钥，请仅通过可信渠道分享。",
+      "export": "导出…",
+      "importTitle": "导入分享包",
+      "importDescription": "条目会合并到你的数据中，不会激活任何内容。只有在你允许时才会替换现有条目，并保留其密钥。",
+      "chooseFile": "选择文件…",
+      "enterKey": "输入密钥（可选）",
+      "overwrite": "替换存在差异的现有条目",
+      "import": "导入 {{count}} 项",
+      "title": "分享包",
+      "subtitle": "分享供应商、MCP 服务器和提示词，不含你的密钥"
+    }
+  },
+  "validation": {
+    "codex": {
+      "wireApi": {
+        "invalid": "不支持 wire_api \"{{value}}\"；请使用以下之一：{{allowed}}"
+      },
+      "modelProvider": {
+        "undefined": "model_provider \"{{value}}\" 没有对应的 [model_providers.{{value}}] 表"
+      }
+    },
+    "env": {
+      "keyCase": "\"{{value}}\" 应写作 \"{{expected}}\""
+    },
+    "toml": {
+      "syntax": "TOML 语法错误：{{message}}"
+    }
   }
 }

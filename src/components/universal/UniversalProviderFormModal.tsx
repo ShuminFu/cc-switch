@@ -21,8 +21,13 @@ import { deepClone } from "@/utils/deepClone";
 interface UniversalProviderFormModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (provider: UniversalProvider) => void;
-  onSaveAndSync?: (provider: UniversalProvider) => void;
+  /** Return `false` (or resolve to it) to keep the modal open on failure. */
+  onSave: (
+    provider: UniversalProvider,
+  ) => void | boolean | Promise<void | boolean>;
+  onSaveAndSync?: (
+    provider: UniversalProvider,
+  ) => void | boolean | Promise<void | boolean>;
   editingProvider?: UniversalProvider | null;
   initialPreset?: UniversalProviderPreset | null;
 }
@@ -185,65 +190,6 @@ requires_openai_auth = true`;
     };
   }, [geminiEnabled, baseUrl, apiKey, models.gemini]);
 
-  // 提交表单
-  const handleSubmit = useCallback(() => {
-    if (!name.trim() || !baseUrl.trim() || !apiKey.trim()) {
-      return;
-    }
-
-    const provider: UniversalProvider = editingProvider
-      ? {
-          ...editingProvider,
-          name: name.trim(),
-          baseUrl: baseUrl.trim(),
-          apiKey: apiKey.trim(),
-          websiteUrl: websiteUrl.trim() || undefined,
-          notes: notes.trim() || undefined,
-          apps: {
-            claude: claudeEnabled,
-            codex: codexEnabled,
-            gemini: geminiEnabled,
-          },
-          models,
-        }
-      : createUniversalProviderFromPreset(
-          selectedPreset || universalProviderPresets[0],
-          crypto.randomUUID(),
-          baseUrl.trim(),
-          apiKey.trim(),
-          name.trim(),
-        );
-
-    // 如果是新建，更新应用启用状态和模型
-    if (!editingProvider) {
-      provider.apps = {
-        claude: claudeEnabled,
-        codex: codexEnabled,
-        gemini: geminiEnabled,
-      };
-      provider.models = models;
-      provider.websiteUrl = websiteUrl.trim() || undefined;
-      provider.notes = notes.trim() || undefined;
-    }
-
-    onSave(provider);
-    onClose();
-  }, [
-    editingProvider,
-    name,
-    baseUrl,
-    apiKey,
-    websiteUrl,
-    notes,
-    claudeEnabled,
-    codexEnabled,
-    geminiEnabled,
-    models,
-    selectedPreset,
-    onSave,
-    onClose,
-  ]);
-
   // 构建 provider 对象的辅助函数
   const buildProvider = useCallback((): UniversalProvider | null => {
     if (!name.trim() || !baseUrl.trim() || !apiKey.trim()) {
@@ -300,6 +246,16 @@ requires_openai_auth = true`;
     selectedPreset,
   ]);
 
+  // 提交表单 (FE-PROV-37: the one builder above produces the provider)
+  const handleSubmit = useCallback(async () => {
+    const provider = buildProvider();
+    if (!provider) return;
+
+    // Wait for the save so a failed upsert keeps the entered values.
+    if ((await onSave(provider)) === false) return;
+    onClose();
+  }, [buildProvider, onSave, onClose]);
+
   // 打开保存并同步确认弹窗
   const handleSaveAndSyncClick = useCallback(() => {
     const provider = buildProvider();
@@ -310,12 +266,13 @@ requires_openai_auth = true`;
   }, [buildProvider, onSaveAndSync]);
 
   // 确认保存并同步
-  const confirmSaveAndSync = useCallback(() => {
+  const confirmSaveAndSync = useCallback(async () => {
     if (!pendingProvider || !onSaveAndSync) return;
 
-    onSaveAndSync(pendingProvider);
     setSyncConfirmOpen(false);
+    const saved = await onSaveAndSync(pendingProvider);
     setPendingProvider(null);
+    if (saved === false) return;
     onClose();
   }, [pendingProvider, onSaveAndSync, onClose]);
 
@@ -334,7 +291,7 @@ requires_openai_auth = true`;
         </Button>
       ) : (
         <Button
-          onClick={handleSubmit}
+          onClick={() => void handleSubmit()}
           disabled={!name.trim() || !baseUrl.trim() || !apiKey.trim()}
         >
           {t("common.add", { defaultValue: "添加" })}

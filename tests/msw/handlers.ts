@@ -1,6 +1,6 @@
 import { http, HttpResponse } from "msw";
 import type { AppId } from "@/lib/api/types";
-import type { McpServer, Provider, Settings } from "@/types";
+import type { Provider, Settings } from "@/types";
 import {
   addProvider,
   deleteProvider,
@@ -19,11 +19,8 @@ import {
   setSettings,
   getAppConfigDirOverride,
   setAppConfigDirOverrideState,
-  getMcpConfig,
-  setMcpServerEnabled,
-  upsertMcpServer,
-  deleteMcpServer,
 } from "./state";
+import { tauriError } from "./tauriError";
 
 const TAURI_ENDPOINT = "http://tauri.local";
 
@@ -39,7 +36,131 @@ const withJson = async <T>(request: Request): Promise<T> => {
 
 const success = <T>(payload: T) => HttpResponse.json(payload as any);
 
+const secretsVaultStatus = (enabled: boolean) => ({
+  enabled,
+  backend: "memory",
+  available: true,
+  unavailableReason: null,
+  vaultedSecrets: 0,
+  inlineSecrets: 0,
+  unresolvedSecrets: 0,
+  unresolvedProviders: [],
+  warning: null,
+});
+
 export const handlers = [
+  http.post(`${TAURI_ENDPOINT}/save_session_export`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/take_deeplink_action`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/get_request_log_retention`, () =>
+    success({ retentionDays: 30, minDays: 1, maxDays: 3650 }),
+  ),
+  http.post(
+    `${TAURI_ENDPOINT}/set_request_log_retention`,
+    async ({ request }) => {
+      const { days } = await withJson<{ days: number }>(request);
+      return success({ retentionDays: days, minDays: 1, maxDays: 3650 });
+    },
+  ),
+  http.post(`${TAURI_ENDPOINT}/prune_request_logs_now`, () => success(0)),
+  http.post(`${TAURI_ENDPOINT}/get_stream_check_retention`, () =>
+    success({ retentionDays: 7 }),
+  ),
+  http.post(
+    `${TAURI_ENDPOINT}/set_stream_check_retention`,
+    async ({ request }) => {
+      const { days } = await withJson<{ days: number }>(request);
+      return success({ retentionDays: days });
+    },
+  ),
+  http.post(`${TAURI_ENDPOINT}/restore_db_backup_with_options`, () =>
+    success("safety-backup"),
+  ),
+  http.post(`${TAURI_ENDPOINT}/list_claude_agents`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/create_claude_agent`, async ({ request }) => {
+    const { agent } = await withJson<{
+      agent: { name: string; description: string; prompt: string };
+    }>(request);
+    return success({
+      fileName: `${agent.name}.md`,
+      path: `/home/mock/.claude/agents/${agent.name}.md`,
+      name: agent.name,
+      description: agent.description,
+      prompt: agent.prompt,
+    });
+  }),
+  // Proxy request inspector (FE-UI-39) reads the request log while running.
+  http.post(`${TAURI_ENDPOINT}/get_request_logs`, () =>
+    success({ data: [], total: 0, page: 0, pageSize: 10 }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_request_detail`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/render_provider_env_profile`, () =>
+    success("export ANTHROPIC_BASE_URL='https://example.invalid'\n"),
+  ),
+  // Workbench features (src/components/workbench, src-tauri/src/features).
+  http.post(`${TAURI_ENDPOINT}/list_audit_events`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/export_audit_log`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/list_config_history`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_provider_history`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/restore_provider_version`, () =>
+    success({ recreated: false, missingSecrets: [] }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/list_custom_tools`, () =>
+    success({ tools: [], descriptorErrors: [], descriptorsDir: "" }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/save_custom_tool_profile`, () => success("p1")),
+  http.post(`${TAURI_ENDPOINT}/delete_custom_tool_profile`, () =>
+    success(null),
+  ),
+  http.post(`${TAURI_ENDPOINT}/activate_custom_tool_profile`, () => success(1)),
+  http.post(`${TAURI_ENDPOINT}/import_custom_tool_live`, () => success("p1")),
+  http.post(`${TAURI_ENDPOINT}/export_share_bundle`, () =>
+    success({
+      path: null,
+      providers: 0,
+      mcpServers: 0,
+      prompts: 0,
+      secretsStripped: 0,
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/preview_share_bundle`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/apply_share_bundle`, () =>
+    success({ added: 0, updated: 0, skipped: 0, errors: [] }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_session_usage`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/get_usage_by_project`, () =>
+    success({
+      since: 0,
+      projects: [],
+      unattributed: {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        totalCostUsd: 0,
+      },
+      total: {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        totalCostUsd: 0,
+      },
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/copy_prompt_to_apps`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/list_recovery_backups`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/restore_backup_for_recovery`, () => success("")),
+  http.post(`${TAURI_ENDPOINT}/get_managed_policy_status`, () =>
+    success({ state: "none", signed: false, unknownFeatures: [] }),
+  ),
+  // App startup commands (found by the e2e harness, TEST-17).
+  http.post(`${TAURI_ENDPOINT}/get_init_error`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/get_auto_failover_enabled`, () =>
+    success(false),
+  ),
+  http.post(`${TAURI_ENDPOINT}/set_window_theme`, () => success(null)),
   http.post(`${TAURI_ENDPOINT}/get_migration_result`, () => success(false)),
   http.post(`${TAURI_ENDPOINT}/get_skills_migration_result`, () =>
     success(null),
@@ -76,6 +197,10 @@ export const handlers = [
     success(getLiveProviderIds("openclaw")),
   ),
 
+  http.post(`${TAURI_ENDPOINT}/get_hermes_live_provider_ids`, () =>
+    success(getLiveProviderIds("hermes")),
+  ),
+
   http.post(`${TAURI_ENDPOINT}/get_openclaw_default_model`, () =>
     success({ primary: null, fallback: [] }),
   ),
@@ -86,7 +211,7 @@ export const handlers = [
     const { id, app } = await withJson<{ id: string; app: AppId }>(request);
     const providers = listProviders(app);
     if (!providers[id]) {
-      return HttpResponse.json(false, { status: 404 });
+      return tauriError(`Provider not found: ${id}`);
     }
     setCurrentProviderId(app, id);
     return success(true);
@@ -127,12 +252,155 @@ export const handlers = [
 
   http.post(`${TAURI_ENDPOINT}/list_sessions`, () => success(listSessions())),
 
+  // Deep-link v2 (SESS-10)
+  http.post(`${TAURI_ENDPOINT}/import_deeplink_bundle`, async ({ request }) => {
+    const { choices } = await withJson<{
+      choices: Array<{ index: number; accept: boolean }>;
+    }>(request);
+    return success(
+      choices
+        .filter((choice) => choice.accept)
+        .map((choice) => ({
+          index: choice.index,
+          resource: "provider",
+          ok: true,
+          result: { type: "provider", id: `bundle-${choice.index}` },
+        })),
+    );
+  }),
+  http.post(`${TAURI_ENDPOINT}/discard_pending_deeplink`, () => success(true)),
+  // Single-resource imports (v1 links and one-item v2 links, TEST-32).
+  http.post(
+    `${TAURI_ENDPOINT}/import_from_deeplink_unified`,
+    async ({ request }) => {
+      const { request: link } = await withJson<{
+        request: { resource?: string; name?: string; repo?: string };
+      }>(request);
+      const resource = link.resource ?? "provider";
+      if (resource === "mcp") {
+        return success({
+          type: "mcp",
+          importedCount: 1,
+          importedIds: ["deeplink-mcp"],
+          failed: [],
+        });
+      }
+      if (resource === "skill") {
+        return success({ type: "skill", key: link.repo ?? "owner/repo" });
+      }
+      return success({ type: resource, id: `deeplink-${resource}` });
+    },
+  ),
+  // Echo the request: the fake has no Base64/URL config to merge.
+  http.post(`${TAURI_ENDPOINT}/merge_deeplink_config`, async ({ request }) => {
+    const { request: link } = await withJson<{ request: unknown }>(request);
+    return success(link);
+  }),
+  http.post(`${TAURI_ENDPOINT}/build_deeplink_share_link`, () =>
+    success("ccswitch://v2/import?p=e30"),
+  ),
+
+  // Preset catalog (PRODUCT-07): bundled empty overlay.
+  http.post(`${TAURI_ENDPOINT}/get_preset_catalog`, () =>
+    success({
+      status: { source: "bundled", version: "0.0.0", autoUpdate: true },
+      catalog: { schema: 1, version: "0.0.0", apps: {}, promotions: {} },
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/refresh_preset_catalog`, () =>
+    success({ source: "bundled", version: "0.0.0", autoUpdate: true }),
+  ),
+  http.post(
+    `${TAURI_ENDPOINT}/set_preset_catalog_auto_update`,
+    async ({ request }) => {
+      const { enabled } = await withJson<{ enabled: boolean }>(request);
+      return success({
+        source: "bundled",
+        version: "0.0.0",
+        autoUpdate: enabled,
+      });
+    },
+  ),
+
+  // Session index (SESS-09): the mock always returns the full list.
+  http.post(`${TAURI_ENDPOINT}/scan_sessions_report`, () =>
+    success({
+      sessions: listSessions(),
+      errors: [],
+      generation: Date.now(),
+      changed: true,
+      parsedFiles: 0,
+      unchanged: false,
+    }),
+  ),
+
+  http.post(`${TAURI_ENDPOINT}/get_session_index_snapshot`, () => success([])),
+
+  http.post(`${TAURI_ENDPOINT}/search_sessions`, async ({ request }) => {
+    const { query } = await withJson<{ query: string }>(request);
+    const needle = query.trim().toLowerCase();
+    const hits = listSessions()
+      .filter((session) =>
+        getSessionMessages(session.providerId, session.sourcePath ?? "").some(
+          (message) => message.content.toLowerCase().includes(needle),
+        ),
+      )
+      .map((session) => ({
+        sessionKey: `${session.providerId}:${session.sessionId}:${session.sourcePath ?? ""}`,
+        providerId: session.providerId,
+        sessionId: session.sessionId,
+      }));
+    return success({ hits, complete: true });
+  }),
+
   http.post(`${TAURI_ENDPOINT}/get_session_messages`, async ({ request }) => {
     const { providerId, sourcePath } = await withJson<{
       providerId: string;
       sourcePath: string;
     }>(request);
     return success(getSessionMessages(providerId, sourcePath));
+  }),
+
+  http.post(
+    `${TAURI_ENDPOINT}/get_session_messages_page`,
+    async ({ request }) => {
+      const { providerId, sourcePath, offset, limit } = await withJson<{
+        providerId: string;
+        sourcePath: string;
+        offset?: number;
+        limit?: number;
+      }>(request);
+      const all = getSessionMessages(providerId, sourcePath);
+      const start = Math.min(offset ?? 0, all.length);
+      const messages = all.slice(start, start + (limit ?? 200));
+      return success({
+        messages,
+        offset: start,
+        total: all.length,
+        hasMore: start + messages.length < all.length,
+        truncated: [],
+      });
+    },
+  ),
+
+  http.post(`${TAURI_ENDPOINT}/get_command_stats`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/check_app_update`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/get_session_usage_summaries`, () => success({})),
+
+  http.post(`${TAURI_ENDPOINT}/list_session_turns`, async ({ request }) => {
+    const { providerId, sourcePath } = await withJson<{
+      providerId: string;
+      sourcePath: string;
+    }>(request);
+    return success(
+      getSessionMessages(providerId, sourcePath).map((message, index) => ({
+        index,
+        role: message.role,
+        ts: message.ts,
+        preview: message.content.slice(0, 160),
+        contentBytes: message.content.length,
+      })),
+    );
   }),
 
   http.post(`${TAURI_ENDPOINT}/delete_session`, async ({ request }) => {
@@ -143,6 +411,21 @@ export const handlers = [
     }>(request);
     return success(deleteSession(providerId, sessionId, sourcePath));
   }),
+
+  http.post(`${TAURI_ENDPOINT}/list_session_trash`, () => success([])),
+
+  // Session pin / archive / tags (SESS-18).
+  http.post(`${TAURI_ENDPOINT}/get_session_annotations`, () => success({})),
+  http.post(`${TAURI_ENDPOINT}/set_session_annotation`, async ({ request }) => {
+    const { annotation } = await withJson<{
+      annotation: { pinned: boolean; archived: boolean; tags: string[] };
+    }>(request);
+    return success(annotation);
+  }),
+
+  http.post(`${TAURI_ENDPOINT}/restore_session_from_trash`, () =>
+    HttpResponse.json("Trash entry not found", { status: 400 }),
+  ),
 
   http.post(`${TAURI_ENDPOINT}/delete_sessions`, async ({ request }) => {
     const { items = [] } = await withJson<{
@@ -167,48 +450,62 @@ export const handlers = [
     );
   }),
 
-  // MCP APIs
-  http.post(`${TAURI_ENDPOINT}/get_mcp_config`, async ({ request }) => {
-    const { app } = await withJson<{ app: AppId }>(request);
-    return success(getMcpConfig(app));
-  }),
+  http.post(`${TAURI_ENDPOINT}/restart_app`, () => success(true)),
 
-  http.post(`${TAURI_ENDPOINT}/import_mcp_from_claude`, () => success(1)),
-  http.post(`${TAURI_ENDPOINT}/import_mcp_from_codex`, () => success(1)),
-
-  http.post(`${TAURI_ENDPOINT}/set_mcp_enabled`, async ({ request }) => {
-    const { app, id, enabled } = await withJson<{
-      app: AppId;
-      id: string;
-      enabled: boolean;
-    }>(request);
-    setMcpServerEnabled(app, id, enabled);
+  http.post(`${TAURI_ENDPOINT}/patch_settings`, async ({ request }) => {
+    const { patch } = await withJson<{ patch: Partial<Settings> }>(request);
+    setSettings({ ...getSettings(), ...patch });
     return success(true);
   }),
 
-  http.post(
-    `${TAURI_ENDPOINT}/upsert_mcp_server_in_config`,
-    async ({ request }) => {
-      const { app, id, spec } = await withJson<{
-        app: AppId;
-        id: string;
-        spec: McpServer;
-      }>(request);
-      upsertMcpServer(app, id, spec);
-      return success(true);
-    },
-  ),
+  http.post(`${TAURI_ENDPOINT}/get_startup_warnings`, () => success([])),
 
-  http.post(
-    `${TAURI_ENDPOINT}/delete_mcp_server_in_config`,
-    async ({ request }) => {
-      const { app, id } = await withJson<{ app: AppId; id: string }>(request);
-      deleteMcpServer(app, id);
-      return success(true);
-    },
-  ),
+  http.post(`${TAURI_ENDPOINT}/get_providers_health`, async ({ request }) => {
+    const { providerIds } = await withJson<{ providerIds: string[] }>(request);
+    return success(
+      (providerIds ?? []).map((providerId) => ({
+        provider_id: providerId,
+        app_type: "claude",
+        is_healthy: true,
+        consecutive_failures: 0,
+        last_success_at: null,
+        last_failure_at: null,
+        last_error: null,
+        updated_at: new Date(0).toISOString(),
+      })),
+    );
+  }),
 
-  http.post(`${TAURI_ENDPOINT}/restart_app`, () => success(true)),
+  http.post(`${TAURI_ENDPOINT}/get_proxy_overview`, () =>
+    success({
+      status: {
+        running: false,
+        address: "127.0.0.1",
+        port: 0,
+        active_connections: 0,
+        total_requests: 0,
+        success_requests: 0,
+        failed_requests: 0,
+        success_rate: 0,
+        uptime_seconds: 0,
+        current_provider: null,
+        current_provider_id: null,
+        last_request_at: null,
+        last_error: null,
+        failover_count: 0,
+        active_targets: [],
+      },
+      takeover: {
+        claude: false,
+        codex: false,
+        gemini: false,
+        grokbuild: false,
+        opencode: false,
+        openclaw: false,
+        hermes: false,
+      },
+    }),
+  ),
 
   http.post(`${TAURI_ENDPOINT}/get_settings`, () => success(getSettings())),
 
@@ -256,18 +553,6 @@ export const handlers = [
   }),
 
   http.post(`${TAURI_ENDPOINT}/is_portable_mode`, () => success(false)),
-
-  http.post(
-    `${TAURI_ENDPOINT}/select_config_directory`,
-    async ({ request }) => {
-      const { defaultPath, default_path } = await withJson<{
-        defaultPath?: string;
-        default_path?: string;
-      }>(request);
-      const initial = defaultPath ?? default_path;
-      return success(initial ? `${initial}/picked` : "/mock/selected-dir");
-    },
-  ),
 
   http.post(`${TAURI_ENDPOINT}/pick_directory`, async ({ request }) => {
     const { defaultPath, default_path } = await withJson<{
@@ -343,6 +628,24 @@ export const handlers = [
 
   http.post(`${TAURI_ENDPOINT}/is_live_takeover_active`, () => success(false)),
 
+  // Proxy flight recorder (PROXY-21).
+  http.post(`${TAURI_ENDPOINT}/list_recent_proxy_requests`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/export_recent_proxy_requests`, () =>
+    success(""),
+  ),
+
+  // Proxy routing (PROXY-19): the default reproduces the priority list.
+  http.post(`${TAURI_ENDPOINT}/get_proxy_routing_config`, () =>
+    success({
+      strategy: "priority",
+      stickySessions: false,
+      stickyTtlSecs: 0,
+      maxConcurrentPerProvider: 0,
+      weights: {},
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/set_proxy_routing_config`, () => success(null)),
+
   // Failover / circuit breaker defaults
   http.post(`${TAURI_ENDPOINT}/get_failover_queue`, () => success([])),
   http.post(`${TAURI_ENDPOINT}/get_available_providers_for_failover`, () =>
@@ -352,8 +655,6 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/remove_from_failover_queue`, () =>
     success(true),
   ),
-  http.post(`${TAURI_ENDPOINT}/reorder_failover_queue`, () => success(true)),
-  http.post(`${TAURI_ENDPOINT}/set_failover_item_enabled`, () => success(true)),
 
   http.post(`${TAURI_ENDPOINT}/get_circuit_breaker_config`, () =>
     success({
@@ -381,4 +682,153 @@ export const handlers = [
   ),
   http.post(`${TAURI_ENDPOINT}/reset_circuit_breaker`, () => success(true)),
   http.post(`${TAURI_ENDPOINT}/get_circuit_breaker_stats`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/deeplink_frontend_ready`, () => success(null)),
+
+  // Benign defaults for commands that settings/provider components fire on
+  // mount. Without them those invokes reject and the components silently
+  // render their error branches (TEST-04/TEST-40).
+  http.post(`${TAURI_ENDPOINT}/get_installed_skills`, () => success([])),
+  // Defaults for commands added in wave 2 (tests can override per test).
+  http.post(`${TAURI_ENDPOINT}/sync_encryption_get_status`, () =>
+    success({
+      enabled: false,
+      hasPassphrase: false,
+      storage: "none",
+      minPassphraseLength: 8,
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_provider_secret_vault_status`, () =>
+    success(secretsVaultStatus(false)),
+  ),
+  http.post(
+    `${TAURI_ENDPOINT}/set_provider_secret_vault`,
+    async ({ request }) => {
+      const { enabled } = await withJson<{ enabled: boolean }>(request);
+      return success(secretsVaultStatus(enabled));
+    },
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_usage_data_sources`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_tool_versions`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_budget_enforcement`, () => success(false)),
+  http.post(`${TAURI_ENDPOINT}/set_budget_enforcement`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/save_usage_export`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/open_backups_folder`, () => success(true)),
+  http.post(`${TAURI_ENDPOINT}/get_current_prompt_file_content`, () =>
+    success(null),
+  ),
+  http.post(`${TAURI_ENDPOINT}/set_model_pricing_metadata`, () =>
+    success(null),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_pricing_fx_rates`, () =>
+    success({ CNY: "7.2", USD: "1" }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/set_pricing_fx_rates`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/preview_sync_download`, () =>
+    success({ empty: true }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/check_provider_limits`, async ({ request }) => {
+    const { providerId } = await withJson<{ providerId: string }>(request);
+    return success({
+      providerId,
+      dailyUsage: "0",
+      dailyLimit: null,
+      dailyExceeded: false,
+      monthlyUsage: "0",
+      monthlyLimit: null,
+      monthlyExceeded: false,
+    });
+  }),
+  http.post(`${TAURI_ENDPOINT}/list_profiles`, () =>
+    success({
+      profiles: [],
+      currentIds: {
+        claude: null,
+        claudeDesktop: null,
+        codex: null,
+        gemini: null,
+        grokbuild: null,
+        opencode: null,
+        openclaw: null,
+        hermes: null,
+      },
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/list_project_bindings`, () =>
+    success({ bindings: [], projectLevelScopes: ["claude", "gemini"] }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/bind_project_directory`, async ({ request }) => {
+    const body = await withJson<{
+      path: string;
+      profileId: string;
+      scopes?: string[];
+      projectLevel?: boolean;
+    }>(request);
+    return success({
+      path: body.path,
+      profileId: body.profileId,
+      scopes: body.scopes ?? [],
+      projectLevel: body.projectLevel ?? false,
+      managed: [],
+      createdAt: 0,
+      updatedAt: 0,
+    });
+  }),
+  http.post(`${TAURI_ENDPOINT}/unbind_project_directory`, () => success(true)),
+  http.post(`${TAURI_ENDPOINT}/detect_project`, async ({ request }) => {
+    const { path } = await withJson<{ path?: string }>(request);
+    return success({
+      directory: path ?? "",
+      gitRoot: null,
+      binding: null,
+      profileName: null,
+    });
+  }),
+  http.post(`${TAURI_ENDPOINT}/apply_project_binding`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/get_app_config_dirs`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_mcp_sync_skips`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_import_candidates`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/scan_external_imports`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/import_external_config`, () =>
+    success({ imported: [], skipped: [], rulesImported: 0 }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/test_mcp_server`, () =>
+    success({ ok: true, transport: "stdio", latencyMs: 1, tools: [] }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/preview_live_write`, async ({ request }) => {
+    const { app, providerId } = await withJson<{
+      app: AppId;
+      providerId: string;
+    }>(request);
+    return success({ app, providerId, supported: false, files: [] });
+  }),
+  http.post(`${TAURI_ENDPOINT}/validate_provider_settings`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_codex_history_backup_usage`, () =>
+    success({
+      migrationBytes: 0,
+      restoreLedgerBytes: 0,
+      restoreBackupBytes: 0,
+      totalBytes: 0,
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/purge_codex_history_backups`, () =>
+    success({
+      migrationBytes: 0,
+      restoreLedgerBytes: 0,
+      restoreBackupBytes: 0,
+      totalBytes: 0,
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_claude_desktop_proxy_dependency`, () =>
+    success(false),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_common_config_snippet`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/auth_get_status`, async ({ request }) => {
+    const { authProvider } = await withJson<{ authProvider?: string }>(request);
+    return success({
+      provider: authProvider ?? "github_copilot",
+      authenticated: false,
+      default_account_id: null,
+      accounts: [],
+    });
+  }),
 ];

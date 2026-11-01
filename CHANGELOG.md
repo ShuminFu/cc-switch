@@ -5,6 +5,14 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+New entries go under **[Unreleased]** using the Keep a Changelog sections (Added, Changed,
+Deprecated, Removed, Fixed, Security). The git-cliff tool (configuration in
+[`cliff.toml`](cliff.toml)) drafts that section from the Conventional Commit subjects; edit the
+draft, then move it under the new version heading when releasing (see
+[RELEASING.md](RELEASING.md)).
+
+## [Unreleased]
+
 ## [3.17.0] - 2026-07-13
 
 Development since v3.16.5 is headlined by project profiles — named snapshots of provider/MCP/Skills/prompt state, switchable per scope from a new header switcher or the tray (schema v12) — and a deep Codex push: official ChatGPT-subscription sessions can now route through the local proxy takeover with a corrected client identity, gpt-5.6 lands across context-window injection and Sol/Terra/Luna pricing with 1.25× cache-write rates, and a native Anthropic Messages upstream joins the Codex format options. A proxy-correctness wave makes the Responses↔Anthropic bridges fail closed and round-trip reasoning/tool results losslessly, strengthens prompt-cache breakpoint injection, and fixes cache-write accounting across historical token semantics (schema v13); a config.toml hardening batch stops deleted MCP servers from resurrecting, fails MCP sync closed on unparseable files, extends switch-time common-config autosync to Codex, and moves the common-config merge to backend toml_edit. Usage tooling gains Zhipu team-plan quota queries, Codex sub-agent and free-plan accounting, and transient-failure retry, while Kimi For Coding's 256K window finally takes effect — rounded out by a Codex default-model form field, renamed-session titles, OpenCode form and live-sync fixes, and preset updates (SudoCode sponsorship, LongCat-2.0, GPT-5.6 defaults, Hunyuan Hy3 pricing).
@@ -1891,6 +1899,31 @@ v3.7.0 represents a major evolution from "Provider Switcher" to **"All-in-One AI
 - Gemini CLI support requires Gemini CLI to be installed separately
 - MCP v3.7.0 unified structure is backward compatible with previous configs
 
+## [3.6.1] - 2025-11-10
+
+Stability and user-experience patch on top of v3.6.0. Full notes: [docs/release-notes/v3.6.1-en.md](docs/release-notes/v3.6.1-en.md).
+
+### Added
+
+- Usage queries can use their own API key and base URL instead of the provider's; credential fields follow the template type (General, NewAPI, Custom).
+- Show/hide toggle for API key and access token fields; usage-script form switched to shadcn/ui Switch and Input components.
+- Shared JSON/TOML form validators (`jsonConfigSchema`, `tomlConfigSchema`, `mcpJsonConfigSchema`); MCP `stdio` servers require `command`, `http` servers require `url`.
+- PackyCode added to the Claude and Codex provider presets as a partner.
+
+### Changed
+
+- Non-official provider categories pre-fill the Base URL field; misleading example text removed from model inputs.
+- Provider switch failures show a copyable error message.
+- Configs imported from the default live config are categorised as `custom`.
+
+### Fixed
+
+- Usage-script panel crashed to a white screen (`FormLabel` used outside a `FormField` context).
+- Full-width (CJK IME) quotes broke TOML parsing; quotes are now normalised before parsing.
+- Tray menu order did not follow drag-and-drop sorting (#179).
+- Editing a Codex MCP server in TOML dropped unknown fields such as `timeout_ms`.
+- Tray menu update failures no longer fail the main operation, and tray event handling no longer panics on `unwrap()`.
+
 ## [3.6.0] - 2025-11-07
 
 ### ✨ New Features
@@ -2252,3 +2285,7 @@ For users upgrading from v2.x (Electron version):
 - Basic provider management
 - Claude Code integration
 - Configuration file handling
+
+[Unreleased]: https://github.com/farion1231/cc-switch/compare/v3.17.0...HEAD
+[3.17.0]: https://github.com/farion1231/cc-switch/compare/v3.16.5...v3.17.0
+[3.16.5]: https://github.com/farion1231/cc-switch/compare/v3.16.4...v3.16.5

@@ -1,0 +1,36 @@
+{
+  "model": "claude-sonnet-4-5",
+  "instructions": "You are a terse assistant.",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Hello"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Hi."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Say goodbye in French."
+        }
+      ]
+    }
+  ],
+  "max_output_tokens": 1024,
+  "temperature": 0.2,
+  "stream": false
+}

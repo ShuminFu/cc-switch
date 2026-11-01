@@ -1,7 +1,6 @@
 import type { UsageRangePreset, UsageRangeSelection } from "@/types/usage";
 
 const DAY_SECONDS = 24 * 60 * 60;
-const DAY_MS = DAY_SECONDS * 1000;
 
 export interface ResolvedUsageRange {
   startDate: number;
@@ -18,9 +17,16 @@ function getPresetLookbackStart(
   nowMs: number,
 ): number {
   const dayCount = preset === "7d" ? 7 : preset === "14d" ? 14 : 30;
-  return Math.floor(
-    getStartOfLocalDayDate(nowMs - (dayCount - 1) * DAY_MS).getTime() / 1000,
+  // Calendar arithmetic, not `nowMs - n * 24h`: a 23-hour DST day inside the
+  // window would otherwise push the start one calendar day too far back
+  // (FE-ARCH-42).
+  const now = new Date(nowMs);
+  const start = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - (dayCount - 1),
   );
+  return Math.floor(start.getTime() / 1000);
 }
 
 export function resolveUsageRange(
@@ -66,7 +72,7 @@ export function getUsageRangePresetLabel(
 ): string {
   switch (preset) {
     case "today":
-      return t("usage.presetToday", { defaultValue: "当天" });
+      return t("usage.presetToday", { defaultValue: "Today" });
     case "1d":
       return t("usage.preset1d", { defaultValue: "1d" });
     case "7d":
@@ -76,6 +82,6 @@ export function getUsageRangePresetLabel(
     case "30d":
       return t("usage.preset30d", { defaultValue: "30d" });
     case "custom":
-      return t("usage.customRange", { defaultValue: "日历筛选" });
+      return t("usage.customRange", { defaultValue: "Calendar Filter" });
   }
 }

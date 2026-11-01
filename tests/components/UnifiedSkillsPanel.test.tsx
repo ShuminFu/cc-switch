@@ -112,13 +112,13 @@ describe("UnifiedSkillsPanel", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("skills.import")).toBeInTheDocument();
+      expect(screen.getByText("Import Existing")).toBeInTheDocument();
       expect(screen.getByText("Shared Skill")).toBeInTheDocument();
       expect(screen.getByText("/tmp/shared-skill")).toBeInTheDocument();
     });
 
     await act(async () => {
-      screen.getByText("skills.importSelected").click();
+      screen.getByText("Import Selected (1)").click();
     });
 
     await waitFor(() => {

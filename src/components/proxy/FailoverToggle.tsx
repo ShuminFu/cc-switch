@@ -14,6 +14,7 @@ import { useProxyStatus } from "@/hooks/useProxyStatus";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import type { AppId } from "@/lib/api";
+import { getAppLabel } from "@/config/proxyApps";
 
 interface FailoverToggleProps {
   className?: string;
@@ -33,19 +34,12 @@ export function FailoverToggle({ className, activeApp }: FailoverToggleProps) {
     setEnabled.mutate({ appType: activeApp, enabled: checked });
   };
 
-  const appLabel =
-    activeApp === "claude"
-      ? "Claude"
-      : activeApp === "codex"
-        ? "Codex"
-        : activeApp === "grokbuild"
-          ? "Grok Build"
-          : "Gemini";
+  const appLabel = getAppLabel(activeApp);
 
   const tooltipText = !takeoverEnabled
     ? t("failover.tooltip.takeoverRequired", {
         app: appLabel,
-        defaultValue: `请先接管 ${appLabel}，再启用故障转移`,
+        defaultValue: "Enable {{app}} takeover before turning on failover",
       })
     : isEnabled
       ? t("failover.tooltip.enabled", {
@@ -71,16 +65,26 @@ export function FailoverToggle({ className, activeApp }: FailoverToggleProps) {
         <Shuffle
           className={cn(
             "h-4 w-4 transition-colors",
-            isEnabled
-              ? "text-emerald-500 animate-pulse"
-              : "text-muted-foreground",
+            isEnabled && takeoverEnabled
+              ? "text-emerald-500 animate-pulse motion-reduce:animate-none"
+              : isEnabled
+                ? "text-emerald-500/50"
+                : "text-muted-foreground",
           )}
         />
       )}
       <Switch
         checked={isEnabled}
         onCheckedChange={handleToggle}
-        disabled={setEnabled.isPending || isLoading || !takeoverEnabled}
+        // Turning failover off must always be possible, even after takeover
+        // was stopped and left the per-app flag on (FE-UI-56).
+        disabled={
+          setEnabled.isPending || isLoading || (!takeoverEnabled && !isEnabled)
+        }
+        aria-label={t("failover.toggleLabel", {
+          app: appLabel,
+          defaultValue: "{{app}} failover",
+        })}
       />
     </div>
   );

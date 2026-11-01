@@ -10,7 +10,7 @@ use crate::proxy::providers::copilot_auth::{
 const AUTH_PROVIDER_GITHUB_COPILOT: &str = "github_copilot";
 const AUTH_PROVIDER_CODEX_OAUTH: &str = "codex_oauth";
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub struct ManagedAuthAccount {
     pub id: String,
     pub provider: String,
@@ -21,7 +21,7 @@ pub struct ManagedAuthAccount {
     pub github_domain: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub struct ManagedAuthStatus {
     pub provider: String,
     pub authenticated: bool,
@@ -30,7 +30,7 @@ pub struct ManagedAuthStatus {
     pub accounts: Vec<ManagedAuthAccount>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub struct ManagedAuthDeviceCodeResponse {
     pub provider: String,
     pub device_code: String,
@@ -79,6 +79,7 @@ fn map_device_code_response(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+#[specta::specta]
 pub async fn auth_start_login(
     auth_provider: String,
     github_domain: Option<String>,
@@ -108,6 +109,7 @@ pub async fn auth_start_login(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+#[specta::specta]
 pub async fn auth_poll_for_account(
     auth_provider: String,
     device_code: String,
@@ -151,6 +153,7 @@ pub async fn auth_poll_for_account(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+#[specta::specta]
 pub async fn auth_list_accounts(
     auth_provider: String,
     copilot_state: State<'_, CopilotAuthState>,
@@ -183,6 +186,7 @@ pub async fn auth_list_accounts(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+#[specta::specta]
 pub async fn auth_get_status(
     auth_provider: String,
     copilot_state: State<'_, CopilotAuthState>,
@@ -231,6 +235,7 @@ pub async fn auth_get_status(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+#[specta::specta]
 pub async fn auth_remove_account(
     auth_provider: String,
     account_id: String,
@@ -258,6 +263,7 @@ pub async fn auth_remove_account(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+#[specta::specta]
 pub async fn auth_set_default_account(
     auth_provider: String,
     account_id: String,
@@ -285,6 +291,7 @@ pub async fn auth_set_default_account(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+#[specta::specta]
 pub async fn auth_logout(
     auth_provider: String,
     copilot_state: State<'_, CopilotAuthState>,

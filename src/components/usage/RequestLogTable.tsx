@@ -26,6 +26,12 @@ import {
 } from "@/types/usage";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
+import { RequestDetailPanel } from "./RequestDetailPanel";
+import {
+  STATUS_CLASS_OPTIONS,
+  STATUS_CODE_OPTIONS,
+  statusFilterToFilters,
+} from "./statusFilter";
 import {
   fmtInt,
   fmtUsd,
@@ -56,9 +62,10 @@ export function RequestLogTable({
 
   // 应用/Provider/模型筛选已上移到 Dashboard 顶栏（全局生效）；
   // 这里只保留日志特有的状态码筛选。
-  const [statusCode, setStatusCode] = useState<number | undefined>(undefined);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [page, setPage] = useState(0);
   const [pageInput, setPageInput] = useState("");
+  const [detailRequestId, setDetailRequestId] = useState<string | null>(null);
   const pageSize = 20;
 
   const effectiveFilters: LogFilters = {
@@ -68,7 +75,7 @@ export function RequestLogTable({
         : undefined,
     providerName,
     model,
-    statusCode,
+    ...statusFilterToFilters(statusFilter),
   };
 
   const { data: result, isLoading } = useRequestLogs({
@@ -114,25 +121,34 @@ export function RequestLogTable({
         <div className="flex flex-wrap items-center gap-1.5">
           {/* Status code */}
           <Select
-            value={statusCode?.toString() || "all"}
+            value={statusFilter}
             onValueChange={(v) => {
-              const parsed = Number.parseInt(v, 10);
-              setStatusCode(
-                v === "all" || !Number.isFinite(parsed) ? undefined : parsed,
-              );
+              setStatusFilter(v);
               setPage(0);
             }}
           >
-            <SelectTrigger className="h-8 w-[100px] bg-background text-xs">
+            <SelectTrigger
+              className="h-8 w-[120px] bg-background text-xs"
+              aria-label={t("usage.statusCode")}
+            >
               <SelectValue placeholder={t("usage.statusCode")} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{t("common.all")}</SelectItem>
-              <SelectItem value="200">200 OK</SelectItem>
-              <SelectItem value="400">400</SelectItem>
-              <SelectItem value="401">401</SelectItem>
-              <SelectItem value="429">429</SelectItem>
-              <SelectItem value="500">500</SelectItem>
+              {STATUS_CLASS_OPTIONS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option === "errors"
+                    ? t("usage.statusErrors", {
+                        defaultValue: "Errors (≥400)",
+                      })
+                    : option}
+                </SelectItem>
+              ))}
+              {STATUS_CODE_OPTIONS.map((code) => (
+                <SelectItem key={code} value={String(code)}>
+                  {code === 200 ? "200 OK" : String(code)}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
 
@@ -197,7 +213,18 @@ export function RequestLogTable({
                   logs.map((log) => {
                     const unpriced = isUnpricedUsage(log);
                     return (
-                      <TableRow key={log.requestId}>
+                      <TableRow
+                        key={log.requestId}
+                        className="cursor-pointer"
+                        tabIndex={0}
+                        onClick={() => setDetailRequestId(log.requestId)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setDetailRequestId(log.requestId);
+                          }
+                        }}
+                      >
                         <TableCell className="text-center whitespace-nowrap text-xs px-1.5">
                           {new Date(log.createdAt * 1000).toLocaleString(
                             locale,
@@ -277,7 +304,7 @@ export function RequestLogTable({
                             }`}
                           >
                             {unpriced
-                              ? t("usage.unpriced", "未定价")
+                              ? t("usage.unpriced", "Unpriced")
                               : fmtUsd(log.totalCostUsd, 4)}
                           </div>
                           {parseFiniteNumber(log.costMultiplier) != null &&
@@ -398,6 +425,12 @@ export function RequestLogTable({
             </div>
           </div>
         </>
+      )}
+      {detailRequestId && (
+        <RequestDetailPanel
+          requestId={detailRequestId}
+          onClose={() => setDetailRequestId(null)}
+        />
       )}
     </div>
   );

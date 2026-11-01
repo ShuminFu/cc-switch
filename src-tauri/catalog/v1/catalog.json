@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "version": "0.0.0",
+  "publishedAt": null,
+  "note": "Bundled snapshot. An empty overlay leaves the presets compiled into the app unchanged; signed remote catalogs (same format) add, patch or hide presets for new providers only.",
+  "apps": {},
+  "promotions": {}
+}

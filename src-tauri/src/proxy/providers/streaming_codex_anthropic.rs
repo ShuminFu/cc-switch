@@ -413,11 +413,21 @@ impl AnthropicToResponsesState {
                 if source_block.get("type").and_then(Value::as_str) == Some("thinking") {
                     source_block["thinking"] = json!(text);
                 }
-                let Some(item) =
-                    responses_reasoning_item_from_anthropic_block(&item_id, &source_block)
-                else {
-                    return Vec::new();
-                };
+                // PROV-36: the item was already announced with
+                // `output_item.added`; always close it, even when there is
+                // nothing to carry in `encrypted_content`.
+                let item = responses_reasoning_item_from_anthropic_block(&item_id, &source_block)
+                    .unwrap_or_else(|| {
+                        json!({
+                            "id": item_id.clone(),
+                            "type": "reasoning",
+                            "summary": if text.is_empty() {
+                                json!([])
+                            } else {
+                                json!([{ "type": "summary_text", "text": text.clone() }])
+                            }
+                        })
+                    });
                 let events = sse::reasoning_close_with_item(
                     output_index,
                     &item_id,
@@ -1039,6 +1049,44 @@ mod tests {
         assert!(merged.contains("event: response.reasoning_summary_text.delta"));
         assert!(merged.contains("\"delta\":\"hmm\""));
         assert!(merged.contains(ANTHROPIC_THINKING_ENCRYPTED_PREFIX));
+    }
+
+    #[tokio::test]
+    async fn test_unsigned_thinking_reasoning_item_is_always_closed() {
+        let input = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_u\",\"model\":\"deepseek-v4-pro\"}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"plan\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"read\",\"input\":{}}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        );
+        let merged = run(input).await;
+        let added = merged.matches("event: response.output_item.added").count();
+        let done = merged.matches("event: response.output_item.done").count();
+        assert_eq!(added, 2, "{merged}");
+        assert_eq!(done, 2, "{merged}");
+        let completed = merged
+            .split("event: response.completed\ndata: ")
+            .nth(1)
+            .and_then(|rest| rest.split("\n\n").next())
+            .expect("response.completed");
+        let completed: Value = serde_json::from_str(completed).unwrap();
+        let output = completed["response"]["output"].as_array().unwrap();
+        assert_eq!(output[0]["type"], "reasoning");
+        assert_eq!(output[1]["type"], "function_call");
     }
 
     #[tokio::test]

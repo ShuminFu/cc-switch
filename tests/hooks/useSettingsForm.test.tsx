@@ -213,4 +213,46 @@ describe("useSettingsForm Hook", () => {
 
     expect(changeLanguageSpy).not.toHaveBeenCalled();
   });
+
+  it("sanitizes hermesConfigDir like the other directory overrides", async () => {
+    useSettingsQueryMock.mockReturnValue({
+      data: { hermesConfigDir: "  /hermes  ", language: "en" },
+      isLoading: false,
+    });
+
+    const { result } = renderHook(() => useSettingsForm());
+    await waitFor(() => expect(result.current.settings).not.toBeNull());
+    expect(result.current.settings!.hermesConfigDir).toBe("/hermes");
+  });
+
+  it("keeps unsaved directory drafts when settings are refetched after an autosave", async () => {
+    let data: Record<string, unknown> = {
+      minimizeToTrayOnClose: true,
+      claudeConfigDir: "/server/claude",
+      language: "en",
+    };
+    useSettingsQueryMock.mockImplementation(() => ({ data, isLoading: false }));
+
+    const { result, rerender } = renderHook(() => useSettingsForm());
+    await waitFor(() => expect(result.current.settings).not.toBeNull());
+
+    act(() => {
+      result.current.updateSettings({ claudeConfigDir: "/draft/claude" });
+    });
+
+    // An autosave of an unrelated toggle refetches settings from the server.
+    data = { ...data, minimizeToTrayOnClose: false };
+    rerender();
+
+    await waitFor(() =>
+      expect(result.current.settings?.minimizeToTrayOnClose).toBe(false),
+    );
+    expect(result.current.settings?.claudeConfigDir).toBe("/draft/claude");
+
+    // An explicit reset discards the draft.
+    act(() => {
+      result.current.resetSettings(data as any);
+    });
+    expect(result.current.settings?.claudeConfigDir).toBe("/server/claude");
+  });
 });

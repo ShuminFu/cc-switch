@@ -1,14 +1,12 @@
+/**
+ * Global proxy settings. Retries and timeouts are per app (`AppProxyConfig`);
+ * the vestigial copies that used to live here were removed (PROXY-29).
+ */
 export interface ProxyConfig {
   listen_address: string;
   listen_port: number;
-  max_retries: number;
-  request_timeout: number;
   enable_logging: boolean;
   live_takeover_active?: boolean;
-  // 超时配置
-  streaming_first_byte_timeout: number;
-  streaming_idle_timeout: number;
-  non_streaming_timeout: number;
 }
 
 export interface ProxyStatus {
@@ -138,4 +136,42 @@ export interface AppProxyConfig {
   circuitTimeoutSeconds: number;
   circuitErrorRateThreshold: number;
   circuitMinRequests: number;
+}
+
+/** Which available provider a request tries first (PROXY-19). */
+export type RoutingStrategy = "priority" | "roundRobin" | "weighted";
+
+/** Per-app routing settings; the defaults reproduce the priority list. */
+export interface RoutingConfig {
+  strategy: RoutingStrategy;
+  stickySessions: boolean;
+  /** Sticky pin lifetime after last use; 0 = backend default. */
+  stickyTtlSecs: number;
+  /** In-flight requests allowed per provider; 0 = unlimited. */
+  maxConcurrentPerProvider: number;
+  /** Provider id -> weight for `weighted`; missing = 1. */
+  weights: Record<string, number>;
+}
+
+/** One provider attempt inside a flight-recorder request (PROXY-21). */
+export interface ProxyAttemptRecord {
+  providerId: string;
+  providerName: string;
+  result: "served" | "failover" | "aborted" | "skipped";
+  status: number | null;
+  error: string | null;
+  durationMs: number;
+}
+
+/** A request remembered by the in-memory flight recorder (no bodies). */
+export interface ProxyRequestRecord {
+  id: number;
+  appType: string;
+  method: string;
+  endpoint: string;
+  /** Unix milliseconds. */
+  startedAt: number;
+  durationMs: number;
+  success: boolean;
+  attempts: ProxyAttemptRecord[];
 }

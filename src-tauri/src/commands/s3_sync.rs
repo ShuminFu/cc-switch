@@ -4,10 +4,11 @@ use serde_json::{json, Value};
 use tauri::State;
 
 use crate::commands::sync_support::{
-    attach_warning, post_sync_warning_from_result, run_post_import_sync,
+    attach_warning, post_sync_warning_from_result, run_post_import_sync_blocking,
 };
 use crate::error::AppError;
 use crate::services::s3_sync as s3_sync_service;
+use crate::services::sync_protocol::is_insecure_remote_url;
 use crate::settings::{self, S3SyncSettings};
 use crate::store::AppState;
 
@@ -17,20 +18,19 @@ fn persist_sync_error(settings: &mut S3SyncSettings, error: &AppError, source: &
     let _ = settings::update_s3_sync_status(settings.status.clone());
 }
 
-fn s3_not_configured_error() -> String {
+fn s3_not_configured_error() -> AppError {
     AppError::localized(
         "s3.sync.not_configured",
         "未配置 S3 同步",
         "S3 sync is not configured.",
     )
-    .to_string()
 }
 
-fn s3_sync_disabled_error() -> String {
-    AppError::localized("s3.sync.disabled", "S3 同步未启用", "S3 sync is disabled.").to_string()
+fn s3_sync_disabled_error() -> AppError {
+    AppError::localized("s3.sync.disabled", "S3 同步未启用", "S3 sync is disabled.")
 }
 
-fn require_enabled_s3_settings() -> Result<S3SyncSettings, String> {
+pub(super) fn require_enabled_s3_settings() -> Result<S3SyncSettings, AppError> {
     let settings = settings::get_s3_sync_settings().ok_or_else(s3_not_configured_error)?;
     if !settings.enabled {
         return Err(s3_sync_disabled_error());
@@ -63,7 +63,7 @@ where
     s3_sync_service::run_with_sync_lock(operation).await
 }
 
-fn map_sync_result<T, F>(result: Result<T, AppError>, on_error: F) -> Result<T, String>
+fn map_sync_result<T, F>(result: Result<T, AppError>, on_error: F) -> Result<T, AppError>
 where
     F: FnOnce(&AppError),
 {
@@ -71,7 +71,7 @@ where
         Ok(value) => Ok(value),
         Err(err) => {
             on_error(&err);
-            Err(err.to_string())
+            Err(err)
         }
     }
 }
@@ -80,48 +80,70 @@ where
 pub async fn s3_test_connection(
     settings: S3SyncSettings,
     #[allow(non_snake_case)] preserveEmptyPassword: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, AppError> {
     let preserve_empty = preserveEmptyPassword.unwrap_or(true);
     let resolved =
         resolve_secret_for_request(settings, settings::get_s3_sync_settings(), preserve_empty);
-    s3_sync_service::check_connection(&resolved)
-        .await
-        .map_err(|e| e.to_string())?;
+    s3_sync_service::check_connection(&resolved).await?;
     Ok(json!({
         "success": true,
-        "message": "S3 connection ok"
+        "message": "S3 connection ok",
+        "insecureTransport": is_insecure_remote_url(&resolved.endpoint),
     }))
 }
 
+/// Manual sync commands: `force` defaults to `true` because the settings UI
+/// only calls them after showing the remote snapshot (device/time) or the
+/// "overwrite all local data" warning and getting explicit confirmation.
+/// Callers that want conflict detection pass `force: false` and receive a
+/// distinct "remote changed" / "local changed" conflict error instead.
+fn manual_force(force: Option<bool>) -> bool {
+    force.unwrap_or(true)
+}
+
 #[tauri::command]
-pub async fn s3_sync_upload(state: State<'_, AppState>) -> Result<Value, String> {
+#[specta::specta]
+pub async fn s3_sync_upload(
+    state: State<'_, AppState>,
+    force: Option<bool>,
+) -> Result<Value, AppError> {
     let db = state.db.clone();
     let mut settings = require_enabled_s3_settings()?;
 
-    let result = run_with_s3_lock(s3_sync_service::upload(&db, &mut settings)).await;
+    let result = run_with_s3_lock(s3_sync_service::upload(
+        &db,
+        &mut settings,
+        manual_force(force),
+    ))
+    .await;
     map_sync_result(result, |error| {
         persist_sync_error(&mut settings, error, "manual")
     })
 }
 
 #[tauri::command]
-pub async fn s3_sync_download(state: State<'_, AppState>) -> Result<Value, String> {
+#[specta::specta]
+pub async fn s3_sync_download(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    force: Option<bool>,
+) -> Result<Value, AppError> {
     let db = state.db.clone();
-    let db_for_sync = db.clone();
     let mut settings = require_enabled_s3_settings()?;
     let _auto_sync_suppression = crate::services::s3_auto_sync::AutoSyncSuppressionGuard::new();
 
-    let sync_result = run_with_s3_lock(s3_sync_service::download(&db, &mut settings)).await;
+    let sync_result = run_with_s3_lock(s3_sync_service::download(
+        &db,
+        &mut settings,
+        manual_force(force),
+    ))
+    .await;
     let mut result = map_sync_result(sync_result, |error| {
         persist_sync_error(&mut settings, error, "manual")
     })?;
 
     // Post-download sync is best-effort: snapshot restore has already succeeded.
-    let warning = post_sync_warning_from_result(
-        tauri::async_runtime::spawn_blocking(move || run_post_import_sync(db_for_sync))
-            .await
-            .map_err(|e| e.to_string()),
-    );
+    let warning = post_sync_warning_from_result(run_post_import_sync_blocking(app).await);
     if let Some(msg) = warning.as_ref() {
         log::warn!("[S3] post-download sync warning: {msg}");
     }
@@ -134,7 +156,7 @@ pub async fn s3_sync_download(state: State<'_, AppState>) -> Result<Value, Strin
 pub async fn s3_sync_save_settings(
     settings: S3SyncSettings,
     #[allow(non_snake_case)] passwordTouched: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, AppError> {
     let password_touched = passwordTouched.unwrap_or(false);
     let existing = settings::get_s3_sync_settings();
     let mut sync_settings =
@@ -146,17 +168,16 @@ pub async fn s3_sync_save_settings(
     }
 
     sync_settings.normalize();
-    sync_settings.validate().map_err(|e| e.to_string())?;
-    settings::set_s3_sync_settings(Some(sync_settings)).map_err(|e| e.to_string())?;
+    sync_settings.validate()?;
+    settings::set_s3_sync_settings(Some(sync_settings))?;
     Ok(json!({ "success": true }))
 }
 
 #[tauri::command]
-pub async fn s3_sync_fetch_remote_info() -> Result<Value, String> {
+#[specta::specta]
+pub async fn s3_sync_fetch_remote_info() -> Result<Value, AppError> {
     let settings = require_enabled_s3_settings()?;
-    let info = s3_sync_service::fetch_remote_info(&settings)
-        .await
-        .map_err(|e| e.to_string())?;
+    let info = s3_sync_service::fetch_remote_info(&settings).await?;
     Ok(info.unwrap_or(json!({ "empty": true })))
 }
 
@@ -319,7 +340,9 @@ mod tests {
         }))
         .expect("seed disabled s3 settings");
 
-        let err = require_enabled_s3_settings().expect_err("disabled settings should fail");
+        let err = require_enabled_s3_settings()
+            .expect_err("disabled settings should fail")
+            .to_string();
         assert!(
             err.contains("disabled") || err.contains("未启用"),
             "unexpected error: {err}"

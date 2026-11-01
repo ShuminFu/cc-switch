@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Save, Plus, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import JsonEditor from "@/components/JsonEditor";
 import type { AppId } from "@/lib/api/types";
-import { McpServer, McpServerSpec } from "@/types";
+import type { McpServer, McpServerSpec } from "@/types";
 import { mcpPresets, getMcpPresetWithDescription } from "@/config/mcpPresets";
 import McpWizardModal from "./McpWizardModal";
 import {
@@ -19,11 +19,12 @@ import {
   extractIdFromToml,
   mcpServerToToml,
 } from "@/utils/tomlUtils";
-import { normalizeTomlText } from "@/utils/textNormalization";
 import { parseSmartMcpJson } from "@/utils/formatters";
 import { useMcpValidation } from "./useMcpValidation";
 import { useUpsertMcpServer } from "@/hooks/useMcp";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
+import { MCP_APP_IDS } from "@/config/appConfig";
+import { useDarkMode } from "@/hooks/useDarkMode";
 
 interface McpFormModalProps {
   editingId?: string;
@@ -100,12 +101,7 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
     isEditing ? hasAdditionalInfo : false,
   );
 
-  const useTomlFormat = useMemo(() => {
-    if (initialData?.server) {
-      return defaultFormat === "toml";
-    }
-    return defaultFormat === "toml";
-  }, [defaultFormat, initialData]);
+  const useTomlFormat = defaultFormat === "toml";
 
   const [formConfig, setFormConfig] = useState(() => {
     const spec = initialData?.server;
@@ -120,22 +116,7 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [idError, setIdError] = useState("");
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
+  const isDarkMode = useDarkMode();
 
   const useToml = useTomlFormat;
 
@@ -223,7 +204,9 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
   };
 
   const handleConfigChange = (value: string) => {
-    const nextValue = useToml ? normalizeTomlText(value) : value;
+    // Never rewrite quotes while typing (FE-ARCH-37); TOML parsing falls back
+    // to smart-quote delimiters on its own.
+    const nextValue = value;
     setFormConfig(nextValue);
 
     if (useToml) {
@@ -262,13 +245,22 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
         setConfigError("");
       } catch (err: any) {
         const errorMessage = err?.message || String(err);
-        setConfigError(t("mcp.error.jsonInvalid") + ": " + errorMessage);
+        setConfigError(
+          t("mcp.error.jsonInvalidDetail", {
+            error: errorMessage,
+            defaultValue: "Invalid JSON: {{error}}",
+          }),
+        );
       }
     }
   };
 
   const handleWizardApply = (title: string, json: string) => {
-    setFormId(title);
+    // 编辑模式下 ID 是锁定的：改 ID 会让 upsert 新建一份副本，
+    // 或者静默覆盖另一个同名服务器。
+    if (!isEditing) {
+      handleIdChange(title);
+    }
     if (!formName.trim()) {
       setFormName(title);
     }
@@ -288,7 +280,8 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
   };
 
   const handleSubmit = async () => {
-    const trimmedId = formId.trim();
+    // 编辑时始终按原 ID 保存，绝不重命名
+    const trimmedId = isEditing && editingId ? editingId : formId.trim();
     if (!trimmedId) {
       toast.error(t("mcp.error.idRequired"), { duration: 3000 });
       return;
@@ -338,7 +331,12 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
           serverSpec = result.config as McpServerSpec;
         } catch (e: any) {
           const errorMessage = e?.message || String(e);
-          setConfigError(t("mcp.error.jsonInvalid") + ": " + errorMessage);
+          setConfigError(
+            t("mcp.error.jsonInvalidDetail", {
+              error: errorMessage,
+              defaultValue: "Invalid JSON: {{error}}",
+            }),
+          );
           toast.error(t("mcp.error.jsonInvalid"), { duration: 4000 });
           return;
         }
@@ -406,7 +404,7 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
       await onSave();
     } catch (error: any) {
       const detail = extractErrorMessage(error);
-      const mapped = translateMcpBackendError(detail, t);
+      const mapped = translateMcpBackendError(error, t);
       const msg = mapped || detail || t("mcp.error.saveFailed");
       toast.error(msg, { duration: mapped || detail ? 6000 : 4000 });
     } finally {
@@ -522,102 +520,28 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
               <label className="block text-sm font-medium text-foreground mb-3">
                 {t("mcp.form.enabledApps")}
               </label>
+              {/* One checkbox per MCP-capable app, from the app registry, so
+                  OpenClaw (and future apps) can be enabled here too (FE-UI-32). */}
               <div className="flex flex-wrap gap-4">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="enable-claude"
-                    checked={enabledApps.claude}
-                    onCheckedChange={(checked: boolean) =>
-                      setEnabledApps({ ...enabledApps, claude: checked })
-                    }
-                  />
-                  <label
-                    htmlFor="enable-claude"
-                    className="text-sm text-foreground cursor-pointer select-none"
-                  >
-                    {t("mcp.unifiedPanel.apps.claude")}
-                  </label>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="enable-codex"
-                    checked={enabledApps.codex}
-                    onCheckedChange={(checked: boolean) =>
-                      setEnabledApps({ ...enabledApps, codex: checked })
-                    }
-                  />
-                  <label
-                    htmlFor="enable-codex"
-                    className="text-sm text-foreground cursor-pointer select-none"
-                  >
-                    {t("mcp.unifiedPanel.apps.codex")}
-                  </label>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="enable-gemini"
-                    checked={enabledApps.gemini}
-                    onCheckedChange={(checked: boolean) =>
-                      setEnabledApps({ ...enabledApps, gemini: checked })
-                    }
-                  />
-                  <label
-                    htmlFor="enable-gemini"
-                    className="text-sm text-foreground cursor-pointer select-none"
-                  >
-                    {t("mcp.unifiedPanel.apps.gemini")}
-                  </label>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="enable-grokbuild"
-                    checked={enabledApps.grokbuild}
-                    onCheckedChange={(checked: boolean) =>
-                      setEnabledApps({ ...enabledApps, grokbuild: checked })
-                    }
-                  />
-                  <label
-                    htmlFor="enable-grokbuild"
-                    className="text-sm text-foreground cursor-pointer select-none"
-                  >
-                    {t("mcp.unifiedPanel.apps.grokbuild")}
-                  </label>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="enable-opencode"
-                    checked={enabledApps.opencode}
-                    onCheckedChange={(checked: boolean) =>
-                      setEnabledApps({ ...enabledApps, opencode: checked })
-                    }
-                  />
-                  <label
-                    htmlFor="enable-opencode"
-                    className="text-sm text-foreground cursor-pointer select-none"
-                  >
-                    {t("mcp.unifiedPanel.apps.opencode")}
-                  </label>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="enable-hermes"
-                    checked={enabledApps.hermes}
-                    onCheckedChange={(checked: boolean) =>
-                      setEnabledApps({ ...enabledApps, hermes: checked })
-                    }
-                  />
-                  <label
-                    htmlFor="enable-hermes"
-                    className="text-sm text-foreground cursor-pointer select-none"
-                  >
-                    {t("mcp.unifiedPanel.apps.hermes")}
-                  </label>
-                </div>
+                {MCP_APP_IDS.filter(
+                  (app): app is keyof typeof enabledApps => app in enabledApps,
+                ).map((app) => (
+                  <div key={app} className="flex items-center gap-2">
+                    <Checkbox
+                      id={`enable-${app}`}
+                      checked={enabledApps[app]}
+                      onCheckedChange={(checked: boolean) =>
+                        setEnabledApps({ ...enabledApps, [app]: checked })
+                      }
+                    />
+                    <label
+                      htmlFor={`enable-${app}`}
+                      className="text-sm text-foreground cursor-pointer select-none"
+                    >
+                      {t(`mcp.unifiedPanel.apps.${app}`)}
+                    </label>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -741,6 +665,7 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
         onClose={() => setIsWizardOpen(false)}
         onApply={handleWizardApply}
         initialTitle={formId}
+        titleReadOnly={isEditing}
         initialServer={wizardInitialSpec}
       />
     </>

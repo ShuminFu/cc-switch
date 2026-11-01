@@ -1,9 +1,9 @@
+use super::{timed_blocking, timed_blocking_with_state};
 use std::time::Duration;
-use tauri::{AppHandle, State};
+use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::hermes_config;
-use crate::store::AppState;
 
 /// Error string returned when `open_hermes_web_ui` cannot reach the Hermes
 /// FastAPI server. Kept in sync with the `HERMES_WEB_OFFLINE_ERROR` constant
@@ -19,25 +19,37 @@ const HERMES_WEB_OFFLINE_ERROR: &str = "hermes_web_offline";
 /// Hermes uses additive mode — users may already have providers
 /// configured in config.yaml.
 #[tauri::command]
-pub fn import_hermes_providers_from_live(state: State<'_, AppState>) -> Result<usize, String> {
-    crate::services::provider::import_hermes_providers_from_live(state.inner())
-        .map_err(|e| e.to_string())
+#[specta::specta]
+pub async fn import_hermes_providers_from_live(handle: tauri::AppHandle) -> Result<usize, String> {
+    timed_blocking_with_state("import_hermes_providers_from_live", handle, move |state| {
+        crate::services::provider::import_hermes_providers_from_live(state)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// Get provider names in the Hermes live config.
 #[tauri::command]
-pub fn get_hermes_live_provider_ids() -> Result<Vec<String>, String> {
-    hermes_config::get_providers()
-        .map(|providers| providers.keys().cloned().collect())
-        .map_err(|e| e.to_string())
+#[specta::specta]
+pub async fn get_hermes_live_provider_ids() -> Result<Vec<String>, String> {
+    timed_blocking("get_hermes_live_provider_ids", move || {
+        hermes_config::get_providers()
+            .map(|providers| providers.keys().cloned().collect())
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// Get a single Hermes provider fragment from live config.
 #[tauri::command]
-pub fn get_hermes_live_provider(
+#[specta::specta]
+pub async fn get_hermes_live_provider(
     #[allow(non_snake_case)] providerId: String,
 ) -> Result<Option<serde_json::Value>, String> {
-    hermes_config::get_provider(&providerId).map_err(|e| e.to_string())
+    timed_blocking("get_hermes_live_provider", move || {
+        hermes_config::get_provider(&providerId).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // ============================================================================
@@ -47,8 +59,11 @@ pub fn get_hermes_live_provider(
 /// Get Hermes model config (model section of config.yaml). Read-only — writes
 /// happen implicitly through `apply_switch_defaults` when switching providers.
 #[tauri::command]
-pub fn get_hermes_model_config() -> Result<Option<hermes_config::HermesModelConfig>, String> {
-    hermes_config::get_model_config().map_err(|e| e.to_string())
+pub async fn get_hermes_model_config() -> Result<Option<hermes_config::HermesModelConfig>, String> {
+    timed_blocking("get_hermes_model_config", move || {
+        hermes_config::get_model_config().map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // ============================================================================
@@ -56,26 +71,45 @@ pub fn get_hermes_model_config() -> Result<Option<hermes_config::HermesModelConf
 // ============================================================================
 
 #[tauri::command]
-pub fn get_hermes_memory(kind: hermes_config::MemoryKind) -> Result<String, String> {
-    hermes_config::read_memory(kind).map_err(|e| e.to_string())
+#[specta::specta]
+pub async fn get_hermes_memory(kind: hermes_config::MemoryKind) -> Result<String, String> {
+    timed_blocking("get_hermes_memory", move || {
+        hermes_config::read_memory(kind).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn set_hermes_memory(kind: hermes_config::MemoryKind, content: String) -> Result<(), String> {
-    hermes_config::write_memory(kind, &content).map_err(|e| e.to_string())
+#[specta::specta]
+pub async fn set_hermes_memory(
+    kind: hermes_config::MemoryKind,
+    content: String,
+) -> Result<(), String> {
+    timed_blocking("set_hermes_memory", move || {
+        hermes_config::write_memory(kind, &content).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn get_hermes_memory_limits() -> Result<hermes_config::HermesMemoryLimits, String> {
-    hermes_config::read_memory_limits().map_err(|e| e.to_string())
+#[specta::specta]
+pub async fn get_hermes_memory_limits() -> Result<hermes_config::HermesMemoryLimits, String> {
+    timed_blocking("get_hermes_memory_limits", move || {
+        hermes_config::read_memory_limits().map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn set_hermes_memory_enabled(
+#[specta::specta]
+pub async fn set_hermes_memory_enabled(
     kind: hermes_config::MemoryKind,
     enabled: bool,
 ) -> Result<hermes_config::HermesWriteOutcome, String> {
-    hermes_config::set_memory_enabled(kind, enabled).map_err(|e| e.to_string())
+    timed_blocking("set_hermes_memory_enabled", move || {
+        hermes_config::set_memory_enabled(kind, enabled).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // ============================================================================
@@ -95,6 +129,7 @@ pub fn set_hermes_memory_enabled(
 /// there is no need (and no way) for CC Switch to inject it — we just open
 /// the URL and let Hermes handle auth.
 #[tauri::command]
+#[specta::specta]
 pub async fn open_hermes_web_ui(app: AppHandle, path: Option<String>) -> Result<(), String> {
     let port = std::env::var("HERMES_WEB_PORT")
         .ok()
@@ -134,9 +169,10 @@ pub async fn open_hermes_web_ui(app: AppHandle, path: Option<String>) -> Result<
 /// since Hermes startup can take several seconds and may fail outright if
 /// the `hermes-agent[web]` extras are missing.
 #[tauri::command]
+#[specta::specta]
 pub async fn launch_hermes_dashboard() -> Result<(), String> {
     tokio::task::spawn_blocking(|| {
-        crate::commands::misc::launch_terminal_running("hermes dashboard", "hermes_dashboard")
+        crate::services::cli_tools::launch_terminal_running("hermes dashboard", "hermes_dashboard")
     })
     .await
     .map_err(|e| format!("launch task join error: {e}"))?

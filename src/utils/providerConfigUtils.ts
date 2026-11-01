@@ -3,23 +3,57 @@
 import type { TemplateValueConfig } from "../config/claudeProviderPresets";
 import type { CodexApiFormat } from "@/types";
 import { deepClone } from "@/utils/deepClone";
-import { normalizeTomlText } from "@/utils/textNormalization";
+import { normalizeTomlText, parseTomlLenient } from "@/utils/textNormalization";
 import { parse as parseToml } from "smol-toml";
+import i18n from "i18next";
 
-const isPlainObject = (value: unknown): value is Record<string, any> => {
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   return Object.prototype.toString.call(value) === "[object Object]";
 };
 
+/**
+ * Keys that must never be walked or assigned when merging untrusted JSON
+ * (common-config snippets come from the DB, sync and SQL import). Writing
+ * through them would mutate `Object.prototype` (FE-ARCH-40).
+ */
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** The parts of a parsed Codex config.toml this module reads. */
+type CodexTomlDoc = {
+  features?: { goals?: unknown };
+  model_provider?: unknown;
+  model_providers?: Record<
+    string,
+    { name?: unknown; experimental_bearer_token?: unknown } | undefined
+  >;
+  [key: string]: unknown;
+};
+
+const safeEntries = (source: Record<string, unknown>): [string, unknown][] =>
+  Object.entries(source).filter(([key]) => !UNSAFE_KEYS.has(key));
+
+const hasOwn = (target: object, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(target, key);
+
+/** True when a parsed JSON value contains a prototype-polluting key anywhere. */
+export const containsUnsafeKeys = (value: unknown): boolean => {
+  if (Array.isArray(value)) return value.some(containsUnsafeKeys);
+  if (!isPlainObject(value)) return false;
+  return Object.keys(value).some(
+    (key) => UNSAFE_KEYS.has(key) || containsUnsafeKeys(value[key]),
+  );
+};
+
 const deepMerge = (
-  target: Record<string, any>,
-  source: Record<string, any>,
-): Record<string, any> => {
-  Object.entries(source).forEach(([key, value]) => {
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): Record<string, unknown> => {
+  safeEntries(source).forEach(([key, value]) => {
     if (isPlainObject(value)) {
-      if (!isPlainObject(target[key])) {
+      if (!hasOwn(target, key) || !isPlainObject(target[key])) {
         target[key] = {};
       }
-      deepMerge(target[key], value);
+      deepMerge(target[key] as Record<string, unknown>, value);
     } else {
       // 直接覆盖非对象字段（数组/基础类型）
       target[key] = value;
@@ -29,11 +63,11 @@ const deepMerge = (
 };
 
 const deepRemove = (
-  target: Record<string, any>,
-  source: Record<string, any>,
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
 ) => {
-  Object.entries(source).forEach(([key, value]) => {
-    if (!(key in target)) return;
+  safeEntries(source).forEach(([key, value]) => {
+    if (!hasOwn(target, key)) return;
 
     if (isPlainObject(value) && isPlainObject(target[key])) {
       // 只移除完全匹配的嵌套属性
@@ -48,11 +82,11 @@ const deepRemove = (
   });
 };
 
-const isSubset = (target: any, source: any): boolean => {
+const isSubset = (target: unknown, source: unknown): boolean => {
   if (isPlainObject(source)) {
     if (!isPlainObject(target)) return false;
-    return Object.entries(source).every(([key, value]) =>
-      isSubset(target[key], value),
+    return safeEntries(source).every(([key, value]) =>
+      isSubset(hasOwn(target, key) ? target[key] : undefined, value),
     );
   }
 
@@ -69,22 +103,38 @@ export interface UpdateCommonConfigResult {
   error?: string;
 }
 
-// 验证JSON配置格式
+// 验证JSON配置格式（错误文案走 i18n，fieldName 应传入已本地化的字段名）
 export const validateJsonConfig = (
   value: string,
-  fieldName: string = "配置",
+  fieldName?: string,
 ): string => {
   if (!value.trim()) {
     return "";
   }
+  const field =
+    fieldName ??
+    i18n.t("providerForm.validation.fieldConfig", { defaultValue: "Config" });
   try {
     const parsed = JSON.parse(value);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return `${fieldName}必须是 JSON 对象`;
+      return i18n.t("providerForm.validation.fieldMustBeObject", {
+        field,
+        defaultValue: "{{field}} must be a JSON object",
+      });
+    }
+    if (containsUnsafeKeys(parsed)) {
+      return i18n.t("providerForm.validation.fieldUnsafeKey", {
+        field,
+        defaultValue:
+          "{{field}} must not contain __proto__, constructor or prototype keys",
+      });
     }
     return "";
   } catch {
-    return `${fieldName}JSON格式错误，请检查语法`;
+    return i18n.t("providerForm.validation.fieldJsonSyntaxError", {
+      field,
+      defaultValue: "{{field}}: JSON format error, please check the syntax",
+    });
   }
 };
 
@@ -94,13 +144,16 @@ export const updateCommonConfigSnippet = (
   snippetString: string,
   enabled: boolean,
 ): UpdateCommonConfigResult => {
-  let config: Record<string, any>;
+  let config: Record<string, unknown>;
   try {
     config = jsonString ? JSON.parse(jsonString) : {};
   } catch (err) {
     return {
       updatedConfig: jsonString,
-      error: "配置 JSON 解析失败，无法应用通用配置",
+      error: i18n.t("providerForm.validation.commonConfigParseFailed", {
+        defaultValue:
+          "Config JSON could not be parsed, so the common config was not applied",
+      }),
     };
   }
 
@@ -111,7 +164,12 @@ export const updateCommonConfigSnippet = (
   }
 
   // 使用统一的验证函数
-  const snippetError = validateJsonConfig(snippetString, "通用配置片段");
+  const snippetError = validateJsonConfig(
+    snippetString,
+    i18n.t("providerForm.validation.fieldCommonConfigSnippet", {
+      defaultValue: "Common config snippet",
+    }),
+  );
   if (snippetError) {
     return {
       updatedConfig: JSON.stringify(config, null, 2),
@@ -119,7 +177,7 @@ export const updateCommonConfigSnippet = (
     };
   }
 
-  const snippet = JSON.parse(snippetString) as Record<string, any>;
+  const snippet = JSON.parse(snippetString) as Record<string, unknown>;
 
   if (enabled) {
     const merged = deepMerge(deepClone(config), snippet);
@@ -151,59 +209,11 @@ export const hasCommonConfigSnippet = (
   }
 };
 
-// 读取配置中的 API Key（支持 Claude, Codex, Gemini）
-export const getApiKeyFromConfig = (
-  jsonString: string,
-  appType?: string,
-): string => {
-  try {
-    const config = JSON.parse(jsonString);
-
-    // 优先检查顶层 apiKey 字段（用于 Bedrock API Key 等预设）
-    if (
-      typeof config?.apiKey === "string" &&
-      config.apiKey &&
-      !config.apiKey.includes("${")
-    ) {
-      return config.apiKey;
-    }
-
-    const env = config?.env;
-
-    if (!env) return "";
-
-    // Gemini API Key
-    if (appType === "gemini") {
-      const geminiKey = env.GEMINI_API_KEY;
-      return typeof geminiKey === "string" ? geminiKey : "";
-    }
-
-    // Codex API Key
-    if (appType === "codex") {
-      const codexKey = env.CODEX_API_KEY;
-      return typeof codexKey === "string" ? codexKey : "";
-    }
-
-    // Claude API Key (优先 ANTHROPIC_AUTH_TOKEN，其次 ANTHROPIC_API_KEY)
-    const token = env.ANTHROPIC_AUTH_TOKEN;
-    const apiKey = env.ANTHROPIC_API_KEY;
-    const value =
-      typeof token === "string"
-        ? token
-        : typeof apiKey === "string"
-          ? apiKey
-          : "";
-    return value;
-  } catch (err) {
-    return "";
-  }
-};
-
 // 模板变量替换
-export const applyTemplateValues = (
-  config: any,
+export const applyTemplateValues = <T>(
+  config: T,
   templateValues: Record<string, TemplateValueConfig> | undefined,
-): any => {
+): T => {
   const resolvedValues = Object.fromEntries(
     Object.entries(templateValues ?? {}).map(([key, value]) => {
       const resolvedValue =
@@ -224,7 +234,7 @@ export const applyTemplateValues = (
     }, str);
   };
 
-  const traverse = (obj: any): any => {
+  const traverse = (obj: unknown): unknown => {
     if (typeof obj === "string") {
       return replaceInString(obj);
     }
@@ -232,7 +242,7 @@ export const applyTemplateValues = (
       return obj.map(traverse);
     }
     if (obj && typeof obj === "object") {
-      const result: any = {};
+      const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(obj)) {
         result[key] = traverse(value);
       }
@@ -241,106 +251,12 @@ export const applyTemplateValues = (
     return obj;
   };
 
-  return traverse(config);
+  return traverse(config) as T;
 };
 
-// 判断配置中是否存在 API Key 字段
-export const hasApiKeyField = (
-  jsonString: string,
-  appType?: string,
-): boolean => {
-  try {
-    const config = JSON.parse(jsonString);
-
-    // 检查顶层 apiKey 字段（用于 Bedrock API Key 等预设）
-    if (Object.prototype.hasOwnProperty.call(config, "apiKey")) {
-      return true;
-    }
-
-    const env = config?.env ?? {};
-
-    if (appType === "gemini") {
-      return Object.prototype.hasOwnProperty.call(env, "GEMINI_API_KEY");
-    }
-
-    if (appType === "codex") {
-      return Object.prototype.hasOwnProperty.call(env, "CODEX_API_KEY");
-    }
-
-    return (
-      Object.prototype.hasOwnProperty.call(env, "ANTHROPIC_AUTH_TOKEN") ||
-      Object.prototype.hasOwnProperty.call(env, "ANTHROPIC_API_KEY")
-    );
-  } catch (err) {
-    return false;
-  }
-};
-
-// 写入/更新配置中的 API Key，默认不新增缺失字段
-export const setApiKeyInConfig = (
-  jsonString: string,
-  apiKey: string,
-  options: {
-    createIfMissing?: boolean;
-    appType?: string;
-    apiKeyField?: string;
-  } = {},
-): string => {
-  const { createIfMissing = false, appType, apiKeyField } = options;
-  try {
-    const config = JSON.parse(jsonString);
-
-    // 优先检查顶层 apiKey 字段（用于 Bedrock API Key 等预设）
-    if (Object.prototype.hasOwnProperty.call(config, "apiKey")) {
-      config.apiKey = apiKey;
-      return JSON.stringify(config, null, 2);
-    }
-
-    if (!config.env) {
-      if (!createIfMissing) return jsonString;
-      config.env = {};
-    }
-    const env = config.env as Record<string, any>;
-
-    // Gemini API Key
-    if (appType === "gemini") {
-      if ("GEMINI_API_KEY" in env) {
-        env.GEMINI_API_KEY = apiKey;
-      } else if (createIfMissing) {
-        env.GEMINI_API_KEY = apiKey;
-      } else {
-        return jsonString;
-      }
-      return JSON.stringify(config, null, 2);
-    }
-
-    // Codex API Key
-    if (appType === "codex") {
-      if ("CODEX_API_KEY" in env) {
-        env.CODEX_API_KEY = apiKey;
-      } else if (createIfMissing) {
-        env.CODEX_API_KEY = apiKey;
-      } else {
-        return jsonString;
-      }
-      return JSON.stringify(config, null, 2);
-    }
-
-    // Claude API Key (优先写入已存在的字段；若两者均不存在且允许创建，则使用 apiKeyField 或默认 AUTH_TOKEN 字段)
-    if ("ANTHROPIC_AUTH_TOKEN" in env) {
-      env.ANTHROPIC_AUTH_TOKEN = apiKey;
-    } else if ("ANTHROPIC_API_KEY" in env) {
-      env.ANTHROPIC_API_KEY = apiKey;
-    } else if (createIfMissing) {
-      env[apiKeyField ?? "ANTHROPIC_AUTH_TOKEN"] = apiKey;
-    } else {
-      return jsonString;
-    }
-    return JSON.stringify(config, null, 2);
-  } catch (err) {
-    return jsonString;
-  }
-};
+// API-key read/write lives in the per-app provider codecs
+// (src/lib/providerCodecs): Codex keeps its key in `auth.OPENAI_API_KEY`,
+// not in an `env` block (FE-PROV-22).
 
 // ========== TOML Config Utilities ==========
 
@@ -356,8 +272,8 @@ export const hasTomlCommonConfigSnippet = (
   if (!snippetString.trim()) return false;
 
   try {
-    const config = parseToml(normalizeTomlText(tomlString || ""));
-    const snippet = parseToml(normalizeTomlText(snippetString));
+    const config = parseTomlLenient(tomlString || "");
+    const snippet = parseTomlLenient(snippetString);
     return isSubset(config, snippet);
   } catch {
     // Fallback to text-based matching if TOML parsing fails
@@ -368,7 +284,81 @@ export const hasTomlCommonConfigSnippet = (
 
 // ========== Codex base_url utils ==========
 
-const TOML_SECTION_HEADER_PATTERN = /^\s*\[([^\]\r\n]+)\]\s*$/;
+const BARE_TOML_KEY = /^[A-Za-z0-9_-]+$/;
+
+/** A key segment in canonical form: bare when possible, else `"quoted"`. */
+const tomlKeySegment = (key: string): string =>
+  BARE_TOML_KEY.test(key) ? key : JSON.stringify(key);
+
+/**
+ * Split a dotted TOML key (`a. "b.c" .'d'`) into its segments, or
+ * `undefined` when it is malformed.
+ */
+const splitTomlDottedKey = (raw: string): string[] | undefined => {
+  const parts: string[] = [];
+  let i = 0;
+  const n = raw.length;
+  const skipWs = () => {
+    while (i < n && (raw[i] === " " || raw[i] === "\t")) i += 1;
+  };
+  while (true) {
+    skipWs();
+    if (i >= n) return undefined;
+    const ch = raw[i];
+    if (ch === '"') {
+      let value = "";
+      i += 1;
+      while (i < n && raw[i] !== '"') {
+        if (raw[i] === "\\" && i + 1 < n) {
+          const next = raw[i + 1];
+          value += next === "n" ? "\n" : next === "t" ? "\t" : next;
+          i += 2;
+          continue;
+        }
+        value += raw[i];
+        i += 1;
+      }
+      if (i >= n) return undefined;
+      i += 1;
+      parts.push(value);
+    } else if (ch === "'") {
+      const end = raw.indexOf("'", i + 1);
+      if (end === -1) return undefined;
+      parts.push(raw.slice(i + 1, end));
+      i = end + 1;
+    } else {
+      const start = i;
+      while (i < n && /[A-Za-z0-9_-]/.test(raw[i])) i += 1;
+      if (i === start) return undefined;
+      parts.push(raw.slice(start, i));
+    }
+    skipWs();
+    if (i >= n) return parts;
+    if (raw[i] !== ".") return undefined;
+    i += 1;
+  }
+};
+
+/**
+ * Canonical name of a TOML table header line, or `undefined` when the line
+ * is not a header (FE-ARCH-46). Recognises trailing comments, whitespace
+ * inside the brackets and quoted keys (`[model_providers."a.b"] # main`).
+ * Array tables (`[[profiles.x]]`) are returned as `[[profiles.x]]` so they
+ * end the previous section but never match a plain table name.
+ */
+const parseTomlSectionHeader = (line: string): string | undefined => {
+  const match = line.match(/^\s*(\[\[?)(.*?)(\]\]?)\s*(?:#.*)?$/);
+  if (!match) return undefined;
+  const [, open, inner, close] = match;
+  if (open.length !== close.length) return undefined;
+  const parts = splitTomlDottedKey(inner);
+  if (!parts) return undefined;
+  const name = parts.map(tomlKeySegment).join(".");
+  return open.length === 2 ? `[[${name}]]` : name;
+};
+
+const isTomlSectionHeader = (line: string): boolean =>
+  parseTomlSectionHeader(line) !== undefined;
 const TOML_BASE_URL_PATTERN =
   /^\s*base_url\s*=\s*(?:"((?:\\.|[^"\\\r\n])*)"|'([^'\r\n]*)')\s*(?:#.*)?$/;
 const TOML_EXPERIMENTAL_BEARER_TOKEN_PATTERN =
@@ -428,13 +418,13 @@ const getTomlSectionRange = (
   let headerLineIndex = -1;
 
   for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].match(TOML_SECTION_HEADER_PATTERN);
-    if (!match) {
+    const headerName = parseTomlSectionHeader(lines[index]);
+    if (headerName === undefined) {
       continue;
     }
 
     if (headerLineIndex === -1) {
-      if (match[1] === sectionName) {
+      if (headerName === sectionName) {
         headerLineIndex = index;
       }
       continue;
@@ -459,9 +449,7 @@ const getTomlSectionRange = (
 };
 
 const getTopLevelEndIndex = (lines: string[]): number => {
-  const firstSectionIndex = lines.findIndex((line) =>
-    TOML_SECTION_HEADER_PATTERN.test(line),
-  );
+  const firstSectionIndex = lines.findIndex(isTomlSectionHeader);
   return firstSectionIndex === -1 ? lines.length : firstSectionIndex;
 };
 
@@ -482,7 +470,7 @@ const getTomlSectionInsertIndex = (
 const getCodexModelProviderName = (configText: string): string | undefined => {
   const normalized = normalizeTomlText(configText);
   try {
-    const parsed = parseToml(normalized) as Record<string, any>;
+    const parsed = parseToml(normalized) as Record<string, unknown>;
     const providerName =
       typeof parsed.model_provider === "string"
         ? parsed.model_provider.trim()
@@ -504,7 +492,9 @@ const getCodexProviderSectionName = (
   configText: string,
 ): string | undefined => {
   const providerName = getCodexModelProviderName(configText);
-  return providerName ? `model_providers.${providerName}` : undefined;
+  return providerName
+    ? `model_providers.${tomlKeySegment(providerName)}`
+    : undefined;
 };
 
 const isCustomCodexModelProviderId = (providerName: string): boolean => {
@@ -517,7 +507,7 @@ const getCodexCustomProviderSectionName = (
 ): string | undefined => {
   const providerName = getCodexModelProviderName(configText);
   return providerName && isCustomCodexModelProviderId(providerName)
-    ? `model_providers.${providerName}`
+    ? `model_providers.${tomlKeySegment(providerName)}`
     : undefined;
 };
 
@@ -586,9 +576,9 @@ const findTomlAssignments = (
   let currentSectionName: string | undefined;
 
   lines.forEach((line, index) => {
-    const sectionMatch = line.match(TOML_SECTION_HEADER_PATTERN);
-    if (sectionMatch) {
-      currentSectionName = sectionMatch[1];
+    const headerName = parseTomlSectionHeader(line);
+    if (headerName !== undefined) {
+      currentSectionName = headerName;
       return;
     }
 
@@ -631,6 +621,8 @@ const getRecoverableBaseUrlAssignments = (
     ({ sectionName }) =>
       sectionName !== targetSectionName &&
       !isMcpServerSection(sectionName) &&
+      // Array tables ([[profiles.x]]) own their keys; never move them.
+      !sectionName?.startsWith("[[") &&
       !isOtherProviderSection(sectionName, targetSectionName),
   );
 
@@ -792,7 +784,8 @@ export const setCodexWireApi = (
   configText: string,
   wireApi: "responses" | "chat",
 ): string => {
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   const lines = normalizedText ? normalizedText.split("\n") : [];
   const targetSectionName = getCodexProviderSectionName(normalizedText);
   const replacementLine = `wire_api = "${wireApi}"`;
@@ -872,7 +865,7 @@ export const isCodexGoalModeEnabled = (
     if (!text) return false;
 
     try {
-      const parsed = parseToml(text) as Record<string, any>;
+      const parsed = parseToml(text) as CodexTomlDoc;
       return parsed.features?.goals === true;
     } catch {
       // Fall back to line scanning while the user is editing invalid TOML.
@@ -900,7 +893,8 @@ export const setCodexGoalMode = (
   configText: string,
   enabled: boolean,
 ): string => {
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   const lines = normalizedText ? normalizedText.split("\n") : [];
   let featureRange = getTomlSectionRange(lines, "features");
 
@@ -969,7 +963,7 @@ export const isCodexRemoteCompactionEnabled = (
     if (!text) return false;
 
     try {
-      const parsed = parseToml(text) as Record<string, any>;
+      const parsed = parseToml(text) as CodexTomlDoc;
       const providerId =
         typeof parsed.model_provider === "string"
           ? parsed.model_provider.trim()
@@ -1009,7 +1003,8 @@ export const setCodexRemoteCompaction = (
   enabled: boolean,
   fallbackProviderName?: string,
 ): string => {
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   const lines = normalizedText ? normalizedText.split("\n") : [];
   const targetSectionName = getCodexCustomProviderSectionName(normalizedText);
 
@@ -1120,7 +1115,7 @@ export const extractCodexExperimentalBearerToken = (
     if (!text) return undefined;
 
     try {
-      const parsed = parseToml(text) as Record<string, any>;
+      const parsed = parseToml(text) as CodexTomlDoc;
       const providerName =
         typeof parsed.model_provider === "string"
           ? parsed.model_provider.trim()
@@ -1184,7 +1179,8 @@ export const updateCodexExperimentalBearerToken = (
   configText: string,
   token: string,
 ): string => {
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   if (
     !normalizedText ||
     !normalizedText.includes("experimental_bearer_token")
@@ -1240,13 +1236,11 @@ export const updateCodexExperimentalBearerToken = (
 
 // 从 Provider 对象中提取 Codex base_url（当 settingsConfig.config 为 TOML 字符串时）
 export const getCodexBaseUrl = (
-  provider: { settingsConfig?: Record<string, any> } | undefined | null,
+  provider: { settingsConfig?: Record<string, unknown> } | undefined | null,
 ): string | undefined => {
   try {
-    const text =
-      typeof provider?.settingsConfig?.config === "string"
-        ? (provider as any).settingsConfig.config
-        : "";
+    const raw = provider?.settingsConfig?.config;
+    const text = typeof raw === "string" ? raw : "";
     return extractCodexBaseUrl(text);
   } catch {
     return undefined;
@@ -1259,7 +1253,8 @@ export const setCodexBaseUrl = (
   baseUrl: string,
 ): string => {
   const trimmed = baseUrl.trim();
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   const lines = normalizedText ? normalizedText.split("\n") : [];
   const targetSectionName = getCodexProviderSectionName(normalizedText);
   const allAssignments = findTomlAssignments(lines, TOML_BASE_URL_PATTERN);
@@ -1419,7 +1414,8 @@ export const setCodexModelName = (
   modelName: string,
 ): string => {
   const trimmed = modelName.trim();
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   const lines = normalizedText ? normalizedText.split("\n") : [];
   const topLevelEndIndex = getTopLevelEndIndex(lines);
   const modelLineIndex = findTopLevelModelLineIndex(lines, topLevelEndIndex);
@@ -1497,7 +1493,8 @@ export const setCodexTopLevelInt = (
   fieldName: string,
   value: number,
 ): string => {
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   const lines = normalizedText ? normalizedText.split("\n") : [];
   const topLevelEndIndex = getTopLevelEndIndex(lines);
   const existing = findTopLevelIntMatch(lines, fieldName, topLevelEndIndex);
@@ -1522,7 +1519,8 @@ export const removeCodexTopLevelField = (
   configText: string,
   fieldName: string,
 ): string => {
-  const normalizedText = normalizeTomlText(configText);
+  // Edit the text as written: never rewrite quotes in strings (FE-ARCH-37).
+  const normalizedText = configText ?? "";
   if (!normalizedText) return normalizedText;
   const lines = normalizedText.split("\n");
   const topLevelEndIndex = getTopLevelEndIndex(lines);

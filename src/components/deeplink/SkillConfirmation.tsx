@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { DeepLinkImportRequest } from "../../lib/api/deeplink";
+import type { DeepLinkImportRequest } from "../../lib/api/deeplink";
 
 export function SkillConfirmation({
   request,
@@ -18,15 +18,6 @@ export function SkillConfirmation({
         </label>
         <div className="mt-1 text-sm font-mono bg-muted/50 p-2 rounded border">
           {request.repo}
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-muted-foreground">
-          {t("deeplink.skill.directory")}
-        </label>
-        <div className="mt-1 text-sm font-mono bg-muted/50 p-2 rounded border">
-          {request.directory}
         </div>
       </div>
 

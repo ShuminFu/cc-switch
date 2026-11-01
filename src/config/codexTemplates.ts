@@ -4,7 +4,7 @@
  */
 
 export interface CodexTemplate {
-  auth: Record<string, any>;
+  auth: Record<string, unknown>;
   config: string;
 }
 

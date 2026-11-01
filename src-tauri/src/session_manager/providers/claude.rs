@@ -5,28 +5,26 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::config::get_claude_config_dir;
+use crate::session_manager::cache::ScanCache;
+use crate::session_manager::resume::resume_command;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
 use super::utils::{
-    extract_text, parse_timestamp_to_ms, path_basename, read_head_tail_lines, truncate_summary,
-    TITLE_MAX_CHARS,
+    extract_text, file_mtime_ms, parse_timestamp_to_ms, path_basename, read_head_tail_lines,
+    truncate_summary, TITLE_MAX_CHARS,
 };
 
 const PROVIDER_ID: &str = "claude";
 
-pub fn scan_sessions() -> Vec<SessionMeta> {
+pub fn scan_sessions(cache: &ScanCache) -> Vec<SessionMeta> {
     let root = get_claude_config_dir().join("projects");
     let mut files = Vec::new();
     collect_jsonl_files(&root, &mut files);
 
-    let mut sessions = Vec::new();
-    for path in files {
-        if let Some(meta) = parse_session(&path) {
-            sessions.push(meta);
-        }
-    }
-
-    sessions
+    files
+        .iter()
+        .filter_map(|path| cache.get_or_parse(PROVIDER_ID, path, || parse_session(path)))
+        .collect()
 }
 
 pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
@@ -100,22 +98,17 @@ pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<boo
         ));
     }
 
-    if let Some(stem) = path.file_stem() {
-        let sibling = path.parent().unwrap_or_else(|| Path::new("")).join(stem);
-        remove_path_if_exists(&sibling).map_err(|e| {
-            format!(
-                "Failed to delete Claude session sidecar {}: {e}",
-                sibling.display()
-            )
-        })?;
+    // SESS-41: the transcript and its sidecar dir (subagents, tool results)
+    // move to the session trash as one restorable entry.
+    let sibling = path
+        .file_stem()
+        .map(|stem| path.parent().unwrap_or_else(|| Path::new("")).join(stem));
+    let mut doomed: Vec<&Path> = Vec::new();
+    if let Some(sibling) = sibling.as_deref() {
+        doomed.push(sibling);
     }
-
-    std::fs::remove_file(path).map_err(|e| {
-        format!(
-            "Failed to delete Claude session file {}: {e}",
-            path.display()
-        )
-    })?;
+    doomed.push(path);
+    crate::session_manager::trash::move_to_trash("claude", session_id, &doomed)?;
 
     Ok(true)
 }
@@ -223,8 +216,12 @@ fn parse_session(path: &Path) -> Option<SessionMeta> {
         }
     }
 
-    let session_id = session_id.or_else(|| infer_session_id_from_filename(path));
-    let session_id = session_id?;
+    // A transcript without an embedded sessionId falls back to its file stem;
+    // only a UUID-shaped stem is a resumable Claude session id.
+    let id_from_content = session_id.is_some();
+    let session_id = session_id.or_else(|| infer_session_id_from_filename(path))?;
+    let resumable = id_from_content || looks_like_uuid(&session_id);
+    let custom_title = custom_title.or_else(|| find_last_custom_title(path));
 
     // Title priority: custom-title > first user message > directory basename
     let title = custom_title
@@ -240,15 +237,23 @@ fn parse_session(path: &Path) -> Option<SessionMeta> {
     let summary = summary.map(|text| truncate_summary(&text, 160));
 
     Some(SessionMeta {
+        source: None,
+        session_key: None,
         provider_id: PROVIDER_ID.to_string(),
         session_id: session_id.clone(),
         title,
         summary,
         project_dir,
         created_at,
-        last_active_at,
+        // A tail without timestamps (e.g. a final line beyond the tail cap)
+        // falls back to the file modification time.
+        last_active_at: last_active_at.or_else(|| file_mtime_ms(path)),
         source_path: Some(path.to_string_lossy().to_string()),
-        resume_command: Some(format!("claude --resume {session_id}")),
+        resume_command: if resumable {
+            resume_command("claude", &session_id)
+        } else {
+            None
+        },
     })
 }
 
@@ -265,38 +270,76 @@ fn infer_session_id_from_filename(path: &Path) -> Option<String> {
         .map(|stem| stem.to_string())
 }
 
+/// Collect Claude session transcripts: only `projects/<project>/<id>.jsonl`.
+/// Session sidecar directories (`<id>/subagents/`, `<id>/tool-results/`,
+/// workflow journals, ...) live one level deeper and are not sessions.
 fn collect_jsonl_files(root: &Path, files: &mut Vec<PathBuf>) {
-    if !root.exists() {
+    let Ok(projects) = std::fs::read_dir(root) else {
         return;
-    }
-
-    let entries = match std::fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(_) => return,
     };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_jsonl_files(&path, files);
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
-            files.push(path);
+    for project in projects.flatten() {
+        let project_path = project.path();
+        if !project_path.is_dir() {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&project_path) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
+                files.push(path);
+            }
         }
     }
 }
 
-fn remove_path_if_exists(path: &Path) -> std::io::Result<()> {
-    match std::fs::metadata(path) {
-        Ok(meta) => {
-            if meta.is_dir() {
-                std::fs::remove_dir_all(path)
-            } else {
-                std::fs::remove_file(path)
-            }
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
+/// Files larger than this are not scanned in full for `custom-title` entries;
+/// only the tail window is consulted.
+const CUSTOM_TITLE_FULL_SCAN_MAX: u64 = 64 * 1024 * 1024;
+
+/// Find the last `custom-title` entry anywhere in the file. A cheap substring
+/// prefilter avoids JSON-parsing unrelated lines.
+fn find_last_custom_title(path: &Path) -> Option<String> {
+    let len = std::fs::metadata(path).ok()?.len();
+    if len > CUSTOM_TITLE_FULL_SCAN_MAX {
+        return None;
     }
+    let reader = BufReader::new(File::open(path).ok()?);
+    let mut found = None;
+    for line in reader.split(b'\n').map_while(Result::ok) {
+        if !contains_bytes(&line, b"\"custom-title\"") {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        if value.get("type").and_then(Value::as_str) != Some("custom-title") {
+            continue;
+        }
+        if let Some(title) = value
+            .get("customTitle")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            found = Some(title.to_string());
+        }
+    }
+    found
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+/// Claude Code names transcripts `<uuid>.jsonl`.
+fn looks_like_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.chars().enumerate().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => c == '-',
+            _ => c.is_ascii_hexdigit(),
+        })
 }
 
 #[cfg(test)]
@@ -496,5 +539,114 @@ mod tests {
 
         let meta = parse_session(&path).unwrap();
         assert_eq!(meta.title.as_deref(), Some("帮我看看工作区的改动"));
+    }
+
+    #[test]
+    fn parse_session_drops_resume_command_for_injected_session_id() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("evil.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"sessionId\":\"x; touch /tmp/pwned\",\"cwd\":\"/tmp/project\",\"timestamp\":\"2026-03-06T10:00:00Z\"}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"},\"timestamp\":\"2026-03-06T10:01:00Z\"}\n",
+            ),
+        )
+        .expect("write");
+
+        let meta = parse_session(&path).unwrap();
+        assert_eq!(meta.resume_command, None);
+
+        let ok = temp.path().join("abc-123.jsonl");
+        std::fs::write(
+            &ok,
+            "{\"sessionId\":\"abc-123\",\"timestamp\":\"2026-03-06T10:00:00Z\"}\n",
+        )
+        .expect("write");
+        let meta = parse_session(&ok).unwrap();
+        assert_eq!(
+            meta.resume_command.as_deref(),
+            Some("claude --resume abc-123")
+        );
+    }
+
+    #[test]
+    fn parse_session_reads_last_active_at_from_large_final_line() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("big-session.jsonl");
+        let big = "x".repeat(40 * 1024);
+        let content = format!(
+            "{{\"sessionId\":\"big-session\",\"cwd\":\"/tmp/project\",\"timestamp\":\"2026-03-06T10:00:00Z\"}}\n\
+             {{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"hi\"}},\"timestamp\":\"2026-03-06T10:01:00Z\"}}\n\
+             {{\"type\":\"assistant\",\"message\":{{\"role\":\"assistant\",\"content\":\"done {big}\"}},\"timestamp\":\"2026-03-06T12:00:00Z\"}}\n"
+        );
+        std::fs::write(&path, content).expect("write");
+
+        let meta = parse_session(&path).unwrap();
+        assert_eq!(
+            meta.last_active_at,
+            parse_timestamp_to_ms(&serde_json::json!("2026-03-06T12:00:00Z"))
+        );
+        assert!(meta.summary.as_deref().unwrap_or("").starts_with("done "));
+    }
+
+    #[test]
+    fn scan_ignores_sidecar_and_workflow_journal_files() {
+        let temp = tempdir().expect("tempdir");
+        let project = temp.path().join("-tmp-project");
+        let main_id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        let main = project.join(format!("{main_id}.jsonl"));
+        let sidecar = project.join(main_id);
+        std::fs::create_dir_all(sidecar.join("subagents/workflows/wf_1")).unwrap();
+        std::fs::write(
+            &main,
+            format!("{{\"sessionId\":\"{main_id}\",\"timestamp\":\"2026-03-06T10:00:00Z\"}}\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            sidecar.join("subagents/agent-1.jsonl"),
+            "{\"sessionId\":\"agent\",\"timestamp\":\"2026-03-06T10:00:00Z\"}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            sidecar.join("subagents/workflows/wf_1/journal.jsonl"),
+            "{\"timestamp\":\"2026-03-06T10:00:00Z\"}\n",
+        )
+        .unwrap();
+
+        let mut files = Vec::new();
+        collect_jsonl_files(temp.path(), &mut files);
+        let sessions: Vec<_> = files.iter().filter_map(|p| parse_session(p)).collect();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, main_id);
+    }
+
+    #[test]
+    fn non_uuid_file_stem_gets_no_resume_command() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("journal.jsonl");
+        std::fs::write(&path, "{\"timestamp\":\"2026-03-06T10:00:00Z\"}\n").unwrap();
+        let meta = parse_session(&path).unwrap();
+        assert_eq!(meta.session_id, "journal");
+        assert_eq!(meta.resume_command, None);
+    }
+
+    #[test]
+    fn custom_title_found_outside_tail_window() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("renamed.jsonl");
+        let mut content = String::from(
+            "{\"sessionId\":\"renamed\",\"timestamp\":\"2026-03-06T10:00:00Z\"}\n\
+             {\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first prompt\"},\"timestamp\":\"2026-03-06T10:00:01Z\"}\n\
+             {\"type\":\"custom-title\",\"customTitle\":\"renamed-session\"}\n",
+        );
+        for i in 0..60 {
+            content.push_str(&format!(
+                "{{\"type\":\"assistant\",\"message\":{{\"role\":\"assistant\",\"content\":\"reply {i}\"}},\"timestamp\":\"2026-03-06T10:01:00Z\"}}\n"
+            ));
+        }
+        std::fs::write(&path, content).unwrap();
+        let meta = parse_session(&path).unwrap();
+        assert_eq!(meta.title.as_deref(), Some("renamed-session"));
     }
 }

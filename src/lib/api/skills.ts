@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, call } from "./invoke";
+import { commands } from "@/lib/bindings";
 
 import type { AppId } from "@/lib/api/types";
 
@@ -42,6 +43,8 @@ export interface InstalledSkill {
 
 export interface SkillUninstallResult {
   backupPath?: string;
+  /** Non-fatal cleanup failures, one message per path (SVC-38). */
+  warnings?: string[];
 }
 
 export interface SkillBackupEntry {
@@ -70,6 +73,11 @@ export interface UnmanagedSkill {
   description?: string;
   foundIn: string[];
   path: string;
+  /**
+   * A managed skill with the same directory name exists but is not enabled
+   * for that app, and this directory is not a cc-switch copy (SVC-45).
+   */
+  conflict?: boolean;
 }
 
 /** 导入已有 Skill 时提交的应用启用状态 */
@@ -150,7 +158,7 @@ export const skillsApi = {
 
   /** 删除 Skill 备份 */
   async deleteBackup(backupId: string): Promise<boolean> {
-    return await invoke("delete_skill_backup", { backupId });
+    return await call(commands.deleteSkillBackup(backupId));
   },
 
   /** 安装 Skill（统一安装） */
@@ -176,7 +184,7 @@ export const skillsApi = {
 
   /** 切换 Skill 的应用启用状态 */
   async toggleApp(id: string, app: AppId, enabled: boolean): Promise<boolean> {
-    return await invoke("toggle_skill_app", { id, app, enabled });
+    return await call(commands.toggleSkillApp(id, app, enabled));
   },
 
   /** 扫描未管理的 Skills */
@@ -222,35 +230,6 @@ export const skillsApi = {
     return await invoke("search_skills_sh", { query, limit, offset });
   },
 
-  // ========== 兼容旧 API ==========
-
-  /** 获取技能列表（兼容旧 API） */
-  async getAll(app: AppId = "claude"): Promise<Skill[]> {
-    if (app === "claude") {
-      return await invoke("get_skills");
-    }
-    return await invoke("get_skills_for_app", { app });
-  },
-
-  /** 安装技能（兼容旧 API） */
-  async install(directory: string, app: AppId = "claude"): Promise<boolean> {
-    if (app === "claude") {
-      return await invoke("install_skill", { directory });
-    }
-    return await invoke("install_skill_for_app", { app, directory });
-  },
-
-  /** 卸载技能（兼容旧 API） */
-  async uninstall(
-    directory: string,
-    app: AppId = "claude",
-  ): Promise<SkillUninstallResult> {
-    if (app === "claude") {
-      return await invoke("uninstall_skill", { directory });
-    }
-    return await invoke("uninstall_skill_for_app", { app, directory });
-  },
-
   // ========== 仓库管理 ==========
 
   /** 获取仓库列表 */
@@ -265,7 +244,7 @@ export const skillsApi = {
 
   /** 删除仓库 */
   async removeRepo(owner: string, name: string): Promise<boolean> {
-    return await invoke("remove_skill_repo", { owner, name });
+    return await call(commands.removeSkillRepo(owner, name));
   },
 
   // ========== ZIP 安装 ==========

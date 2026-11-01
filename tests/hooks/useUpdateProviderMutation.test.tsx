@@ -28,13 +28,6 @@ vi.mock("@/hooks/useOpenClaw", () => ({
   },
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (_key: string, options?: { defaultValue?: string }) =>
-      options?.defaultValue ?? _key,
-  }),
-}));
-
 vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),

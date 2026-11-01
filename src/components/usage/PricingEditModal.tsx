@@ -6,9 +6,12 @@ import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useUpdateModelPricing } from "@/lib/query/usage";
+import { useModelPricing, useUpdateModelPricing } from "@/lib/query/usage";
 import { isNonNegativeDecimalString, type ModelPricing } from "@/types/usage";
-import { ModelsDevPickerDialog } from "./ModelsDevPickerDialog";
+import {
+  ModelsDevPickerDialog,
+  normalizeModelIdForPricing,
+} from "./ModelsDevPickerDialog";
 
 interface PricingEditModalProps {
   open: boolean;
@@ -19,6 +22,19 @@ interface PricingEditModalProps {
 
 const PRICE_INPUT_STEP = "0.0001";
 
+type PriceField =
+  | "inputCost"
+  | "outputCost"
+  | "cacheReadCost"
+  | "cacheCreationCost";
+const PRICE_FIELDS: PriceField[] = [
+  "inputCost",
+  "outputCost",
+  "cacheReadCost",
+  "cacheCreationCost",
+];
+type FieldErrors = Partial<Record<"modelId" | PriceField, string>>;
+
 export function PricingEditModal({
   open,
   model,
@@ -27,7 +43,9 @@ export function PricingEditModal({
 }: PricingEditModalProps) {
   const { t } = useTranslation();
   const updatePricing = useUpdateModelPricing();
+  const { data: existingPricing } = useModelPricing();
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [errors, setErrors] = useState<FieldErrors>({});
 
   const [formData, setFormData] = useState({
     modelId: model.modelId,
@@ -38,33 +56,55 @@ export function PricingEditModal({
     cacheCreationCost: model.cacheCreationCostPerMillion,
   });
 
+  const normalizedModelId = normalizeModelIdForPricing(formData.modelId);
+  const isDuplicate =
+    isNew &&
+    !!normalizedModelId &&
+    (existingPricing ?? []).some(
+      (p) => p.modelId.toLowerCase() === normalizedModelId,
+    );
+
+  const fieldError = (field: keyof FieldErrors) =>
+    errors[field] ? (
+      <p
+        id={`${field}-error`}
+        className="text-xs text-destructive"
+        data-testid={`${field}-error`}
+      >
+        {errors[field]}
+      </p>
+    ) : null;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // 验证模型 ID
-    if (isNew && !formData.modelId.trim()) {
-      toast.error(t("usage.modelIdRequired", "模型 ID 不能为空"));
-      return;
-    }
-
-    // 验证非负数
-    const values = [
-      formData.inputCost,
-      formData.outputCost,
-      formData.cacheReadCost,
-      formData.cacheCreationCost,
-    ];
-
-    for (const value of values) {
-      if (!isNonNegativeDecimalString(value)) {
-        toast.error(t("usage.invalidPrice", "价格必须为非负数"));
-        return;
+    // Field-level validation (FE-UI-30). New model IDs are normalised the
+    // same way the backend matches usage rows, so a typed
+    // `openai/gpt-4o` is stored as `gpt-4o` and can actually be attributed.
+    const nextErrors: FieldErrors = {};
+    if (isNew) {
+      if (!normalizedModelId) {
+        nextErrors.modelId = t("usage.modelIdRequired", "模型 ID 不能为空");
+      } else if (isDuplicate) {
+        nextErrors.modelId = t("usage.modelIdDuplicate", {
+          defaultValue: "Pricing for {{id}} already exists.",
+          id: normalizedModelId,
+        });
       }
+    }
+    for (const field of PRICE_FIELDS) {
+      if (!isNonNegativeDecimalString(formData[field])) {
+        nextErrors[field] = t("usage.invalidPrice", "价格必须为非负数");
+      }
+    }
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      return;
     }
 
     try {
       await updatePricing.mutateAsync({
-        modelId: isNew ? formData.modelId : model.modelId,
+        modelId: isNew ? normalizedModelId : model.modelId,
         displayName: formData.displayName,
         inputCost: formData.inputCost,
         outputCost: formData.outputCost,
@@ -147,8 +187,22 @@ export function PricingEditModal({
               placeholder={t("usage.modelIdPlaceholder", {
                 defaultValue: "例如: claude-3-5-sonnet-20241022",
               })}
+              aria-invalid={!!errors.modelId}
               required
             />
+            {normalizedModelId &&
+              normalizedModelId !== formData.modelId.trim() && (
+                <p
+                  className="text-xs text-muted-foreground"
+                  data-testid="modelId-normalized"
+                >
+                  {t("usage.modelIdNormalizedHint", {
+                    defaultValue: "Will be saved as {{id}}",
+                    id: normalizedModelId,
+                  })}
+                </p>
+              )}
+            {fieldError("modelId")}
           </div>
         )}
 
@@ -175,6 +229,7 @@ export function PricingEditModal({
           </Label>
           <Input
             id="inputCost"
+            aria-invalid={!!errors.inputCost}
             type="number"
             step={PRICE_INPUT_STEP}
             min="0"
@@ -184,6 +239,7 @@ export function PricingEditModal({
             }
             required
           />
+          {fieldError("inputCost")}
         </div>
 
         <div className="space-y-2">
@@ -192,6 +248,7 @@ export function PricingEditModal({
           </Label>
           <Input
             id="outputCost"
+            aria-invalid={!!errors.outputCost}
             type="number"
             step={PRICE_INPUT_STEP}
             min="0"
@@ -201,6 +258,7 @@ export function PricingEditModal({
             }
             required
           />
+          {fieldError("outputCost")}
         </div>
 
         <div className="space-y-2">
@@ -212,6 +270,7 @@ export function PricingEditModal({
           </Label>
           <Input
             id="cacheReadCost"
+            aria-invalid={!!errors.cacheReadCost}
             type="number"
             step={PRICE_INPUT_STEP}
             min="0"
@@ -221,6 +280,7 @@ export function PricingEditModal({
             }
             required
           />
+          {fieldError("cacheReadCost")}
         </div>
 
         <div className="space-y-2">
@@ -232,6 +292,7 @@ export function PricingEditModal({
           </Label>
           <Input
             id="cacheCreationCost"
+            aria-invalid={!!errors.cacheCreationCost}
             type="number"
             step={PRICE_INPUT_STEP}
             min="0"
@@ -241,6 +302,7 @@ export function PricingEditModal({
             }
             required
           />
+          {fieldError("cacheCreationCost")}
         </div>
       </form>
 

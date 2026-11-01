@@ -1,4 +1,7 @@
+import i18n from "i18next";
 import { useState, useCallback, useEffect } from "react";
+import { mergeEnvIntoText } from "@/utils/providerEnvText";
+import { settingsConfigFor } from "@/types/providerSettings";
 
 interface UseGeminiConfigStateProps {
   initialData?: {
@@ -77,14 +80,15 @@ export function useGeminiConfigState({
   useEffect(() => {
     if (!initialData) return;
 
-    const config = initialData.settingsConfig;
-    if (typeof config === "object" && config !== null) {
+    const raw = initialData.settingsConfig;
+    if (typeof raw === "object" && raw !== null) {
+      const config = settingsConfigFor("gemini", raw);
       // 设置 env
-      const env = (config as any).env || {};
+      const env = config.env ?? {};
       setGeminiEnvState(envObjToString(env));
 
       // 设置 config
-      const configObj = (config as any).config || {};
+      const configObj = config.config ?? {};
       setGeminiConfigState(JSON.stringify(configObj, null, 2));
 
       // 提取 API Key、Base URL 和 Model
@@ -126,9 +130,15 @@ export function useGeminiConfigState({
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return "";
       }
-      return "Config must be a JSON object";
+      return i18n.t("providerForm.validation.fieldMustBeObject", {
+        field: "config",
+        defaultValue: "{{field}} must be a JSON object",
+      });
     } catch {
-      return "Invalid JSON format";
+      return i18n.t("providerForm.validation.fieldJsonSyntaxError", {
+        field: "config",
+        defaultValue: "{{field}}: JSON format error, please check the syntax",
+      });
     }
   }, []);
 
@@ -158,10 +168,11 @@ export function useGeminiConfigState({
 
       const envObj = envStringToObj(geminiEnv);
       envObj.GEMINI_API_KEY = trimmed;
-      const newEnv = envObjToString(envObj);
+      // Patch the text in place to keep comments and order (FE-PROV-48).
+      const newEnv = mergeEnvIntoText(geminiEnv, envObj);
       setGeminiEnv(newEnv);
     },
-    [geminiEnv, envStringToObj, envObjToString, setGeminiEnv],
+    [geminiEnv, envStringToObj, setGeminiEnv],
   );
 
   // 处理 Gemini Base URL 变化
@@ -172,10 +183,11 @@ export function useGeminiConfigState({
 
       const envObj = envStringToObj(geminiEnv);
       envObj.GOOGLE_GEMINI_BASE_URL = sanitized;
-      const newEnv = envObjToString(envObj);
+      // Patch the text in place to keep comments and order (FE-PROV-48).
+      const newEnv = mergeEnvIntoText(geminiEnv, envObj);
       setGeminiEnv(newEnv);
     },
-    [geminiEnv, envStringToObj, envObjToString, setGeminiEnv],
+    [geminiEnv, envStringToObj, setGeminiEnv],
   );
 
   // 处理 Gemini Model 变化
@@ -186,10 +198,11 @@ export function useGeminiConfigState({
 
       const envObj = envStringToObj(geminiEnv);
       envObj.GEMINI_MODEL = trimmed;
-      const newEnv = envObjToString(envObj);
+      // Patch the text in place to keep comments and order (FE-PROV-48).
+      const newEnv = mergeEnvIntoText(geminiEnv, envObj);
       setGeminiEnv(newEnv);
     },
-    [geminiEnv, envStringToObj, envObjToString, setGeminiEnv],
+    [geminiEnv, envStringToObj, setGeminiEnv],
   );
 
   // 处理 env 变化

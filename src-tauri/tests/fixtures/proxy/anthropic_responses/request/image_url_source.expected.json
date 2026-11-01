@@ -1,0 +1,19 @@
+{
+  "model": "claude-sonnet-4-5",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_image",
+          "image_url": "https://example.com/cat.png"
+        },
+        {
+          "type": "input_text",
+          "text": "What animal is this?"
+        }
+      ]
+    }
+  ],
+  "max_output_tokens": 512
+}

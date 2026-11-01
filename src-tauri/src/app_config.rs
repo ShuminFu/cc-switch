@@ -5,7 +5,7 @@ use std::str::FromStr;
 use crate::services::skill::SkillStore;
 
 /// MCP 服务器应用状态（标记应用到哪些客户端）
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, specta::Type)]
 pub struct McpApps {
     #[serde(default)]
     pub claude: bool,
@@ -100,6 +100,9 @@ pub struct SkillApps {
     pub opencode: bool,
     #[serde(default)]
     pub hermes: bool,
+    /// PRODUCT-53: OpenClaw loads managed skills from `~/.openclaw/skills`.
+    #[serde(default)]
+    pub openclaw: bool,
 }
 
 impl SkillApps {
@@ -112,7 +115,7 @@ impl SkillApps {
             AppType::GrokBuild => self.grokbuild,
             AppType::OpenCode => self.opencode,
             AppType::Hermes => self.hermes,
-            AppType::OpenClaw => false, // OpenClaw doesn't support Skills
+            AppType::OpenClaw => self.openclaw,
             AppType::ClaudeDesktop => false,
         }
     }
@@ -126,7 +129,7 @@ impl SkillApps {
             AppType::GrokBuild => self.grokbuild = enabled,
             AppType::OpenCode => self.opencode = enabled,
             AppType::Hermes => self.hermes = enabled,
-            AppType::OpenClaw => {} // OpenClaw doesn't support Skills, ignore
+            AppType::OpenClaw => self.openclaw = enabled,
             AppType::ClaudeDesktop => {} // Claude Desktop 3P profiles don't use CC Switch skill sync
         }
     }
@@ -152,6 +155,9 @@ impl SkillApps {
         if self.hermes {
             apps.push(AppType::Hermes);
         }
+        if self.openclaw {
+            apps.push(AppType::OpenClaw);
+        }
         apps
     }
 
@@ -163,6 +169,7 @@ impl SkillApps {
             && !self.grokbuild
             && !self.opencode
             && !self.hermes
+            && !self.openclaw
     }
 
     /// 仅启用指定应用（其他应用设为禁用）
@@ -239,10 +246,14 @@ pub struct UnmanagedSkill {
     pub found_in: Vec<String>,
     /// 发现路径（首个匹配的完整路径）
     pub path: String,
+    /// The directory shares its name with a managed skill that is not enabled
+    /// for that app and is not a cc-switch copy (SVC-45).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub conflict: bool,
 }
 
 /// MCP 服务器定义（v3.7.0 统一结构）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct McpServer {
     pub id: String,
     pub name: String,
@@ -365,7 +376,7 @@ use crate::prompt_files::prompt_file_path;
 use crate::provider::ProviderManager;
 
 /// 应用类型
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum AppType {
     Claude,

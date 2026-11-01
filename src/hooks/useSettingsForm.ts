@@ -2,54 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettingsQuery } from "@/lib/query";
 import type { Settings } from "@/types";
+import {
+  DIRECTORY_SETTINGS_FIELDS,
+  sanitizeDir,
+} from "./settingsDirectoryFields";
+import {
+  SETTINGS_FORM_DEFAULTS,
+  languagePreference,
+  normalizeLanguage,
+  normalizeSettingsForm,
+  type Language,
+  type SettingsFormState,
+} from "./settingsPayload";
 
-type Language = "zh" | "zh-TW" | "en" | "ja";
-
-export type SettingsFormState = Omit<Settings, "language"> & {
-  language: Language;
-};
-
-const normalizeLanguage = (lang?: string | null): Language => {
-  if (!lang) return "zh";
-  const normalized = lang.toLowerCase().replace(/_/g, "-");
-
-  if (normalized === "zh") {
-    return "zh";
-  }
-
-  if (
-    normalized === "zh-tw" ||
-    normalized.startsWith("zh-hant") ||
-    normalized.startsWith("zh-hk") ||
-    normalized.startsWith("zh-mo")
-  ) {
-    return "zh-TW";
-  }
-
-  if (normalized === "en" || normalized === "ja") {
-    return normalized;
-  }
-
-  if (normalized.startsWith("zh")) {
-    return "zh";
-  }
-
-  return "zh";
-};
-
-const isSupportedLanguage = (lang?: string | null): boolean => {
-  if (!lang) return false;
-  const normalized = lang.toLowerCase().replace(/_/g, "-");
-  return (
-    normalized === "en" || normalized === "ja" || normalized.startsWith("zh")
-  );
-};
-
-const sanitizeDir = (value?: string | null): string | undefined => {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-};
+export type { SettingsFormState };
 
 export interface UseSettingsFormResult {
   settings: SettingsFormState | null;
@@ -76,17 +42,14 @@ export function useSettingsForm(): UseSettingsFormResult {
   const [settingsState, setSettingsState] = useState<SettingsFormState | null>(
     null,
   );
-
+  // State (for render) plus a ref (for callbacks that must see the latest
+  // value without being recreated).
+  const [initialLanguage, setInitialLanguage] = useState<Language>("zh");
   const initialLanguageRef = useRef<Language>("zh");
+  const lastServerDataRef = useRef<Settings | null>(null);
 
   const readPersistedLanguage = useCallback((): Language => {
-    if (typeof window !== "undefined") {
-      const stored = window.localStorage.getItem("language");
-      if (isSupportedLanguage(stored)) {
-        return normalizeLanguage(stored);
-      }
-    }
-    return normalizeLanguage(i18n.language);
+    return languagePreference.get() ?? normalizeLanguage(i18n.language);
   }, [i18n]);
 
   const syncLanguage = useCallback(
@@ -103,34 +66,27 @@ export function useSettingsForm(): UseSettingsFormResult {
   useEffect(() => {
     if (!data) return;
 
-    const normalizedLanguage = normalizeLanguage(
-      data.language ?? readPersistedLanguage(),
-    );
+    const normalized = normalizeSettingsForm(data, readPersistedLanguage);
 
-    const normalized: SettingsFormState = {
-      ...data,
-      showInTray: data.showInTray ?? true,
-      minimizeToTrayOnClose: data.minimizeToTrayOnClose ?? true,
-      useAppWindowControls: data.useAppWindowControls ?? false,
-      enableClaudePluginIntegration:
-        data.enableClaudePluginIntegration ?? false,
-      silentStartup: data.silentStartup ?? false,
-      skipClaudeOnboarding: data.skipClaudeOnboarding ?? false,
-      preserveCodexOfficialAuthOnSwitch:
-        data.preserveCodexOfficialAuthOnSwitch ?? false,
-      unifyCodexSessionHistory: data.unifyCodexSessionHistory ?? false,
-      claudeConfigDir: sanitizeDir(data.claudeConfigDir),
-      codexConfigDir: sanitizeDir(data.codexConfigDir),
-      geminiConfigDir: sanitizeDir(data.geminiConfigDir),
-      grokConfigDir: sanitizeDir(data.grokConfigDir),
-      opencodeConfigDir: sanitizeDir(data.opencodeConfigDir),
-      openclawConfigDir: sanitizeDir(data.openclawConfigDir),
-      language: normalizedLanguage,
-    };
-
-    setSettingsState(normalized);
-    initialLanguageRef.current = normalizedLanguage;
-    syncLanguage(normalizedLanguage);
+    // 目录覆盖是 Advanced 标签页上需要显式保存的草稿：其它设置自动保存后
+    // 会触发 settings 重新拉取，此时保留用户尚未保存的目录编辑，
+    // 否则 Save 时就丢失了这些修改（以及对应的 live 同步）。
+    const previousServer = lastServerDataRef.current;
+    lastServerDataRef.current = data;
+    setSettingsState((prev) => {
+      if (!prev || !previousServer) return normalized;
+      const next = { ...normalized };
+      for (const field of DIRECTORY_SETTINGS_FIELDS) {
+        const draft = prev[field];
+        if (sanitizeDir(draft) !== sanitizeDir(previousServer[field])) {
+          next[field] = draft;
+        }
+      }
+      return next;
+    });
+    initialLanguageRef.current = normalized.language;
+    setInitialLanguage(normalized.language);
+    syncLanguage(normalized.language);
   }, [data, readPersistedLanguage, syncLanguage]);
 
   const updateSettings = useCallback(
@@ -139,13 +95,7 @@ export function useSettingsForm(): UseSettingsFormResult {
         const base =
           prev ??
           ({
-            showInTray: true,
-            minimizeToTrayOnClose: true,
-            useAppWindowControls: false,
-            enableClaudePluginIntegration: false,
-            skipClaudeOnboarding: false,
-            preserveCodexOfficialAuthOnSwitch: false,
-            unifyCodexSessionHistory: false,
+            ...SETTINGS_FORM_DEFAULTS,
             language: readPersistedLanguage(),
           } as SettingsFormState);
 
@@ -169,33 +119,10 @@ export function useSettingsForm(): UseSettingsFormResult {
   const resetSettings = useCallback(
     (serverData: Settings | null) => {
       if (!serverData) return;
-
-      const normalizedLanguage = normalizeLanguage(
-        serverData.language ?? readPersistedLanguage(),
+      lastServerDataRef.current = serverData;
+      setSettingsState(
+        normalizeSettingsForm(serverData, readPersistedLanguage),
       );
-
-      const normalized: SettingsFormState = {
-        ...serverData,
-        showInTray: serverData.showInTray ?? true,
-        minimizeToTrayOnClose: serverData.minimizeToTrayOnClose ?? true,
-        useAppWindowControls: serverData.useAppWindowControls ?? false,
-        enableClaudePluginIntegration:
-          serverData.enableClaudePluginIntegration ?? false,
-        silentStartup: serverData.silentStartup ?? false,
-        skipClaudeOnboarding: serverData.skipClaudeOnboarding ?? false,
-        preserveCodexOfficialAuthOnSwitch:
-          serverData.preserveCodexOfficialAuthOnSwitch ?? false,
-        unifyCodexSessionHistory: serverData.unifyCodexSessionHistory ?? false,
-        claudeConfigDir: sanitizeDir(serverData.claudeConfigDir),
-        codexConfigDir: sanitizeDir(serverData.codexConfigDir),
-        geminiConfigDir: sanitizeDir(serverData.geminiConfigDir),
-        grokConfigDir: sanitizeDir(serverData.grokConfigDir),
-        opencodeConfigDir: sanitizeDir(serverData.opencodeConfigDir),
-        openclawConfigDir: sanitizeDir(serverData.openclawConfigDir),
-        language: normalizedLanguage,
-      };
-
-      setSettingsState(normalized);
       syncLanguage(initialLanguageRef.current);
     },
     [readPersistedLanguage, syncLanguage],
@@ -204,7 +131,7 @@ export function useSettingsForm(): UseSettingsFormResult {
   return {
     settings: settingsState,
     isLoading,
-    initialLanguage: initialLanguageRef.current,
+    initialLanguage,
     updateSettings,
     resetSettings,
     readPersistedLanguage,

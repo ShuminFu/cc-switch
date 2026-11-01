@@ -16,6 +16,11 @@ vi.mock("@tauri-apps/api/core", () => ({
 
     if (!response.ok) {
       const text = await response.text();
+      // TEST-26: `tauriError()` responses reject with the raw serialized
+      // error (a string or an AppError payload), as the real IPC does.
+      if (response.headers.get("x-tauri-invoke-error")) {
+        throw text ? JSON.parse(text) : "";
+      }
       throw new Error(text || `Invoke failed for ${command}`);
     }
 
@@ -62,4 +67,21 @@ void server;
 vi.mock("@tauri-apps/api/path", () => ({
   homeDir: async () => "/home/mock",
   join: async (...segments: string[]) => segments.join("/"),
+}));
+
+// `@tauri-apps/api/window` talks to `window.__TAURI_INTERNALS__`, which jsdom
+// does not have; without this mock App tests log "Failed to sync window
+// maximized state TypeError" (TEST-14). Tests can still spy on these methods
+// via `vi.mocked(getCurrentWindow)().minimize` etc.
+const mockWindow = vi.hoisted(() => ({
+  isMaximized: vi.fn(async () => false),
+  toggleMaximize: vi.fn(async () => {}),
+  minimize: vi.fn(async () => {}),
+  close: vi.fn(async () => {}),
+  setDecorations: vi.fn(async () => {}),
+  onResized: vi.fn(async () => () => {}),
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => mockWindow,
 }));

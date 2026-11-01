@@ -9,19 +9,10 @@ import {
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UsageDashboard } from "@/components/usage/UsageDashboard";
+import { resetDashboardViewState } from "@/components/usage/dashboardViewState";
 
 const useProviderStatsMock = vi.hoisted(() => vi.fn());
 const useModelStatsMock = vi.hoisted(() => vi.fn());
-
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
-    i18n: {
-      resolvedLanguage: "en",
-      language: "en",
-    },
-  }),
-}));
 
 vi.mock("framer-motion", () => ({
   motion: {
@@ -69,6 +60,20 @@ vi.mock("@/components/usage/PricingConfigPanel", () => ({
   PricingConfigPanel: () => <div data-testid="pricing-config-panel" />,
 }));
 
+vi.mock("@/components/usage/UsageExportButton", () => ({
+  UsageExportButton: ({ appType }: { appType?: string }) => (
+    <div data-testid="usage-export">{appType}</div>
+  ),
+}));
+
+vi.mock("@/components/usage/BudgetHeroStrip", () => ({
+  BudgetHeroStrip: () => <div data-testid="budget-hero-strip" />,
+}));
+
+vi.mock("@/components/usage/BudgetLimitsPanel", () => ({
+  BudgetLimitsPanel: () => <div data-testid="budget-limits-panel" />,
+}));
+
 vi.mock("@/components/usage/UsageDateRangePicker", () => ({
   UsageDateRangePicker: () => <button type="button">date-range</button>,
 }));
@@ -107,6 +112,7 @@ const renderDashboard = (props: ComponentProps<typeof UsageDashboard> = {}) => {
 
 describe("UsageDashboard", () => {
   beforeEach(() => {
+    resetDashboardViewState();
     useProviderStatsMock.mockReset();
     useModelStatsMock.mockReset();
     useProviderStatsMock.mockReturnValue({ data: [] });
@@ -151,5 +157,15 @@ describe("UsageDashboard", () => {
     await waitFor(() =>
       expect(screen.getByTestId("select-30000")).toBeInTheDocument(),
     );
+  });
+
+  it("keeps the app filter after the dashboard remounts (FE-UI-31)", () => {
+    const first = renderDashboard();
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    expect(screen.getByTestId("usage-export")).toHaveTextContent("codex");
+    first.unmount();
+
+    renderDashboard();
+    expect(screen.getByTestId("usage-export")).toHaveTextContent("codex");
   });
 });

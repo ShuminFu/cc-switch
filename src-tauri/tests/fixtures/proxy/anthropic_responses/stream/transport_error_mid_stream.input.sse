@@ -1,0 +1,16 @@
+event: response.created
+data: {"sequence_number": 0, "response": {"id": "resp_s1", "object": "response", "created_at": 1700000000, "status": "in_progress", "model": "gpt-5", "output": []}, "type": "response.created"}
+
+event: response.in_progress
+data: {"sequence_number": 1, "response": {"id": "resp_s1", "object": "response", "created_at": 1700000000, "status": "in_progress", "model": "gpt-5", "output": []}, "type": "response.in_progress"}
+
+event: response.output_item.added
+data: {"sequence_number": 2, "output_index": 0, "item": {"type": "message", "id": "msg_s1", "status": "in_progress", "role": "assistant", "content": []}, "type": "response.output_item.added"}
+
+event: response.content_part.added
+data: {"sequence_number": 3, "item_id": "msg_s1", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": "", "annotations": []}, "type": "response.content_part.added"}
+
+event: response.output_text.delta
+data: {"sequence_number": 4, "item_id": "msg_s1", "output_index": 0, "content_index": 0, "delta": "Au revoir, ", "type": "response.output_text.delta"}
+
+: x-fixture-transport-error

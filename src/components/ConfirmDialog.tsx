@@ -23,6 +23,8 @@ interface ConfirmDialogProps {
   /** 可选勾选项：提供 label 即显示，勾选状态经 onConfirm 参数回传 */
   checkboxLabel?: string;
   checkboxDefaultChecked?: boolean;
+  /** While true both buttons are disabled and closing is ignored. */
+  isPending?: boolean;
   onConfirm: (checkboxChecked: boolean) => void;
   onCancel: () => void;
 }
@@ -37,6 +39,7 @@ export function ConfirmDialog({
   zIndex = "alert",
   checkboxLabel,
   checkboxDefaultChecked = false,
+  isPending = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -59,7 +62,7 @@ export function ConfirmDialog({
     <Dialog
       open={isOpen}
       onOpenChange={(open) => {
-        if (!open) {
+        if (!open && !isPending) {
           onCancel();
         }
       }}
@@ -85,11 +88,13 @@ export function ConfirmDialog({
           </label>
         ) : null}
         <DialogFooter className="flex gap-2 border-t-0 bg-transparent pt-2 sm:justify-end">
-          <Button variant="outline" onClick={onCancel}>
+          <Button variant="outline" onClick={onCancel} disabled={isPending}>
             {cancelText || t("common.cancel")}
           </Button>
           <Button
             variant={variant === "info" ? "default" : "destructive"}
+            disabled={isPending}
+            aria-busy={isPending || undefined}
             onClick={() =>
               // 未渲染勾选框时不得回传 defaultChecked 残留值
               onConfirm(checkboxLabel ? checkboxChecked : false)

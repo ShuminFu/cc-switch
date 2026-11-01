@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, call } from "./invoke";
+import { commands } from "@/lib/bindings";
 import type {
   UsageSummary,
   UsageSummaryByApp,
@@ -138,6 +139,19 @@ export const usageApi = {
     });
   },
 
+  /**
+   * Ask for a destination with a native save dialog and write an exported
+   * usage report there (FE-UI-25). Resolves with the saved path, or `null`
+   * when the user cancelled. The backend only writes .csv / .json files.
+   */
+  saveUsageExport: async (
+    defaultName: string,
+    format: "csv" | "json",
+    content: string,
+  ): Promise<string | null> => {
+    return invoke("save_usage_export", { defaultName, format, content });
+  },
+
   getRequestDetail: async (requestId: string): Promise<RequestLog | null> => {
     return invoke("get_request_detail", { requestId });
   },
@@ -154,18 +168,42 @@ export const usageApi = {
     cacheReadCost: string,
     cacheCreationCost: string,
   ): Promise<void> => {
-    return invoke("update_model_pricing", {
-      modelId,
-      displayName,
-      inputCost,
-      outputCost,
-      cacheReadCost,
-      cacheCreationCost,
-    });
+    return call(
+      commands.updateModelPricing(
+        modelId,
+        displayName,
+        inputCost,
+        outputCost,
+        cacheReadCost,
+        cacheCreationCost,
+      ),
+    );
   },
 
   deleteModelPricing: async (modelId: string): Promise<void> => {
-    return invoke("delete_model_pricing", { modelId });
+    return call(commands.deleteModelPricing(modelId));
+  },
+
+  /** Currency and declared input modalities of a pricing row (null = unknown). */
+  setModelPricingMetadata: async (
+    modelId: string,
+    currency: string,
+    inputModalities: string[] | null,
+  ): Promise<void> => {
+    return invoke("set_model_pricing_metadata", {
+      modelId,
+      currency,
+      inputModalities,
+    });
+  },
+
+  /** FX rates as units of each currency per 1 USD. */
+  getPricingFxRates: async (): Promise<Record<string, string>> => {
+    return invoke("get_pricing_fx_rates");
+  },
+
+  setPricingFxRates: async (rates: Record<string, string>): Promise<void> => {
+    return invoke("set_pricing_fx_rates", { rates });
   },
 
   checkProviderLimits: async (

@@ -38,7 +38,7 @@ export function CustomUserAgentField({
     <div className="space-y-2">
       <FormLabel htmlFor={id}>
         {t("providerForm.customUserAgent", {
-          defaultValue: "自定义 User-Agent",
+          defaultValue: "Custom User-Agent",
         })}
       </FormLabel>
       <div className="flex items-center gap-2">
@@ -55,7 +55,7 @@ export function CustomUserAgentField({
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="outline" className="shrink-0 gap-1">
               {t("providerForm.customUserAgentPresets", {
-                defaultValue: "预设",
+                defaultValue: "Presets",
               })}
               <ChevronDown className="h-3.5 w-3.5 opacity-60" />
             </Button>
@@ -80,14 +80,14 @@ export function CustomUserAgentField({
         <p className="text-xs text-muted-foreground">
           {t("providerForm.customUserAgentHint", {
             defaultValue:
-              "仅在开启本地路由/代理接管后生效，会替换转发到供应商 API 请求中的 User-Agent。",
+              "Only takes effect when local routing/proxy takeover is enabled; replaces the User-Agent in requests forwarded to the provider API.",
           })}
         </p>
       ) : (
         <p className="text-xs text-destructive">
           {t("providerForm.customUserAgentInvalid", {
             defaultValue:
-              "User-Agent 不能包含控制字符（如换行符），否则将被忽略。",
+              "User-Agent must not contain control characters (e.g. line breaks); otherwise it will be ignored.",
           })}
         </p>
       )}

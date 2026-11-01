@@ -1,0 +1,10 @@
+{
+  "id": "chatcmpl_b",
+  "object": "chat.completion",
+  "model": "deepseek-chat",
+  "usage": {
+    "prompt_tokens": 90,
+    "completion_tokens": 30,
+    "total_tokens": 120
+  }
+}

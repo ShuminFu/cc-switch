@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 #[cfg(any(target_os = "macos", windows))]
 use crate::config::get_home_dir;
-use crate::config::{atomic_write, delete_file, read_json_file, write_json_file};
+use crate::config::{delete_file, read_json_file};
 use crate::database::Database;
 use crate::database::CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID;
 use crate::error::AppError;
@@ -14,9 +14,7 @@ use crate::provider::{ClaudeDesktopMode, Provider};
 pub const PROFILE_ID: &str = "00000000-0000-4000-8000-000000157210";
 pub const PROFILE_NAME: &str = "CC Switch";
 
-#[cfg(any(target_os = "macos", windows, test))]
 const CONFIG_FILE: &str = "claude_desktop_config.json";
-#[cfg(any(target_os = "macos", windows, test))]
 const CONFIG_LIBRARY_DIR: &str = "configLibrary";
 const GATEWAY_TOKEN_SETTING_KEY: &str = "claude_desktop_gateway_token";
 const CLAUDE_DESKTOP_PROXY_PREFIX: &str = "/claude-desktop";
@@ -93,7 +91,7 @@ struct FileSnapshot {
     content: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeDesktopStatus {
     pub supported: bool,
@@ -913,9 +911,9 @@ fn normalize_mimo_anthropic_thinking_history(body: &mut Value) {
 }
 
 pub fn proxy_gateway_base_url_from_db(db: &Database) -> Result<String, AppError> {
-    // get_proxy_config is async-tagged but its body is fully synchronous (rusqlite
-    // under a Mutex), so block_on cannot deadlock the calling thread.
-    let config = futures::executor::block_on(db.get_proxy_config())?;
+    // block_on_async picks a safe strategy for whatever runtime (if any) the
+    // caller is on, instead of parking a Tokio worker with futures::executor.
+    let config = crate::services::provider::block_on_async(db.get_proxy_config())?;
     if config.listen_port == 0 {
         return Err(AppError::Config(
             "Claude Desktop 代理地址需要真实监听端口；请先启动本地代理或使用固定端口".to_string(),
@@ -926,6 +924,35 @@ pub fn proxy_gateway_base_url_from_db(db: &Database) -> Result<String, AppError>
         proxy_origin_from_parts(&config.listen_address, config.listen_port),
         CLAUDE_DESKTOP_PROXY_PREFIX
     ))
+}
+
+/// Whether `profile`'s inference gateway is the local proxy route at
+/// `proxy_base_url` (same origin and `/claude-desktop` prefix).
+fn profile_points_at_proxy(profile: &Value, proxy_base_url: &str) -> bool {
+    profile
+        .get("inferenceGatewayBaseUrl")
+        .and_then(Value::as_str)
+        .is_some_and(|url| {
+            url.trim_end_matches('/')
+                .starts_with(proxy_base_url.trim_end_matches('/'))
+        })
+}
+
+/// Whether Claude Desktop's live 3P profile currently sends requests to the
+/// local proxy, so stopping the proxy would break it (PROXY-30). Reads the
+/// profile file and the proxy config; blocking.
+pub fn live_profile_uses_proxy(db: &Database) -> bool {
+    let Ok(paths) = current_platform_paths() else {
+        return false;
+    };
+    if !paths.profile_path.exists() {
+        return false;
+    }
+    let Ok(proxy_base_url) = proxy_gateway_base_url_from_db(db) else {
+        return false;
+    };
+    let profile = read_json_or_empty(&paths.profile_path).unwrap_or_else(|_| json!({}));
+    profile_points_at_proxy(&profile, &proxy_base_url)
 }
 
 fn apply_provider_to_paths(
@@ -979,6 +1006,7 @@ fn apply_provider_to_paths_inner(
                 &credentials.base_url,
                 &credentials.api_key,
                 (!model_specs.is_empty()).then_some(model_specs.as_slice()),
+                &extra_egress_hosts(provider),
             )
         }
         ClaudeDesktopMode::Proxy => {
@@ -993,13 +1021,18 @@ fn apply_provider_to_paths_inner(
                     supports_1m: route.supports_1m,
                 })
                 .collect::<Vec<_>>();
-            build_gateway_profile(&base_url, &api_key, Some(model_specs.as_slice()))
+            build_gateway_profile(
+                &base_url,
+                &api_key,
+                Some(model_specs.as_slice()),
+                &extra_egress_hosts(provider),
+            )
         }
     };
 
     write_deployment_mode(&paths.normal_config_path, "3p")?;
     write_deployment_mode(&paths.threep_config_path, "3p")?;
-    write_json_file(&paths.profile_path, &profile)?;
+    write_desktop_json(&paths.profile_path, &profile)?;
     write_meta(&paths.meta_path, Some(PROFILE_ID))?;
 
     Ok(())
@@ -1018,13 +1051,67 @@ fn restore_official_at_paths_inner(paths: &ClaudeDesktopPaths) -> Result<(), App
     Ok(())
 }
 
+/// Write a Claude Desktop JSON file: keep the file's key order/indent (the
+/// normal config also holds the user's Desktop `mcpServers`), skip no-op
+/// writes and create new files owner-only, since the profile carries the
+/// gateway API key.
+fn write_desktop_json(path: &Path, value: &Value) -> Result<(), AppError> {
+    use crate::adapters::live_file::{to_json_string, write_live_text, JsonStyle, WriteOptions};
+    let content = to_json_string(value, &JsonStyle::of_file(path))?;
+    write_live_text(path, &content, WriteOptions::default().secret())?;
+    Ok(())
+}
+
+/// Additional Cowork egress hosts the user opted into via
+/// `settings_config.coworkEgressAllowedHosts` (`"*"` allows every host).
+fn extra_egress_hosts(provider: &Provider) -> Vec<String> {
+    provider
+        .settings_config
+        .get("coworkEgressAllowedHosts")
+        .and_then(Value::as_array)
+        .map(|hosts| {
+            hosts
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|h| !h.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Minimal Cowork egress allowlist for a profile (CFG-47): the gateway's
+/// host (with an explicit port when it has one) plus the user's extra hosts.
+fn cowork_egress_hosts(base_url: &str, extra: &[String]) -> Vec<String> {
+    let mut hosts = Vec::new();
+    if let Ok(url) = url::Url::parse(base_url.trim()) {
+        if let Some(host) = url.host_str() {
+            hosts.push(match url.port() {
+                Some(port) => format!("{host}:{port}"),
+                None => host.to_string(),
+            });
+        }
+    }
+    for host in extra {
+        if !hosts.contains(host) {
+            hosts.push(host.clone());
+        }
+    }
+    if hosts.iter().any(|h| h == "*") {
+        log::warn!("Claude Desktop profile allows Cowork egress to every host (\"*\")");
+    }
+    hosts
+}
+
 fn build_gateway_profile(
     base_url: &str,
     api_key: &str,
     model_specs: Option<&[InferenceModelSpec]>,
+    extra_egress_hosts: &[String],
 ) -> Value {
     let mut profile = json!({
-        "coworkEgressAllowedHosts": ["*"],
+        "coworkEgressAllowedHosts": cowork_egress_hosts(base_url, extra_egress_hosts),
         "disableDeploymentModeChooser": true,
         "inferenceGatewayApiKey": api_key,
         "inferenceGatewayAuthScheme": "bearer",
@@ -1083,7 +1170,7 @@ fn restore_snapshots(snapshots: &[FileSnapshot]) -> Result<(), AppError> {
                 if let Some(parent) = snapshot.path.parent() {
                     fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
                 }
-                atomic_write(&snapshot.path, content)?;
+                crate::config::atomic_write_secret(&snapshot.path, content)?;
             }
             None => {
                 delete_file(&snapshot.path)?;
@@ -1104,7 +1191,7 @@ fn write_deployment_mode(path: &Path, mode: &str) -> Result<(), AppError> {
             Value::String(mode.to_string()),
         );
     }
-    write_json_file(path, &value)
+    write_desktop_json(path, &value)
 }
 
 fn remove_cc_switch_enterprise_config(path: &Path) -> Result<(), AppError> {
@@ -1137,7 +1224,7 @@ fn remove_cc_switch_enterprise_config(path: &Path) -> Result<(), AppError> {
         obj.remove("enterpriseConfig");
     }
 
-    write_json_file(path, &value)
+    write_desktop_json(path, &value)
 }
 
 fn write_meta(path: &Path, applied_profile_id: Option<&str>) -> Result<(), AppError> {
@@ -1182,7 +1269,7 @@ fn write_meta(path: &Path, applied_profile_id: Option<&str>) -> Result<(), AppEr
     }
 
     obj.insert("entries".to_string(), Value::Array(entries));
-    write_json_file(path, &value)
+    write_desktop_json(path, &value)
 }
 
 fn read_applied_id(path: &Path) -> Option<String> {
@@ -1206,7 +1293,45 @@ fn meta_has_profile_entry(path: &Path) -> bool {
 }
 
 fn is_supported_platform() -> bool {
-    cfg!(any(target_os = "macos", windows))
+    if cfg!(any(target_os = "macos", windows)) {
+        return true;
+    }
+    // PRODUCT-52: on Linux, community Claude Desktop builds keep their config
+    // under $XDG_CONFIG_HOME/Claude; support it once that directory exists.
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        linux_claude_dirs().is_some()
+    }
+    #[cfg(any(target_os = "macos", windows))]
+    {
+        false
+    }
+}
+
+/// `$XDG_CONFIG_HOME` (or `~/.config`) on Linux and other Unix desktops.
+#[cfg(any(not(any(target_os = "macos", windows)), test))]
+fn xdg_config_home(home: &Path, xdg: Option<std::ffi::OsString>) -> PathBuf {
+    xdg.map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| home.join(".config"))
+}
+
+/// `(Claude, Claude-3p)` under the XDG config dir when a Claude Desktop
+/// config directory exists there.
+#[cfg(any(not(any(target_os = "macos", windows)), test))]
+fn linux_claude_dirs_in(config_home: &Path) -> Option<(PathBuf, PathBuf)> {
+    let normal = config_home.join("Claude");
+    let threep = config_home.join("Claude-3p");
+    (normal.is_dir() || threep.is_dir()).then_some((normal, threep))
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn linux_claude_dirs() -> Option<(PathBuf, PathBuf)> {
+    let config_home = xdg_config_home(
+        &crate::config::get_home_dir(),
+        std::env::var_os("XDG_CONFIG_HOME"),
+    );
+    linux_claude_dirs_in(&config_home)
 }
 
 #[allow(clippy::needless_return)]
@@ -1224,7 +1349,10 @@ fn current_platform_paths() -> Result<ClaudeDesktopPaths, AppError> {
 
     #[cfg(not(any(target_os = "macos", windows)))]
     {
-        Err(unsupported_platform_error())
+        match linux_claude_dirs() {
+            Some((normal, threep)) => Ok(paths_from_dirs(normal, threep)),
+            None => Err(unsupported_platform_error()),
+        }
     }
 }
 
@@ -1257,26 +1385,29 @@ fn pick_windows_claude_dir(local_app_data: &Path, threep: bool) -> Option<PathBu
     if exact.exists() {
         return Some(exact);
     }
-
-    let mut candidates: Vec<PathBuf> = std::fs::read_dir(local_app_data)
+    let names: Vec<String> = std::fs::read_dir(local_app_data)
         .ok()?
         .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .filter(|path| {
-            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-                return false;
-            };
-            let starts = name.starts_with("Claude");
-            let is_threep = name.contains("-3p");
-            starts && is_threep == threep
-        })
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
         .collect();
-    candidates.sort();
-    candidates.into_iter().next()
+    pick_claude_dir_name(&names, threep).map(|name| local_app_data.join(name))
 }
 
-#[cfg(any(target_os = "macos", windows, test))]
+/// Pick Claude Desktop's data directory among `names` (CFG-34). Only the
+/// exact name (ignoring case) is accepted: a fuzzy match used to select
+/// stale copies such as `Claude-3p-backup` when `Claude-3p` was missing.
+#[cfg(any(windows, test))]
+fn pick_claude_dir_name(names: &[String], threep: bool) -> Option<String> {
+    let exact_name = if threep { "Claude-3p" } else { "Claude" };
+    let mut matches: Vec<&String> = names
+        .iter()
+        .filter(|name| name.eq_ignore_ascii_case(exact_name))
+        .collect();
+    matches.sort();
+    matches.first().map(|name| (*name).clone())
+}
+
 fn paths_from_dirs(normal_dir: PathBuf, threep_dir: PathBuf) -> ClaudeDesktopPaths {
     let config_library_path = threep_dir.join(CONFIG_LIBRARY_DIR);
     let profile_path = config_library_path.join(format!("{PROFILE_ID}.json"));
@@ -1310,14 +1441,56 @@ fn proxy_origin_from_parts(listen_address: &str, listen_port: u16) -> String {
 fn unsupported_platform_error() -> AppError {
     AppError::localized(
         "claude_desktop.unsupported_platform",
-        "当前平台暂不支持 Claude Desktop 3P 配置。第一阶段仅支持 macOS 和 Windows。",
-        "Claude Desktop 3P configuration is not supported on this platform yet. Phase 1 only supports macOS and Windows.",
+        "未找到 Claude Desktop 配置目录（$XDG_CONFIG_HOME/Claude）。Linux 上需先安装并运行一次 Claude Desktop。",
+        "No Claude Desktop config directory was found ($XDG_CONFIG_HOME/Claude). On Linux, install and run Claude Desktop once first.",
     )
+}
+
+#[cfg(test)]
+mod proxy_dependency_tests {
+    use super::*;
+
+    #[test]
+    fn profile_points_at_proxy_matches_origin_and_prefix() {
+        let base = "http://127.0.0.1:15721/claude-desktop";
+        let on = json!({ "inferenceGatewayBaseUrl": "http://127.0.0.1:15721/claude-desktop/" });
+        let other_port =
+            json!({ "inferenceGatewayBaseUrl": "http://127.0.0.1:9999/claude-desktop" });
+        let direct = json!({ "inferenceGatewayBaseUrl": "https://api.example.com" });
+        assert!(profile_points_at_proxy(&on, base));
+        assert!(!profile_points_at_proxy(&other_port, base));
+        assert!(!profile_points_at_proxy(&direct, base));
+        assert!(!profile_points_at_proxy(&json!({}), base));
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::write_json_file;
+
+    #[test]
+    fn linux_paths_follow_xdg_config_home_and_require_the_claude_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path();
+        assert_eq!(xdg_config_home(home, None), home.join(".config"));
+        assert_eq!(
+            xdg_config_home(home, Some("relative".into())),
+            home.join(".config")
+        );
+        let xdg = home.join("xdg");
+        assert_eq!(xdg_config_home(home, Some(xdg.clone().into())), xdg);
+
+        assert!(linux_claude_dirs_in(&xdg).is_none());
+        std::fs::create_dir_all(xdg.join("Claude")).unwrap();
+        let (normal, threep) = linux_claude_dirs_in(&xdg).expect("Claude dir exists");
+        assert_eq!(normal, xdg.join("Claude"));
+        let paths = paths_from_dirs(normal, threep);
+        assert_eq!(
+            paths.config_library_path,
+            xdg.join("Claude-3p").join(CONFIG_LIBRARY_DIR)
+        );
+    }
     use crate::database::Database;
     use crate::provider::{ClaudeDesktopModelRoute, ProviderMeta};
     use serde_json::json;
@@ -1343,7 +1516,8 @@ mod tests {
             listen_port: port,
             ..Default::default()
         };
-        futures::executor::block_on(db.update_proxy_config(config)).expect("update proxy config");
+        crate::services::provider::block_on_async(db.update_proxy_config(config))
+            .expect("update proxy config");
     }
 
     fn direct_provider(id: &str) -> Provider {
@@ -1481,6 +1655,59 @@ mod tests {
     }
 
     #[test]
+    fn claude_dir_pick_rejects_stale_copies() {
+        let names: Vec<String> = ["Claude-3p-old", "Claude-3p-backup", "Claude"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(pick_claude_dir_name(&names, true), None);
+        assert_eq!(pick_claude_dir_name(&names, false), Some("Claude".into()));
+        let names = vec!["claude-3P".to_string()];
+        assert_eq!(pick_claude_dir_name(&names, true), Some("claude-3P".into()));
+    }
+
+    #[test]
+    fn claude_desktop_profile_egress_hosts_are_minimal_unless_opted_in() {
+        assert_eq!(
+            cowork_egress_hosts("https://gateway.example.com/v1", &[]),
+            vec!["gateway.example.com".to_string()]
+        );
+        assert_eq!(
+            cowork_egress_hosts("http://127.0.0.1:15721/claude-desktop", &[]),
+            vec!["127.0.0.1:15721".to_string()]
+        );
+        assert_eq!(
+            cowork_egress_hosts("https://gw.example.com", &["*".to_string()]),
+            vec!["gw.example.com".to_string(), "*".to_string()]
+        );
+    }
+
+    #[test]
+    fn claude_desktop_writes_keep_user_config_order_and_profile_is_private() {
+        let temp = TempDir::new().expect("tempdir");
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(paths.normal_config_path.parent().unwrap()).unwrap();
+        let original = "{\n    \"mcpServers\": {\n        \"zeta\": {\n            \"command\": \"z\"\n        },\n        \"alpha\": {\n            \"command\": \"a\"\n        }\n    },\n    \"deploymentMode\": \"1p\"\n}\n";
+        fs::write(&paths.normal_config_path, original).unwrap();
+        let provider = direct_provider("direct");
+        let db = test_db();
+        apply_provider_to_paths(&db, &provider, &paths).expect("apply provider");
+
+        let written = fs::read_to_string(&paths.normal_config_path).unwrap();
+        assert_eq!(written, original.replace("\"1p\"", "\"3p\""));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&paths.profile_path)
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+    }
+
+    #[test]
     fn claude_desktop_apply_writes_3p_profile_and_meta() {
         let temp = TempDir::new().expect("tempdir");
         let paths = test_paths(temp.path());
@@ -1503,8 +1730,11 @@ mod tests {
         );
         assert_eq!(profile["inferenceGatewayApiKey"], json!("test-token"));
         assert_eq!(profile["inferenceGatewayAuthScheme"], json!("bearer"));
+        assert_eq!(
+            profile["coworkEgressAllowedHosts"],
+            json!(["gateway.example.com"])
+        );
         assert_eq!(profile["disableDeploymentModeChooser"], json!(true));
-        assert_eq!(profile["coworkEgressAllowedHosts"], json!(["*"]));
         assert!(profile.get("inferenceModels").is_none());
         assert_eq!(meta["appliedId"], json!(PROFILE_ID));
         assert!(meta["entries"]
@@ -1565,7 +1795,10 @@ mod tests {
             json!("http://127.0.0.1:15721/claude-desktop")
         );
         assert_eq!(profile["inferenceGatewayAuthScheme"], json!("bearer"));
-        assert_eq!(profile["coworkEgressAllowedHosts"], json!(["*"]));
+        assert_eq!(
+            profile["coworkEgressAllowedHosts"],
+            json!(["127.0.0.1:15721"])
+        );
         assert_ne!(profile["inferenceGatewayApiKey"], json!("test-token"));
         assert!(profile["inferenceGatewayApiKey"]
             .as_str()

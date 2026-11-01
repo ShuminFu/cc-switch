@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { createElement } from "react";
-import { SessionMeta } from "@/types";
+import type { SessionMeta } from "@/types";
 
 const CODEX_IDE_CONTEXT_PREFIX = "# Context from my IDE setup:";
 const CODEX_REQUEST_MARKER = "my request for codex";
@@ -66,7 +66,10 @@ const extractCodexPromptFromIdeContext = (content: string) => {
   return prompt;
 };
 
+/** Stable key; the backend computes the same `provider:session:source`
+ * string as `sessionKey`, which is preferred when present. */
 export const getSessionKey = (session: SessionMeta) =>
+  session.sessionKey ??
   `${session.providerId}:${session.sessionId}:${session.sourcePath ?? ""}`;
 
 export const getSessionDirectoryGroupKey = (

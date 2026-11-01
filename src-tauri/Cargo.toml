@@ -1,19 +1,28 @@
 [package]
 name = "cc-switch"
 version = "3.17.0"
-description = "All-in-One Assistant for Claude Code, Codex & Gemini CLI"
+description = "All-in-one manager for Claude Code, Claude Desktop, Codex, Gemini CLI, Grok Build, OpenCode, OpenClaw and Hermes Agent"
 authors = ["Jason Young"]
 license = "MIT"
 repository = "https://github.com/farion1231/cc-switch"
 edition = "2021"
-rust-version = "1.85.0"
+rust-version = "1.95"
+default-run = "cc-switch"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
 name = "cc_switch_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop only: the Tauri mobile template's "staticlib"/"cdylib" outputs cost an
+# extra (LTO) link on every build and no mobile target is shipped (CI-13).
+# Re-add them if Android/iOS is ever pursued.
+crate-type = ["rlib"]
 doctest = false
+
+# PRODUCT-11: `ccs` command-line companion over the same SQLite store.
+[[bin]]
+name = "ccs"
+path = "src/bin/ccs.rs"
 
 [features]
 default = []
@@ -26,8 +35,11 @@ tauri-build = { version = "2.4.0", features = [] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
+# Request/attempt spans in the proxy (PROXY-20); no subscriber is installed by default.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 chrono = { version = "0.4", features = ["serde"] }
-tauri = { version = "2.8.2", features = ["tray-icon", "protocol-asset", "image-png"] }
+# No "protocol-asset": the asset:// protocol is unused (CI-43).
+tauri = { version = "2.8.2", features = ["tray-icon", "image-png"] }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
@@ -36,68 +48,90 @@ tauri-plugin-dialog = "2"
 tauri-plugin-store = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-window-state = "2"
-dirs = "5.0"
+tauri-plugin-notification = "2"
+# Typed IPC bindings (CMD-13): `#[specta::specta]` on commands, exported to
+# src/lib/bindings.ts by the `bindings` test. Pinned with `=` while specta v2 is
+# a release candidate.
+specta = { version = "=2.0.0-rc.22", features = ["derive", "function", "serde_json", "indexmap"] }
+specta-typescript = "=0.0.9"
+tauri-specta = { version = "=2.0.0-rc.21", features = ["typescript"] }
+dirs = "6.0"
 toml = "0.8"
 toml_edit = "0.22"
-reqwest = { version = "0.12", features = ["rustls-tls", "json", "stream", "socks"] }
+# TLS: rustls + ring only (no native-tls/OpenSSL, no aws-lc-rs). lib.rs installs
+# the ring provider as the process default; keep these crates on the same provider.
+# rustls-tls-native-roots keeps OS-installed (e.g. corporate) CAs trusted, as the
+# previous native-tls default did; webpki roots remain as the baseline.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "charset", "http2", "system-proxy", "json", "stream", "socks"] }
 arboard = "3.6"
 flate2 = "1"
-brotli = "7"
+brotli = "8"
 zstd = "0.13"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "signal"] }
 futures = "0.3"
 async-stream = "0.3"
 bytes = "1.5"
-axum = "0.7"
-tower = "0.4"
-tower-http = { version = "0.5", features = ["cors"] }
+axum = "0.8"
+tower = "0.5"
 hyper = { version = "1.0", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio", "http1", "client-legacy"] }
-hyper-rustls = { version = "0.27", features = ["http1", "tls12", "ring", "webpki-tokio"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "tls12", "logging", "ring", "webpki-tokio"] }
 http = "1"
 http-body = "1"
 http-body-util = "0.1"
 httparse = "1"
-tokio-rustls = "0.26"
-rustls = "0.23"
-webpki-roots = "0.26"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"
 rustls-native-certs = "0.8"
 regex = "1.10"
-rquickjs = { version = "0.8", features = ["array-buffer", "classes"] }
+rquickjs = { version = "0.14", features = ["array-buffer", "classes"] }
 thiserror = "2.0"
 anyhow = "1.0"
-zip = "2.2"
-serde_yaml = "0.9"
+zip = "4.6"
+# CI-15: serde_yaml 0.9 is archived; serde_norway is its maintained, API-compatible fork.
+serde_yaml = { package = "serde_norway", version = "0.9" }
 tempfile = "3"
 url = "2.5"
 auto-launch = "0.5"
-once_cell = "1.21.3"
 base64 = "0.22"
-rusqlite = { version = "0.31", features = ["bundled", "backup", "hooks"] }
+rusqlite = { version = "0.41", features = ["bundled", "backup", "hooks", "fallible_uint"] }
 indexmap = { version = "2", features = ["serde"] }
 rust_decimal = "1.33"
 uuid = { version = "1.11", features = ["v4"] }
 sha2 = "0.10"
+minisign-verify = "0.2.5"
 hmac = "0.12"
-json5 = "0.4"
 json-five = "0.3.1"
 sys-locale = "0.3"
+# Secrets at rest and in sync (SEC-06, SVC-04, CMD-04): passphrase KDF, AEAD
+# for encrypted sync artifacts, and OS keychain access. Platform backends for
+# keyring are enabled per target below.
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+keyring = { version = "3.6", default-features = false }
+zeroize = "1"
+# CLI argument parsing for `ccs` and `cc-switch --headless` (PRODUCT-10/11).
+clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2.0.1", features = ["v2_16"] }
+keyring = { version = "3.6", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"
+keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
 windows-sys = { version = "0.61", features = ["Win32_Globalization", "Win32_UI_Shell"] }
 
 [target.'cfg(all(target_os = "windows", target_arch = "aarch64"))'.dependencies]
-rquickjs = { version = "0.8", features = ["bindgen"] }
+rquickjs = { version = "0.14", features = ["bindgen"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"
+keyring = { version = "3.6", default-features = false, features = ["apple-native"] }
 objc2-app-kit = { version = "0.2", features = ["NSColor"] }
 
 # Optimize release binary size to help reduce AppImage footprint
@@ -107,8 +141,16 @@ lto = "thin"
 opt-level = "s"
 # 使用 unwind 以便 panic hook 能捕获 backtrace（abort 会直接终止无法捕获）
 panic = "unwind"
-strip = "symbols"
+# Strip debug info but keep the symbol table, so the backtrace that
+# panic_hook.rs force-captures into crash.log shows function names instead of
+# bare addresses (CI-13). Costs ~1-2 MB of binary size.
+strip = "debuginfo"
 
 [dev-dependencies]
+# TEST-37: integration tests (and the binaries they spawn) build the crate with
+# `test-hooks`, which enables the CC_SWITCH_TEST_HOME override and the
+# `*_test_hook` command seams. Release builds never see that feature.
+cc-switch = { path = ".", features = ["test-hooks"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
 serial_test = "3"
 tempfile = "3"

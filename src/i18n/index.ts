@@ -1,92 +1,100 @@
-import i18n from "i18next";
+import i18n, { type BackendModule, type ResourceKey } from "i18next";
 import { initReactI18next } from "react-i18next";
 
+// English is the fallback language and is always bundled; the other locales
+// are separate chunks loaded on demand (FE-ARCH-08 / PERF-15), so startup
+// parses one or two locale files instead of all four.
 import en from "./locales/en.json";
-import ja from "./locales/ja.json";
-import zh from "./locales/zh.json";
-import zhTW from "./locales/zh-TW.json";
+import {
+  DEFAULT_LANGUAGE,
+  getInitialLanguage,
+  syncDocumentLanguage,
+  type Language,
+} from "./language";
 
-type Language = "zh" | "zh-TW" | "en" | "ja";
+export {
+  DEFAULT_LANGUAGE,
+  getInitialLanguage,
+  mapLocaleToLanguage,
+  syncDocumentLanguage,
+} from "./language";
+export type { Language } from "./language";
 
-const DEFAULT_LANGUAGE: Language = "zh";
+type LocaleModule = { default: ResourceKey };
 
-const getInitialLanguage = (): Language => {
-  if (typeof window !== "undefined") {
-    try {
-      const stored = window.localStorage.getItem("language");
-      if (
-        stored === "zh" ||
-        stored === "zh-TW" ||
-        stored === "en" ||
-        stored === "ja"
-      ) {
-        return stored;
-      }
-    } catch (error) {
-      console.warn("[i18n] Failed to read stored language preference", error);
+const LAZY_LOCALES: Record<
+  Exclude<Language, "en">,
+  () => Promise<LocaleModule>
+> = {
+  ja: () => import("./locales/ja.json"),
+  zh: () => import("./locales/zh.json"),
+  "zh-TW": () => import("./locales/zh-TW.json"),
+};
+
+/**
+ * i18next backend that resolves a locale to its lazily imported JSON chunk.
+ * Unknown languages resolve to an empty bundle (i18next then falls back to
+ * English).
+ */
+export const lazyLocaleBackend: BackendModule = {
+  type: "backend",
+  init() {},
+  read(language, _namespace, callback) {
+    if (language === "en") {
+      callback(null, en);
+      return;
     }
-  }
-
-  const navigatorLang =
-    typeof navigator !== "undefined"
-      ? (navigator.language?.toLowerCase() ??
-        navigator.languages?.[0]?.toLowerCase())
-      : undefined;
-
-  if (navigatorLang === "zh") {
-    return "zh";
-  }
-
-  if (
-    navigatorLang?.startsWith("zh-tw") ||
-    navigatorLang?.startsWith("zh-hk") ||
-    navigatorLang?.startsWith("zh-mo") ||
-    navigatorLang?.startsWith("zh-hant")
-  ) {
-    return "zh-TW";
-  }
-
-  if (navigatorLang?.startsWith("zh")) {
-    return "zh";
-  }
-
-  if (navigatorLang?.startsWith("ja")) {
-    return "ja";
-  }
-
-  if (navigatorLang?.startsWith("en")) {
-    return "en";
-  }
-
-  return DEFAULT_LANGUAGE;
-};
-
-const resources = {
-  en: {
-    translation: en,
-  },
-  ja: {
-    translation: ja,
-  },
-  zh: {
-    translation: zh,
-  },
-  "zh-TW": {
-    translation: zhTW,
+    const load = (
+      LAZY_LOCALES as Record<string, (() => Promise<LocaleModule>) | undefined>
+    )[language];
+    if (!load) {
+      callback(null, {});
+      return;
+    }
+    load().then(
+      (module) => callback(null, module.default),
+      (error: unknown) =>
+        callback(
+          error instanceof Error ? error : new Error(String(error)),
+          null,
+        ),
+    );
   },
 };
 
-i18n.use(initReactI18next).init({
-  resources,
-  lng: getInitialLanguage(), // 根据本地存储或系统语言选择默认语言
-  fallbackLng: "en", // 如果缺少中文翻译则退回英文
+// 语言切换时同步 <html lang>（init 完成时也会触发一次）
+i18n.on("languageChanged", syncDocumentLanguage);
 
-  interpolation: {
-    escapeValue: false, // React 已经默认转义
-  },
+/**
+ * Resolves once the initial language's resources are loaded. Render after
+ * awaiting it to avoid a flash of fallback (English) text.
+ */
+export const i18nReady = i18n
+  .use(lazyLocaleBackend)
+  .use(initReactI18next)
+  .init({
+    resources: {
+      en: { translation: en },
+    },
+    // Bundled `en` plus backend-loaded others.
+    partialBundledLanguages: true,
+    lng: getInitialLanguage(), // 根据本地存储或系统语言选择默认语言
+    fallbackLng: DEFAULT_LANGUAGE, // 如果缺少翻译则退回英文
 
-  // 开发模式下显示调试信息
-  debug: false,
-});
+    interpolation: {
+      escapeValue: false, // React 已经默认转义
+    },
+
+    react: {
+      // Keep rendering while a newly selected locale chunk loads.
+      useSuspense: false,
+    },
+
+    // 开发模式下显示调试信息
+    debug: false,
+  })
+  .catch((error: unknown) => {
+    console.error("[i18n] Failed to initialise translations", error);
+  });
 
 export default i18n;

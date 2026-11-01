@@ -1,10 +1,19 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, ChevronDown, ChevronUp, X, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  EyeOff,
+  X,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { EnvConflict } from "@/types/env";
-import { deleteEnvVars } from "@/lib/api/env";
+import { deleteEnvVars, restoreEnvBackup } from "@/lib/api/env";
+import { isSecretEnvName, maskEnvValue } from "./maskEnvValue";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -14,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { showError } from "@/lib/errors/showError";
 
 interface EnvWarningBannerProps {
   conflicts: EnvConflict[];
@@ -33,6 +43,8 @@ export function EnvWarningBanner({
   );
   const [isDeleting, setIsDeleting] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  // Keys of rows whose secret value the user chose to reveal (FE-UI-53).
+  const [revealed, setRevealed] = useState<Set<string>>(new Set());
 
   if (conflicts.length === 0) {
     return null;
@@ -58,6 +70,35 @@ export function EnvWarningBanner({
     }
   };
 
+  const toggleReveal = (key: string) => {
+    setRevealed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleUndo = async (backupPath: string) => {
+    try {
+      await restoreEnvBackup(backupPath);
+      toast.success(
+        t("env.restore.success", {
+          defaultValue: "Environment variables restored",
+        }),
+        { closeButton: true },
+      );
+      onDeleted();
+    } catch (error) {
+      toast.error(
+        t("env.restore.error", {
+          defaultValue: "Failed to restore environment variables",
+        }),
+        { description: String(error) },
+      );
+    }
+  };
+
   const handleDelete = async () => {
     setShowConfirmDialog(false);
     setIsDeleting(true);
@@ -78,18 +119,43 @@ export function EnvWarningBanner({
         description: t("env.backup.location", {
           path: backupInfo.backupPath,
         }),
-        duration: 5000,
+        duration: 10000,
         closeButton: true,
+        // One-click rollback from the backup the delete just wrote (FE-UI-54).
+        action: {
+          label: t("env.delete.undo", { defaultValue: "Undo" }),
+          onClick: () => void handleUndo(backupInfo.backupPath),
+        },
       });
+
+      // Process-environment variables cannot be removed by cc-switch (SVC-48):
+      // say which ones are left and where to remove them.
+      const skipped = backupInfo.skipped ?? [];
+      if (skipped.length > 0) {
+        toast.warning(
+          t("env.delete.skippedTitle", {
+            defaultValue:
+              "{{count}} variable(s) could not be removed by CC Switch",
+            count: skipped.length,
+          }),
+          {
+            description: t("env.delete.skippedDescription", {
+              defaultValue:
+                "{{names}} come from the process environment (launchd, systemd, ~/.zshenv or the parent shell). Remove them where they are set, then restart CC Switch.",
+              names: skipped.map((s) => s.varName).join(", "),
+            }),
+            duration: 15000,
+            closeButton: true,
+          },
+        );
+      }
 
       // 清空选择并通知父组件
       setSelectedConflicts(new Set());
       onDeleted();
     } catch (error) {
       console.error("删除环境变量失败:", error);
-      toast.error(t("env.delete.error"), {
-        description: String(error),
-      });
+      showError({ title: t("env.delete.error"), error });
     } finally {
       setIsDeleting(false);
     }
@@ -151,6 +217,7 @@ export function EnvWarningBanner({
                     variant="ghost"
                     size="icon"
                     onClick={onDismiss}
+                    aria-label={t("common.close")}
                     className="text-yellow-900 dark:text-yellow-100 hover:bg-yellow-100 dark:hover:bg-yellow-900/50"
                   >
                     <X className="h-4 w-4" />
@@ -195,9 +262,40 @@ export function EnvWarningBanner({
                             >
                               {conflict.varName}
                             </label>
-                            <p className="text-xs text-muted-foreground mt-1 break-all">
-                              {t("env.field.value")}: {conflict.varValue}
-                            </p>
+                            <div className="flex items-center gap-1 mt-1">
+                              <p className="text-xs text-muted-foreground break-all">
+                                {t("env.field.value")}:{" "}
+                                {revealed.has(key)
+                                  ? conflict.varValue
+                                  : maskEnvValue(
+                                      conflict.varName,
+                                      conflict.varValue,
+                                    )}
+                              </p>
+                              {isSecretEnvName(conflict.varName) && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleReveal(key)}
+                                  className="flex-shrink-0 text-muted-foreground hover:text-foreground"
+                                  aria-pressed={revealed.has(key)}
+                                  aria-label={
+                                    revealed.has(key)
+                                      ? t("env.actions.hideValue", {
+                                          defaultValue: "Hide value",
+                                        })
+                                      : t("env.actions.showValue", {
+                                          defaultValue: "Show value",
+                                        })
+                                  }
+                                >
+                                  {revealed.has(key) ? (
+                                    <EyeOff className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <Eye className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
+                              )}
+                            </div>
                             <p className="text-xs text-muted-foreground mt-1">
                               {t("env.field.source")}:{" "}
                               {getSourceDescription(conflict)}

@@ -1,13 +1,21 @@
+pub(crate) mod auto_sync;
 pub mod balance;
+pub mod budget;
+pub mod catalog;
+pub mod cli_tools;
 pub mod codex_oauth_models;
 pub mod coding_plan;
 pub mod config;
 pub mod env_checker;
 pub mod env_manager;
+pub mod env_profile;
 pub mod mcp;
 pub mod model_fetch;
+pub mod notifications;
 pub mod omo;
+pub mod operation_log;
 pub mod profile;
+pub mod project_binding;
 pub mod prompt;
 pub mod provider;
 pub mod proxy;
@@ -24,7 +32,9 @@ pub mod sql_helpers;
 pub mod stream_check;
 pub mod subscription;
 pub mod sync_protocol;
+pub(crate) mod sync_transport;
 pub mod usage_cache;
+pub mod usage_query;
 pub mod usage_stats;
 pub mod webdav;
 pub mod webdav_auto_sync;
@@ -36,12 +46,6 @@ pub use omo::OmoService;
 pub use prompt::PromptService;
 pub use provider::{ProviderService, ProviderSortUpdate, SwitchResult};
 pub use proxy::ProxyService;
-#[allow(unused_imports)]
-pub use skill::{DiscoverableSkill, Skill, SkillRepo, SkillService};
+pub use skill::SkillService;
 pub use speedtest::{EndpointLatency, SpeedtestService};
 pub use usage_cache::UsageCache;
-#[allow(unused_imports)]
-pub use usage_stats::{
-    DailyStats, LogFilters, ModelStats, PaginatedLogs, ProviderLimitStatus, ProviderStats,
-    RequestLogDetail, UsageSummary, UsageSummaryByApp,
-};

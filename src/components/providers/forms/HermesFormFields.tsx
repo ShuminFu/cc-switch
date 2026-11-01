@@ -1,4 +1,6 @@
 import { useTranslation } from "react-i18next";
+import { validateEndpointUrl } from "@/utils/providerInputValidation";
+import { ModelOrderButtons, moveItem } from "./shared/ModelOrderButtons";
 import {
   useState,
   useRef,
@@ -40,11 +42,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ApiKeySection } from "./shared";
-import {
-  fetchModelsForConfig,
-  showFetchModelsError,
-  type FetchedModel,
-} from "@/lib/api/model-fetch";
+import { fetchModelsForConfig, type FetchedModel } from "@/lib/api/model-fetch";
+import { showFetchModelsError } from "./shared/showFetchModelsError";
 import {
   hermesApiModes,
   type HermesApiMode,
@@ -78,28 +77,12 @@ const BASE_URL_ERROR_I18N_KEY: Record<BaseUrlErrorCode, string> = {
   invalid: "hermes.form.baseUrlInvalid",
 };
 
-const TEMPLATE_TOKEN_RE = /\$\{[^}]+\}/g;
-
 /**
  * Hermes 0.10.0+ rejects `base_url` entries that don't parse as proper URLs
- * (commit 2cdae233). Validate client-side so the error surfaces before the
- * request ever reaches Hermes' startup.
+ * (commit 2cdae233). Uses the validator shared by every app (FE-PROV-21).
  */
-function validateBaseUrl(raw: string): BaseUrlErrorCode | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return "empty";
-  // Presets like KAT-Coder embed `${VAR}` tokens — swap them before URL parse.
-  const candidate = trimmed.replace(TEMPLATE_TOKEN_RE, "placeholder");
-  let u: URL;
-  try {
-    u = new URL(candidate);
-  } catch {
-    return "invalid";
-  }
-  if (!u.protocol.startsWith("http")) return "scheme";
-  if (!u.hostname) return "invalid";
-  return null;
-}
+const validateBaseUrl = (raw: string): BaseUrlErrorCode | null =>
+  validateEndpointUrl(raw);
 
 interface AdvancedSectionProps {
   open: boolean;
@@ -157,7 +140,8 @@ export function HermesFormFields({
   onRateLimitDelayChange,
 }: HermesFormFieldsProps) {
   const { t } = useTranslation();
-  const [expandedModels, setExpandedModels] = useState<Record<number, boolean>>(
+  // Keyed by the stable row key, not the index (FE-PROV-11).
+  const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>(
     {},
   );
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
@@ -211,7 +195,15 @@ export function HermesFormFields({
   );
 
   const toggleModelAdvanced = (index: number) => {
-    setExpandedModels((prev) => ({ ...prev, [index]: !prev[index] }));
+    const key = modelKeys[index];
+    setExpandedModels((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Reorder models; the first one becomes model.default on switch.
+  const handleMoveModel = (from: number, to: number) => {
+    if (to < 0 || to >= models.length) return;
+    modelKeysRef.current = moveItem(modelKeysRef.current, from, to);
+    onModelsChange(moveItem(models, from, to));
   };
 
   const handleAddModel = () => {
@@ -250,13 +242,13 @@ export function HermesFormFields({
   }, [baseUrl, apiKey, t]);
 
   const handleRemoveModel = (index: number) => {
-    modelKeysRef.current.splice(index, 1);
+    const [removedKey] = modelKeysRef.current.splice(index, 1);
     const next = [...models];
     next.splice(index, 1);
     onModelsChange(next);
     setExpandedModels((prev) => {
       const updated = { ...prev };
-      delete updated[index];
+      delete updated[removedKey];
       return updated;
     });
   };
@@ -275,7 +267,7 @@ export function HermesFormFields({
     <>
       <div className="space-y-2">
         <FormLabel htmlFor="hermes-api-mode">
-          {t("hermes.form.apiMode", { defaultValue: "API 模式" })}
+          {t("hermes.form.apiMode", { defaultValue: "API Mode" })}
         </FormLabel>
         <Select
           value={apiMode}
@@ -294,14 +286,15 @@ export function HermesFormFields({
         </Select>
         <p className="text-xs text-muted-foreground">
           {t("hermes.form.apiModeHint", {
-            defaultValue: "供应商 API 协议。请根据端点选择正确的协议。",
+            defaultValue:
+              "Provider API protocol. Choose the format that matches your endpoint.",
           })}
         </p>
       </div>
 
       <div className="space-y-2">
         <FormLabel htmlFor="hermes-baseurl">
-          {t("hermes.form.baseUrl", { defaultValue: "API 端点" })}
+          {t("providerForm.apiEndpoint", { defaultValue: "API Endpoint" })}
         </FormLabel>
         <Input
           id="hermes-baseurl"
@@ -321,7 +314,7 @@ export function HermesFormFields({
         ) : (
           <p className="text-xs text-muted-foreground">
             {t("hermes.form.baseUrlHint", {
-              defaultValue: "供应商的 API 端点地址。",
+              defaultValue: "The API endpoint URL for this provider.",
             })}
           </p>
         )}
@@ -342,7 +335,7 @@ export function HermesFormFields({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <FormLabel>
-            {t("hermes.form.models", { defaultValue: "模型列表" })}
+            {t("hermes.form.models", { defaultValue: "Models" })}
           </FormLabel>
           <div className="flex gap-1">
             <Button
@@ -368,7 +361,7 @@ export function HermesFormFields({
               className="h-7 gap-1"
             >
               <Plus className="h-3.5 w-3.5" />
-              {t("hermes.form.addModel", { defaultValue: "添加模型" })}
+              {t("hermes.form.addModel", { defaultValue: "Add model" })}
             </Button>
           </div>
         </div>
@@ -376,7 +369,8 @@ export function HermesFormFields({
         {models.length === 0 ? (
           <p className="text-sm text-muted-foreground py-2">
             {t("hermes.form.noModels", {
-              defaultValue: "暂无模型配置。切换到此供应商时将无默认模型。",
+              defaultValue:
+                "No models configured. Switching to this provider won't change the default model.",
             })}
           </p>
         ) : (
@@ -397,10 +391,10 @@ export function HermesFormFields({
                   >
                     {index === 0
                       ? t("hermes.form.primaryModel", {
-                          defaultValue: "默认模型",
+                          defaultValue: "Default",
                         })
                       : t("hermes.form.fallbackModel", {
-                          defaultValue: "备选模型",
+                          defaultValue: "Alternate",
                         })}
                   </span>
                 </div>
@@ -408,7 +402,7 @@ export function HermesFormFields({
                 <div className="flex items-center gap-2">
                   <div className="flex-1 space-y-1">
                     <label className="text-xs text-muted-foreground">
-                      {t("hermes.form.modelId", { defaultValue: "模型 ID" })}
+                      {t("hermes.form.modelId", { defaultValue: "Model ID" })}
                     </label>
                     <div className="flex gap-1">
                       <Input
@@ -427,6 +421,9 @@ export function HermesFormFields({
                             <Button
                               variant="outline"
                               size="icon"
+                              aria-label={t("providerForm.chooseModel", {
+                                defaultValue: "Choose a model",
+                              })}
                               className="shrink-0"
                             >
                               <ChevronDown className="h-4 w-4" />
@@ -464,7 +461,7 @@ export function HermesFormFields({
                   <div className="flex-1 space-y-1">
                     <label className="text-xs text-muted-foreground">
                       {t("hermes.form.modelName", {
-                        defaultValue: "显示名称",
+                        defaultValue: "Display name",
                       })}
                     </label>
                     <Input
@@ -477,11 +474,19 @@ export function HermesFormFields({
                       })}
                     />
                   </div>
+                  <ModelOrderButtons
+                    index={index}
+                    count={models.length}
+                    onMove={handleMoveModel}
+                  />
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
                     onClick={() => handleRemoveModel(index)}
+                    aria-label={t("providerForm.removeModel", {
+                      defaultValue: "Remove model",
+                    })}
                     className="h-9 w-9 mt-5 text-muted-foreground hover:text-destructive"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -489,14 +494,14 @@ export function HermesFormFields({
                 </div>
 
                 <AdvancedSection
-                  open={expandedModels[index] ?? false}
+                  open={expandedModels[modelKeys[index]] ?? false}
                   onOpenChange={() => toggleModelAdvanced(index)}
                   labelKey="hermes.form.advancedOptions"
                 >
                   <div className="space-y-1">
                     <label className="text-xs text-muted-foreground">
                       {t("hermes.form.contextLength", {
-                        defaultValue: "上下文长度",
+                        defaultValue: "Context length",
                       })}
                     </label>
                     <Input
@@ -521,7 +526,7 @@ export function HermesFormFields({
         <p className="text-xs text-muted-foreground">
           {t("hermes.form.modelsHint", {
             defaultValue:
-              "切换到此供应商时，第一个模型会写入顶层 model.default。",
+              "On switch, the first model is written to top-level model.default.",
           })}
         </p>
       </div>
@@ -534,7 +539,7 @@ export function HermesFormFields({
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">
             {t("hermes.form.rateLimitDelay", {
-              defaultValue: "请求间隔（秒）",
+              defaultValue: "Rate limit delay (seconds)",
             })}
           </label>
           <Input
@@ -558,7 +563,7 @@ export function HermesFormFields({
           <p className="text-xs text-muted-foreground">
             {t("hermes.form.rateLimitDelayHint", {
               defaultValue:
-                "连续请求间的最小间隔秒数（可选）。留空表示无限制。",
+                "Minimum delay in seconds between consecutive requests (optional). Leave empty for no limit.",
             })}
           </p>
         </div>

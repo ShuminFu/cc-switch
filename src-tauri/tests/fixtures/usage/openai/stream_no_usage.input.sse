@@ -1,0 +1,4 @@
+data: {"id": "c2", "object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": {"content": "x"}, "finish_reason": "stop"}]}
+
+data: [DONE]
+

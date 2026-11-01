@@ -1,0 +1,91 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "What is the weather in Paris and Rome?"
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "parts": [
+        {
+          "text": "Checking both cities."
+        },
+        {
+          "functionCall": {
+            "name": "get_weather",
+            "args": {
+              "city": "Paris"
+            },
+            "id": "toolu_01A"
+          }
+        },
+        {
+          "functionCall": {
+            "name": "get_weather",
+            "args": {
+              "city": "Rome"
+            },
+            "id": "toolu_01B"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "functionResponse": {
+            "name": "get_weather",
+            "response": {
+              "content": "18C and sunny"
+            },
+            "id": "toolu_01A"
+          }
+        },
+        {
+          "functionResponse": {
+            "name": "get_weather",
+            "response": {
+              "content": "21C and cloudy"
+            },
+            "id": "toolu_01B"
+          }
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 2048
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "get_weather",
+          "description": "Get the current weather for a city",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": "City name"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "toolConfig": {
+    "functionCallingConfig": {
+      "mode": "AUTO"
+    }
+  }
+}

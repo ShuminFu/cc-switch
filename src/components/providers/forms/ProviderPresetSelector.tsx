@@ -12,6 +12,7 @@ import {
   Heart,
   Layers,
   Settings2,
+  EyeOff,
 } from "lucide-react";
 import type { ProviderPreset } from "@/config/claudeProviderPresets";
 import type { CodexProviderPreset } from "@/config/codexProviderPresets";
@@ -26,6 +27,8 @@ import {
   type UniversalProviderPreset,
 } from "@/config/universalProviderPresets";
 import { ProviderIcon } from "@/components/ProviderIcon";
+import { settingsApi } from "@/lib/api/settings";
+import { HintText } from "./shared/HintText";
 
 type PresetTranslator = (key: string) => unknown;
 
@@ -50,6 +53,38 @@ export type PresetEntry = {
   id: string;
   preset: AnyPreset;
 };
+
+/** Public sponsor / affiliate policy linked from the preset picker (PRODUCT-08). */
+export const SPONSOR_POLICY_URL =
+  "https://github.com/farion1231/cc-switch/blob/main/docs/sponsor-policy.md";
+
+/** localStorage key for the "hide sponsored presets" preference. */
+export const HIDE_SPONSORED_STORAGE_KEY = "cc-switch:presets:hideSponsored";
+
+/** Partner and prime-partner presets are paid placements and may carry referral links. */
+export function isSponsoredPreset(preset: AnyPreset): boolean {
+  return Boolean(preset.isPartner || preset.primePartner);
+}
+
+export function readHideSponsoredPreference(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(HIDE_SPONSORED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function writeHideSponsoredPreference(hide: boolean): void {
+  try {
+    if (hide) {
+      globalThis.localStorage?.setItem(HIDE_SPONSORED_STORAGE_KEY, "1");
+    } else {
+      globalThis.localStorage?.removeItem(HIDE_SPONSORED_STORAGE_KEY);
+    }
+  } catch {
+    // storage unavailable: the preference simply does not persist
+  }
+}
 
 export function getPresetDisplayName(
   preset: AnyPreset,
@@ -116,15 +151,24 @@ export interface PresetVisibilityOptions {
   query: string;
   sortMode: PresetSortMode;
   t: PresetTranslator;
+  /** Drop sponsored (partner / prime partner) presets. */
+  hideSponsored?: boolean;
 }
 
 export function getVisiblePresetEntries(
   entries: PresetEntry[],
   options: PresetVisibilityOptions,
 ): PresetEntry[] {
-  const { query, sortMode, t } = options;
+  const { query, sortMode, t, hideSponsored = false } = options;
+  const candidates = hideSponsored
+    ? entries.filter((entry) => !isSponsoredPreset(entry.preset))
+    : entries;
 
-  return sortPresetEntries(filterPresetEntries(entries, query, t), sortMode, t);
+  return sortPresetEntries(
+    filterPresetEntries(candidates, query, t),
+    sortMode,
+    t,
+  );
 }
 
 interface ProviderPresetSelectorProps {
@@ -151,6 +195,9 @@ export function ProviderPresetSelector({
   const [searchQuery, setSearchQuery] = useState("");
   const [sortMode, setSortMode] = useState<PresetSortMode>(
     PresetSortMode.Original,
+  );
+  const [hideSponsored, setHideSponsored] = useState(
+    readHideSponsoredPreference,
   );
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -198,40 +245,82 @@ export function ProviderPresetSelector({
         query: searchQuery,
         sortMode,
         t,
+        hideSponsored,
       }),
-    [presetEntries, searchQuery, sortMode, t],
+    [presetEntries, searchQuery, sortMode, t, hideSponsored],
   );
+
+  const hasSponsoredPresets = useMemo(
+    () => presetEntries.some((entry) => isSponsoredPreset(entry.preset)),
+    [presetEntries],
+  );
+
+  const toggleHideSponsored = () => {
+    setHideSponsored((current) => {
+      const next = !current;
+      writeHideSponsoredPreference(next);
+      return next;
+    });
+  };
+
+  const sponsoredTooltip = t("providerPreset.sponsoredTooltip", {
+    defaultValue:
+      "Sponsored placement: this partner supports CC Switch, and its sign-up links may earn CC Switch a referral commission.",
+  });
+
+  const openSponsorPolicy = () => {
+    void settingsApi.openExternal(SPONSOR_POLICY_URL).catch((error) => {
+      console.error("[ProviderPresetSelector] Failed to open policy", error);
+    });
+  };
+
+  const hint = (text: string) => <HintText>{text}</HintText>;
 
   const getCategoryHint = (): ReactNode => {
     switch (category) {
       case "official":
-        return t("providerForm.officialHint", {
-          defaultValue: "💡 官方供应商使用浏览器登录，无需配置 API Key",
-        });
+        return hint(
+          t("providerForm.officialHint", {
+            defaultValue:
+              "💡 Official provider uses browser login, no API Key needed",
+          }),
+        );
       case "cn_official":
-        return t("providerForm.cnOfficialApiKeyHint", {
-          defaultValue: "💡 国产官方供应商只需填写 API Key，请求地址已预设",
-        });
+        return hint(
+          t("providerForm.cnOfficialApiKeyHint", {
+            defaultValue: "💡 Only need to fill in API Key, endpoint is preset",
+          }),
+        );
       case "aggregator":
-        return t("providerForm.aggregatorApiKeyHint", {
-          defaultValue: "💡 聚合服务供应商只需填写 API Key 即可使用",
-        });
+        return hint(
+          t("providerForm.aggregatorApiKeyHint", {
+            defaultValue: "💡 Only need to fill in API Key, endpoint is preset",
+          }),
+        );
       case "third_party":
-        return t("providerForm.thirdPartyApiKeyHint", {
-          defaultValue: "💡 第三方供应商需要填写 API Key 和请求地址",
-        });
+        return hint(
+          t("providerForm.thirdPartyApiKeyHint", {
+            defaultValue: "💡 Only need to fill in API Key, endpoint is preset",
+          }),
+        );
       case "custom":
-        return t("providerForm.customApiKeyHint", {
-          defaultValue: "💡 自定义配置需手动填写所有必要字段",
-        });
+        return hint(
+          t("providerForm.customApiKeyHint", {
+            defaultValue:
+              "💡 Custom configuration requires manually filling all necessary fields",
+          }),
+        );
       case "omo":
-        return t("providerForm.omoHint", {
-          defaultValue:
-            "💡 OMO 配置管理 Agent 模型分配，兼容 oh-my-openagent.jsonc / oh-my-opencode.jsonc",
-        });
+        return hint(
+          t("providerForm.omoHint", {
+            defaultValue:
+              "💡 OMO config manages Agent model assignments and supports both oh-my-openagent.jsonc and oh-my-opencode.jsonc",
+          }),
+        );
       default:
         return t("providerPreset.hint", {
-          defaultValue: "选择预设后可继续调整下方字段。",
+          defaultValue:
+            "You can continue to adjust the fields below after selecting a preset.",
         });
     }
   };
@@ -349,6 +438,33 @@ export function ProviderPresetSelector({
             <Search className="size-4" />
           </Button>
 
+          {hasSponsoredPresets && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={t("providerPreset.hideSponsoredAriaLabel", {
+                defaultValue: "Hide sponsored presets",
+              })}
+              aria-pressed={hideSponsored}
+              onClick={toggleHideSponsored}
+              title={
+                hideSponsored
+                  ? t("providerPreset.showSponsoredTooltip", {
+                      defaultValue: "Show sponsored presets",
+                    })
+                  : t("providerPreset.hideSponsoredTooltip", {
+                      defaultValue: "Hide sponsored presets",
+                    })
+              }
+              className={
+                hideSponsored ? "size-8 bg-accent text-foreground" : "size-8"
+              }
+            >
+              <EyeOff className="size-4" />
+            </Button>
+          )}
+
           <Button
             type="button"
             variant="ghost"
@@ -404,6 +520,9 @@ export function ProviderPresetSelector({
           const isPartner = entry.preset.isPartner;
           const isPrimePartner = entry.preset.primePartner;
           const presetCategory = entry.preset.category ?? "others";
+          const categoryLabel =
+            presetCategoryLabels[presetCategory] ?? t("providerPreset.other");
+          const sponsored = isSponsoredPreset(entry.preset);
           return (
             <button
               key={entry.id}
@@ -412,9 +531,11 @@ export function ProviderPresetSelector({
               className={`${getPresetButtonClass(isSelected, entry.preset)} relative`}
               style={getPresetButtonStyle(isSelected, entry.preset)}
               title={
-                presetCategoryLabels[presetCategory] ??
-                t("providerPreset.other")
+                sponsored
+                  ? `${categoryLabel} · ${sponsoredTooltip}`
+                  : categoryLabel
               }
+              data-sponsored={sponsored ? "true" : undefined}
             >
               {renderPresetIcon(entry.preset)}
               <span className="truncate">
@@ -447,7 +568,8 @@ export function ProviderPresetSelector({
               onClick={() => onUniversalPresetSelect(preset)}
               className="inline-flex items-center justify-start gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-accent text-muted-foreground hover:bg-accent/80 relative w-full"
               title={t("universalProvider.hint", {
-                defaultValue: "跨应用统一配置，自动同步到 Claude/Codex/Gemini",
+                defaultValue:
+                  "Cross-app unified config, auto-sync to Claude/Codex/Gemini",
               })}
             >
               <ProviderIcon
@@ -468,13 +590,13 @@ export function ProviderPresetSelector({
               onClick={onManageUniversalProviders}
               className="inline-flex items-center justify-start gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-accent text-muted-foreground hover:bg-accent/80 w-full"
               title={t("universalProvider.manage", {
-                defaultValue: "管理统一供应商",
+                defaultValue: "Manage",
               })}
             >
               <Settings2 className="h-4 w-4 flex-shrink-0" />
               <span className="truncate">
                 {t("universalProvider.manage", {
-                  defaultValue: "管理",
+                  defaultValue: "Manage",
                 })}
               </span>
             </button>
@@ -483,6 +605,27 @@ export function ProviderPresetSelector({
       )}
 
       <p className="text-xs text-muted-foreground">{getCategoryHint()}</p>
+
+      {hasSponsoredPresets && (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="sponsor-disclosure"
+        >
+          {t("providerPreset.sponsorDisclosure", {
+            defaultValue:
+              "Presets marked with a star or heart are sponsored placements; their sign-up links may earn CC Switch a referral commission.",
+          })}{" "}
+          <button
+            type="button"
+            onClick={openSponsorPolicy}
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            {t("providerPreset.sponsorPolicyLink", {
+              defaultValue: "Sponsor policy",
+            })}
+          </button>
+        </p>
+      )}
     </div>
   );
 }

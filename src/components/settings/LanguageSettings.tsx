@@ -1,5 +1,4 @@
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { SegmentedControl } from "@/components/common/SegmentedControl";
 import { useTranslation } from "react-i18next";
 
 type LanguageOption = "zh" | "zh-TW" | "en" | "ja";
@@ -20,48 +19,20 @@ export function LanguageSettings({ value, onChange }: LanguageSettingsProps) {
           {t("settings.languageHint")}
         </p>
       </header>
-      <div className="inline-flex gap-1 rounded-md border border-border-default bg-background p-1">
-        <LanguageButton active={value === "zh"} onClick={() => onChange("zh")}>
-          {t("settings.languageOptionChinese")}
-        </LanguageButton>
-        <LanguageButton
-          active={value === "zh-TW"}
-          onClick={() => onChange("zh-TW")}
-        >
-          {t("settings.languageOptionTraditionalChinese")}
-        </LanguageButton>
-        <LanguageButton active={value === "en"} onClick={() => onChange("en")}>
-          {t("settings.languageOptionEnglish")}
-        </LanguageButton>
-        <LanguageButton active={value === "ja"} onClick={() => onChange("ja")}>
-          {t("settings.languageOptionJapanese")}
-        </LanguageButton>
-      </div>
+      <SegmentedControl
+        ariaLabel={t("settings.language")}
+        value={value}
+        onChange={(next) => onChange(next)}
+        options={[
+          { value: "zh", label: t("settings.languageOptionChinese") },
+          {
+            value: "zh-TW",
+            label: t("settings.languageOptionTraditionalChinese"),
+          },
+          { value: "en", label: t("settings.languageOptionEnglish") },
+          { value: "ja", label: t("settings.languageOptionJapanese") },
+        ]}
+      />
     </section>
-  );
-}
-
-interface LanguageButtonProps {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}
-
-function LanguageButton({ active, onClick, children }: LanguageButtonProps) {
-  return (
-    <Button
-      type="button"
-      onClick={onClick}
-      size="sm"
-      variant={active ? "default" : "ghost"}
-      className={cn(
-        "min-w-[96px]",
-        active
-          ? "shadow-sm"
-          : "text-muted-foreground hover:text-foreground hover:bg-muted",
-      )}
-    >
-      {children}
-    </Button>
   );
 }

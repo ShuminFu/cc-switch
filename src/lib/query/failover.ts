@@ -1,29 +1,107 @@
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { ProviderHealth } from "@/types/proxy";
 import { failoverApi } from "@/lib/api/failover";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { getAppLabel } from "@/config/proxyApps";
+import { useCachedProxyRunning } from "./proxy";
+import { queryKeys } from "./keys";
+
+/**
+ * Health / circuit-breaker state only changes while the proxy handles requests,
+ * so poll only while the cached proxy status says it is running. Intervals
+ * pause while the window is hidden (refetchIntervalInBackground: false).
+ */
+const HEALTH_REFETCH_MS = 5000;
 
 // ========== 熔断器 Hooks ==========
 
 /**
  * 获取供应商健康状态
  */
-export function useProviderHealth(providerId: string, appType: string) {
+export function useProviderHealth(
+  providerId: string,
+  appType: string,
+  enabled = true,
+) {
+  const proxyRunning = useCachedProxyRunning();
   return useQuery({
-    queryKey: ["providerHealth", providerId, appType],
+    queryKey: queryKeys.failover.providerHealth(providerId, appType),
     queryFn: () => failoverApi.getProviderHealth(providerId, appType),
-    enabled: !!providerId && !!appType,
-    refetchInterval: 5000, // 每 5 秒刷新一次
+    enabled: enabled && !!providerId && !!appType,
+    refetchInterval: proxyRunning ? HEALTH_REFETCH_MS : false,
+    refetchIntervalInBackground: false,
     retry: false,
   });
 }
 
+const EMPTY_HEALTH = new Map<string, ProviderHealth>();
+
+function indexHealth(entries: ProviderHealth[]): Map<string, ProviderHealth> {
+  return new Map(entries.map((entry) => [entry.provider_id, entry]));
+}
+
 /**
- * 重置熔断器
- *
- * 重置后后端会检查是否应该切回优先级更高的供应商，
- * 因此需要同时刷新供应商列表和代理状态。
+ * Health of several providers of one app through one batched IPC call
+ * (`get_providers_health`), keyed by provider id. The provider list uses this
+ * instead of one poller per card, so the IPC rate no longer grows with the
+ * number of cards (FE-ARCH-09).
+ */
+export function useProvidersHealth(
+  appType: string,
+  providerIds: readonly string[],
+  enabled = true,
+): Map<string, ProviderHealth> {
+  const proxyRunning = useCachedProxyRunning();
+  const ids = useMemo(() => [...providerIds].sort(), [providerIds]);
+  const { data } = useQuery({
+    queryKey: queryKeys.failover.providersHealth(appType, ids),
+    queryFn: () => failoverApi.getProvidersHealth(appType, ids),
+    enabled: enabled && ids.length > 0 && !!appType,
+    refetchInterval: proxyRunning ? HEALTH_REFETCH_MS : false,
+    refetchIntervalInBackground: false,
+    retry: false,
+    select: indexHealth,
+  });
+  return data ?? EMPTY_HEALTH;
+}
+
+function healthRecord(
+  entries: ProviderHealth[],
+): Record<string, ProviderHealth> {
+  return Object.fromEntries(entries.map((entry) => [entry.provider_id, entry]));
+}
+
+/**
+ * Same batched query as {@link useProvidersHealth} (one shared cache entry per
+ * app and id set), exposed as a query result whose data is a record keyed by
+ * provider id, for the failover queue views (FE-UI-22). Keeps the previous
+ * data while the id set changes.
+ */
+export function useProvidersHealthMap(
+  appType: string,
+  providerIds: readonly string[],
+) {
+  const proxyRunning = useCachedProxyRunning();
+  const ids = useMemo(() => [...providerIds].sort(), [providerIds]);
+  return useQuery({
+    queryKey: queryKeys.failover.providersHealth(appType, ids),
+    queryFn: () => failoverApi.getProvidersHealth(appType, ids),
+    enabled: !!appType && ids.length > 0,
+    refetchInterval: proxyRunning ? HEALTH_REFETCH_MS : false,
+    refetchIntervalInBackground: false,
+    retry: false,
+    select: healthRecord,
+    placeholderData: (previousData) => previousData,
+  });
+}
+
+// ========== 故障转移队列 Hooks（新） ==========
+
+/**
+ * 获取故障转移队列
  */
 export function useResetCircuitBreaker() {
   const queryClient = useQueryClient();
@@ -39,64 +117,29 @@ export function useResetCircuitBreaker() {
     onSuccess: (_, variables) => {
       // 刷新健康状态
       queryClient.invalidateQueries({
-        queryKey: ["providerHealth", variables.providerId, variables.appType],
+        queryKey: queryKeys.failover.providerHealth(
+          variables.providerId,
+          variables.appType,
+        ),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.failover.providersHealthByApp(variables.appType),
       });
       // 刷新供应商列表（因为可能发生了自动恢复切换）
       queryClient.invalidateQueries({
-        queryKey: ["providers", variables.appType],
+        queryKey: queryKeys.providers.byApp(variables.appType),
       });
       // 刷新代理状态（更新 active_targets）
       queryClient.invalidateQueries({
-        queryKey: ["proxyStatus"],
+        queryKey: queryKeys.proxy.status,
       });
     },
   });
 }
 
-/**
- * 获取熔断器配置
- */
-export function useCircuitBreakerConfig() {
-  return useQuery({
-    queryKey: ["circuitBreakerConfig"],
-    queryFn: () => failoverApi.getCircuitBreakerConfig(),
-  });
-}
-
-/**
- * 更新熔断器配置
- */
-export function useUpdateCircuitBreakerConfig() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: failoverApi.updateCircuitBreakerConfig,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["circuitBreakerConfig"] });
-    },
-  });
-}
-
-/**
- * 获取熔断器统计信息
- */
-export function useCircuitBreakerStats(providerId: string, appType: string) {
-  return useQuery({
-    queryKey: ["circuitBreakerStats", providerId, appType],
-    queryFn: () => failoverApi.getCircuitBreakerStats(providerId, appType),
-    enabled: !!providerId && !!appType,
-    refetchInterval: 5000, // 每 5 秒刷新一次
-  });
-}
-
-// ========== 故障转移队列 Hooks（新） ==========
-
-/**
- * 获取故障转移队列
- */
 export function useFailoverQueue(appType: string) {
   return useQuery({
-    queryKey: ["failoverQueue", appType],
+    queryKey: queryKeys.failover.queue(appType),
     queryFn: () => failoverApi.getFailoverQueue(appType),
     enabled: !!appType,
   });
@@ -107,7 +150,7 @@ export function useFailoverQueue(appType: string) {
  */
 export function useAvailableProvidersForFailover(appType: string) {
   return useQuery({
-    queryKey: ["availableProvidersForFailover", appType],
+    queryKey: queryKeys.failover.availableProviders(appType),
     queryFn: () => failoverApi.getAvailableProvidersForFailover(appType),
     enabled: !!appType,
   });
@@ -129,13 +172,13 @@ export function useAddToFailoverQueue() {
     }) => failoverApi.addToFailoverQueue(appType, providerId),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
-        queryKey: ["failoverQueue", variables.appType],
+        queryKey: queryKeys.failover.queue(variables.appType),
       });
       queryClient.invalidateQueries({
-        queryKey: ["availableProvidersForFailover", variables.appType],
+        queryKey: queryKeys.failover.availableProviders(variables.appType),
       });
       queryClient.invalidateQueries({
-        queryKey: ["providers", variables.appType],
+        queryKey: queryKeys.providers.byApp(variables.appType),
       });
     },
   });
@@ -157,25 +200,30 @@ export function useRemoveFromFailoverQueue() {
     }) => failoverApi.removeFromFailoverQueue(appType, providerId),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
-        queryKey: ["failoverQueue", variables.appType],
+        queryKey: queryKeys.failover.queue(variables.appType),
       });
       queryClient.invalidateQueries({
-        queryKey: ["availableProvidersForFailover", variables.appType],
+        queryKey: queryKeys.failover.availableProviders(variables.appType),
       });
       queryClient.invalidateQueries({
-        queryKey: ["providers", variables.appType],
+        queryKey: queryKeys.providers.byApp(variables.appType),
       });
       // 清除该供应商的健康状态缓存（退出队列后不再需要健康监控）
       queryClient.invalidateQueries({
-        queryKey: ["providerHealth", variables.providerId, variables.appType],
+        queryKey: queryKeys.failover.providerHealth(
+          variables.providerId,
+          variables.appType,
+        ),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.failover.providersHealthByApp(variables.appType),
       });
       // 清除该供应商的熔断器统计缓存
       queryClient.invalidateQueries({
-        queryKey: [
-          "circuitBreakerStats",
+        queryKey: queryKeys.failover.circuitBreakerStats(
           variables.providerId,
           variables.appType,
-        ],
+        ),
       });
     },
   });
@@ -188,7 +236,7 @@ export function useRemoveFromFailoverQueue() {
  */
 export function useAutoFailoverEnabled(appType: string) {
   return useQuery({
-    queryKey: ["autoFailoverEnabled", appType],
+    queryKey: queryKeys.failover.autoEnabled(appType),
     queryFn: () => failoverApi.getAutoFailoverEnabled(appType),
     // 默认值为 false（与后端保持一致）
     placeholderData: false,
@@ -209,37 +257,33 @@ export function useSetAutoFailoverEnabled() {
     // 乐观更新
     onMutate: async ({ appType, enabled }) => {
       await queryClient.cancelQueries({
-        queryKey: ["autoFailoverEnabled", appType],
+        queryKey: queryKeys.failover.autoEnabled(appType),
       });
       const previousValue = queryClient.getQueryData<boolean>([
         "autoFailoverEnabled",
         appType,
       ]);
 
-      queryClient.setQueryData(["autoFailoverEnabled", appType], enabled);
+      queryClient.setQueryData(
+        queryKeys.failover.autoEnabled(appType),
+        enabled,
+      );
 
       return { previousValue, appType };
     },
 
     onSuccess: (_data, variables) => {
-      const appLabel =
-        variables.appType === "claude"
-          ? "Claude"
-          : variables.appType === "codex"
-            ? "Codex"
-            : variables.appType === "grokbuild"
-              ? "Grok Build"
-              : "Gemini";
+      const appLabel = getAppLabel(variables.appType);
 
       toast.success(
         variables.enabled
           ? t("failover.enabled", {
               app: appLabel,
-              defaultValue: `${appLabel} 故障转移已启用`,
+              defaultValue: "{{app}} failover enabled",
             })
           : t("failover.disabled", {
               app: appLabel,
-              defaultValue: `${appLabel} 故障转移已关闭`,
+              defaultValue: "{{app}} failover disabled",
             }),
         { closeButton: true },
       );
@@ -249,18 +293,18 @@ export function useSetAutoFailoverEnabled() {
     onError: (error: Error, _variables, context) => {
       if (context?.previousValue !== undefined) {
         queryClient.setQueryData(
-          ["autoFailoverEnabled", context.appType],
+          queryKeys.failover.autoEnabled(context.appType),
           context.previousValue,
         );
       }
 
       const detail =
         extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
+        t("common.unknown", { defaultValue: "Unknown" });
       toast.error(
         t("failover.toggleFailed", {
           detail,
-          defaultValue: `操作失败: ${detail}`,
+          defaultValue: "Operation failed: {{detail}}",
         }),
       );
     },
@@ -268,22 +312,22 @@ export function useSetAutoFailoverEnabled() {
     // 无论成功失败，都重新获取
     onSettled: (_, __, variables) => {
       queryClient.invalidateQueries({
-        queryKey: ["autoFailoverEnabled", variables.appType],
+        queryKey: queryKeys.failover.autoEnabled(variables.appType),
       });
       // 启用/关闭故障转移可能触发：
       // - 立即切到队列 P1（当前供应商变化）
       // - 队列为空时自动把当前供应商加入队列（队列内容变化）
       queryClient.invalidateQueries({
-        queryKey: ["failoverQueue", variables.appType],
+        queryKey: queryKeys.failover.queue(variables.appType),
       });
       queryClient.invalidateQueries({
-        queryKey: ["availableProvidersForFailover", variables.appType],
+        queryKey: queryKeys.failover.availableProviders(variables.appType),
       });
       queryClient.invalidateQueries({
-        queryKey: ["providers", variables.appType],
+        queryKey: queryKeys.providers.byApp(variables.appType),
       });
       queryClient.invalidateQueries({
-        queryKey: ["proxyStatus"],
+        queryKey: queryKeys.proxy.status,
       });
     },
   });

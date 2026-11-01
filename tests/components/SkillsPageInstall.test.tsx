@@ -166,10 +166,10 @@ describe("SkillsPage - skills.sh install (regression)", () => {
 
     // Type a query and submit
     const input = screen.getByPlaceholderText(
-      "skills.skillssh.searchPlaceholder",
+      "Search skills.sh (min 2 chars)...",
     );
     await user.type(input, "agent");
-    await user.click(screen.getByRole("button", { name: "skills.search" }));
+    await user.click(screen.getByRole("button", { name: "Search Skills" }));
 
     // Wait for both cards to render
     await waitFor(() => {
@@ -218,12 +218,12 @@ describe("SkillsPage - skills.sh install (regression)", () => {
 
     await user.click(screen.getByRole("button", { name: /skills\.sh/i }));
     const input = screen.getByPlaceholderText(
-      "skills.skillssh.searchPlaceholder",
+      "Search skills.sh (min 2 chars)...",
     );
     await user.type(input, "figma");
 
     const searchButton = screen.getByRole("button", {
-      name: "skills.search",
+      name: "Search Skills",
     });
     await user.click(searchButton);
 
@@ -257,12 +257,12 @@ describe("SkillsPage - skills.sh install (regression)", () => {
 
     await user.click(screen.getByRole("button", { name: /skills\.sh/i }));
     const input = screen.getByPlaceholderText(
-      "skills.skillssh.searchPlaceholder",
+      "Search skills.sh (min 2 chars)...",
     );
     await user.type(input, "figma");
 
     const searchButton = screen.getByRole("button", {
-      name: "skills.search",
+      name: "Search Skills",
     });
     await user.click(searchButton);
 
@@ -274,7 +274,7 @@ describe("SkillsPage - skills.sh install (regression)", () => {
     await user.type(input, "react");
     await user.click(searchButton);
 
-    expect(screen.getByText("skills.skillssh.loading")).toBeInTheDocument();
+    expect(screen.getByText("Searching skills.sh...")).toBeInTheDocument();
   });
 
   it("reports the effective skills.sh source to parent chrome", async () => {
@@ -297,7 +297,7 @@ describe("SkillsPage - skills.sh install (regression)", () => {
       expect(onSourceChange).toHaveBeenCalledWith("repos");
     });
     expect(
-      screen.getByPlaceholderText("skills.searchPlaceholder"),
+      screen.getByPlaceholderText("Search skill name or repo..."),
     ).toBeVisible();
   });
 
@@ -320,9 +320,7 @@ describe("SkillsPage - skills.sh install (regression)", () => {
       <SkillsPage initialApp="claude" onSourceChange={onSourceChange} />,
     );
 
-    await user.click(
-      screen.getByRole("button", { name: "skills.searchSource.repos" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Repos" }));
 
     expect(screen.getByText("Repo Skill")).toBeInTheDocument();
     expect(onSourceChange).toHaveBeenCalledWith("repos");

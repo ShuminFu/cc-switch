@@ -1,0 +1,9 @@
+{
+  "id": "msg_zero",
+  "type": "message",
+  "model": "claude-x",
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0
+  }
+}

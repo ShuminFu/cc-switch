@@ -1,12 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { omoApi, omoSlimApi } from "@/lib/api/omo";
+import { queryKeys } from "./keys";
 
 // ── Factory ────────────────────────────────────────────────────
 
-function createOmoQueryKeys(prefix: string) {
+function createOmoQueryKeys(variant: "omo" | "omo-slim") {
+  const registry = variant === "omo" ? queryKeys.omo : queryKeys.omoSlim;
   return {
-    all: [prefix] as const,
-    currentProviderId: () => [prefix, "current-provider-id"] as const,
+    all: registry.all,
+    currentProviderId: () => registry.currentProviderId,
   };
 }
 
@@ -17,7 +19,10 @@ function createOmoQueryHooks(
   const keys = createOmoQueryKeys(variant);
 
   function invalidateAll(queryClient: ReturnType<typeof useQueryClient>) {
-    queryClient.invalidateQueries({ queryKey: ["providers"] });
+    // OMO / OMO Slim providers only exist for OpenCode.
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.providers.byApp("opencode"),
+    });
     queryClient.invalidateQueries({ queryKey: keys.currentProviderId() });
   }
 

@@ -6,14 +6,12 @@
 use super::types::RectifierConfig;
 use serde_json::Value;
 
-/// 最大 thinking budget tokens
-const MAX_THINKING_BUDGET: u64 = 32000;
+/// Smallest budget Anthropic accepts (`budget_tokens >= 1024`).
+const MIN_THINKING_BUDGET: u64 = 1024;
 
-/// 最大 max_tokens 值
-const MAX_TOKENS_VALUE: u64 = 64000;
-
-/// max_tokens 必须大于 budget_tokens
-const MIN_MAX_TOKENS_FOR_BUDGET: u64 = MAX_THINKING_BUDGET + 1;
+/// `max_tokens` used when the request carries none. Accepted by every current
+/// Claude model and virtually all gateways (same default as the Codex bridge).
+const DEFAULT_MAX_TOKENS: u64 = 8192;
 
 /// Budget 整流结果
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -72,45 +70,65 @@ pub fn should_rectify_thinking_budget(
     false
 }
 
-/// 对请求体执行 budget 整流
-///
-/// 整流动作：
-/// - `thinking.type = "enabled"`
-/// - `thinking.budget_tokens = 32000`
-/// - 如果 `max_tokens < 32001`，设为 `64000`
+/// 对请求体执行 budget 整流（无 provider 输出上限）。
+#[cfg(test)]
 pub fn rectify_thinking_budget(body: &mut Value) -> BudgetRectifyResult {
+    rectify_thinking_budget_with_ceiling(body, None)
+}
+
+/// 对请求体执行 budget 整流 (PROXY-32)
+///
+/// 整流动作只做满足约束所需的最小改动：
+/// - `thinking.type = "enabled"`
+/// - `thinking.budget_tokens = max(1024, requested)`（不再一律抬到 32000）
+/// - `max_tokens = max(existing, budget + 1)`（缺失时取 max(8192, budget + 1)）
+/// - 配置了 provider 输出上限 `max_output_tokens` 时，`max_tokens` 不超过上限，
+///   budget 相应收缩到上限以内；上限低于 1025 时无法满足约束，不改写。
+pub fn rectify_thinking_budget_with_ceiling(
+    body: &mut Value,
+    max_output_tokens: Option<u64>,
+) -> BudgetRectifyResult {
     let before = snapshot_budget(body);
+    let unchanged = |before: BudgetRectifySnapshot| BudgetRectifyResult {
+        applied: false,
+        before: before.clone(),
+        after: before,
+    };
 
     // 与 CCH 对齐：adaptive 请求不改写
     if before.thinking_type.as_deref() == Some("adaptive") {
-        return BudgetRectifyResult {
-            applied: false,
-            before: before.clone(),
-            after: before,
-        };
+        return unchanged(before);
+    }
+
+    let ceiling = max_output_tokens.filter(|c| *c > 0);
+    if ceiling.is_some_and(|c| c <= MIN_THINKING_BUDGET) {
+        return unchanged(before);
+    }
+
+    let mut budget = before
+        .thinking_budget_tokens
+        .unwrap_or(MIN_THINKING_BUDGET)
+        .max(MIN_THINKING_BUDGET);
+    let mut max_tokens = match before.max_tokens {
+        Some(existing) => existing.max(budget + 1),
+        None => DEFAULT_MAX_TOKENS.max(budget + 1),
+    };
+    if let Some(ceiling) = ceiling {
+        max_tokens = max_tokens.min(ceiling);
+        budget = budget.min(max_tokens - 1);
     }
 
     // 与 CCH 对齐：缺少/非法 thinking 时自动创建后再整流
     if !body.get("thinking").is_some_and(Value::is_object) {
         body["thinking"] = Value::Object(serde_json::Map::new());
     }
-
     let Some(thinking) = body.get_mut("thinking").and_then(|t| t.as_object_mut()) else {
-        return BudgetRectifyResult {
-            applied: false,
-            before: before.clone(),
-            after: before,
-        };
+        return unchanged(before);
     };
-
     thinking.insert("type".to_string(), Value::String("enabled".to_string()));
-    thinking.insert(
-        "budget_tokens".to_string(),
-        Value::Number(MAX_THINKING_BUDGET.into()),
-    );
-
-    if before.max_tokens.is_none() || before.max_tokens < Some(MIN_MAX_TOKENS_FOR_BUDGET) {
-        body["max_tokens"] = Value::Number(MAX_TOKENS_VALUE.into());
+    thinking.insert("budget_tokens".to_string(), Value::Number(budget.into()));
+    if before.max_tokens != Some(max_tokens) {
+        body["max_tokens"] = Value::Number(max_tokens.into());
     }
 
     let after = snapshot_budget(body);
@@ -248,15 +266,13 @@ mod tests {
         assert_eq!(result.before.thinking_type.as_deref(), Some("enabled"));
         assert_eq!(result.after.thinking_type.as_deref(), Some("enabled"));
         assert_eq!(result.before.thinking_budget_tokens, Some(512));
-        assert_eq!(
-            result.after.thinking_budget_tokens,
-            Some(MAX_THINKING_BUDGET)
-        );
+        // PROXY-32: raised to the 1024 minimum, not to a hard-coded 32000.
+        assert_eq!(result.after.thinking_budget_tokens, Some(1024));
         assert_eq!(result.before.max_tokens, Some(1024));
-        assert_eq!(result.after.max_tokens, Some(MAX_TOKENS_VALUE));
+        assert_eq!(result.after.max_tokens, Some(1025));
         assert_eq!(body["thinking"]["type"], "enabled");
-        assert_eq!(body["thinking"]["budget_tokens"], MAX_THINKING_BUDGET);
-        assert_eq!(body["max_tokens"], MAX_TOKENS_VALUE);
+        assert_eq!(body["thinking"]["budget_tokens"], 1024);
+        assert_eq!(body["max_tokens"], 1025);
     }
 
     #[test]
@@ -304,14 +320,11 @@ mod tests {
         assert!(result.applied);
         assert_eq!(result.before.thinking_type, None);
         assert_eq!(result.after.thinking_type.as_deref(), Some("enabled"));
-        assert_eq!(
-            result.after.thinking_budget_tokens,
-            Some(MAX_THINKING_BUDGET)
-        );
-        assert_eq!(result.after.max_tokens, Some(MAX_TOKENS_VALUE));
+        assert_eq!(result.after.thinking_budget_tokens, Some(1024));
+        assert_eq!(result.after.max_tokens, Some(1025));
         assert_eq!(body["thinking"]["type"], "enabled");
-        assert_eq!(body["thinking"]["budget_tokens"], MAX_THINKING_BUDGET);
-        assert_eq!(body["max_tokens"], MAX_TOKENS_VALUE);
+        assert_eq!(body["thinking"]["budget_tokens"], 1024);
+        assert_eq!(body["max_tokens"], 1025);
     }
 
     #[test]
@@ -325,8 +338,8 @@ mod tests {
 
         assert!(result.applied);
         assert_eq!(result.before.max_tokens, None);
-        assert_eq!(result.after.max_tokens, Some(MAX_TOKENS_VALUE));
-        assert_eq!(body["max_tokens"], MAX_TOKENS_VALUE);
+        assert_eq!(result.after.max_tokens, Some(DEFAULT_MAX_TOKENS));
+        assert_eq!(body["max_tokens"], DEFAULT_MAX_TOKENS);
     }
 
     #[test]
@@ -343,8 +356,8 @@ mod tests {
         assert_eq!(result.before.thinking_type.as_deref(), Some("disabled"));
         assert_eq!(result.after.thinking_type.as_deref(), Some("enabled"));
         assert_eq!(body["thinking"]["type"], "enabled");
-        assert_eq!(body["thinking"]["budget_tokens"], MAX_THINKING_BUDGET);
-        assert_eq!(body["max_tokens"], MAX_TOKENS_VALUE);
+        assert_eq!(body["thinking"]["budget_tokens"], 1024);
+        assert_eq!(body["max_tokens"], 1025);
     }
 
     #[test]
@@ -361,5 +374,45 @@ mod tests {
         assert_eq!(result.before, result.after);
         assert_eq!(body["thinking"]["budget_tokens"], 32000);
         assert_eq!(body["max_tokens"], 64001);
+    }
+
+    #[test]
+    fn test_rectify_budget_keeps_a_valid_requested_budget() {
+        let mut body = json!({
+            "thinking": { "type": "enabled", "budget_tokens": 2048 },
+            "max_tokens": 1500
+        });
+        let result = rectify_thinking_budget(&mut body);
+        assert!(result.applied);
+        assert_eq!(body["thinking"]["budget_tokens"], 2048);
+        assert_eq!(body["max_tokens"], 2049);
+    }
+
+    #[test]
+    fn test_rectify_budget_respects_provider_output_ceiling() {
+        let mut body = json!({
+            "thinking": { "type": "enabled", "budget_tokens": 16000 },
+            "max_tokens": 20000
+        });
+        let result = rectify_thinking_budget_with_ceiling(&mut body, Some(8192));
+        assert!(result.applied);
+        assert_eq!(body["max_tokens"], 8192);
+        assert_eq!(body["thinking"]["budget_tokens"], 8191);
+
+        let mut no_max = json!({ "thinking": { "type": "enabled", "budget_tokens": 10 } });
+        rectify_thinking_budget_with_ceiling(&mut no_max, Some(4096));
+        assert_eq!(no_max["max_tokens"], 4096);
+        assert_eq!(no_max["thinking"]["budget_tokens"], 1024);
+    }
+
+    #[test]
+    fn test_rectify_budget_gives_up_below_the_minimum_ceiling() {
+        let mut body = json!({
+            "thinking": { "type": "enabled", "budget_tokens": 10 },
+            "max_tokens": 512
+        });
+        let result = rectify_thinking_budget_with_ceiling(&mut body, Some(1000));
+        assert!(!result.applied);
+        assert_eq!(body["thinking"]["budget_tokens"], 10);
     }
 }

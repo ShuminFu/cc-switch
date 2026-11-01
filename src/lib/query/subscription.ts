@@ -8,13 +8,11 @@ import { resolveManagedAccountId } from "@/lib/authBinding";
 import { PROVIDER_TYPES } from "@/config/constants";
 import { resolveDisplayUsage, type LastGoodSnapshot } from "./queries";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { queryKeys } from "./keys";
 
 const REFETCH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
-export const subscriptionKeys = {
-  all: ["subscription"] as const,
-  quota: (appId: AppId) => [...subscriptionKeys.all, "quota", appId] as const,
-};
+export const subscriptionKeys = queryKeys.subscription;
 
 /**
  * reject 且无可展示值时的失败占位：首次查询就失败（data 为 undefined），或
@@ -126,7 +124,7 @@ export function useCodexOauthQuota(
   const { enabled = true, autoQuery = false } = options;
   const accountId = resolveManagedAccountId(meta, PROVIDER_TYPES.CODEX_OAUTH);
   const query = useQuery({
-    queryKey: ["codex_oauth", "quota", accountId ?? "default"],
+    queryKey: queryKeys.codexOauth.quota(accountId),
     queryFn: () => subscriptionApi.getCodexOauthQuota(accountId),
     enabled,
     refetchInterval: autoQuery ? REFETCH_INTERVAL : false,

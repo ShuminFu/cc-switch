@@ -14,7 +14,11 @@ import {
   type SkillsShSearchResult,
 } from "@/lib/api/skills";
 import type { AppId } from "@/lib/api/types";
-import { mergeImportedSkills } from "@/hooks/useSkills.helpers";
+import {
+  mergeImportedSkills,
+  upsertInstalledSkill,
+} from "@/hooks/useSkills.helpers";
+import { queryKeys } from "@/lib/query/keys";
 
 /**
  * 查询所有已安装的 Skills
@@ -23,7 +27,7 @@ import { mergeImportedSkills } from "@/hooks/useSkills.helpers";
  */
 export function useInstalledSkills() {
   return useQuery({
-    queryKey: ["skills", "installed"],
+    queryKey: queryKeys.skills.installed,
     queryFn: () => skillsApi.getInstalled(),
     staleTime: Infinity,
     placeholderData: keepPreviousData,
@@ -32,7 +36,7 @@ export function useInstalledSkills() {
 
 export function useSkillBackups() {
   return useQuery({
-    queryKey: ["skills", "backups"],
+    queryKey: queryKeys.skills.backups,
     queryFn: () => skillsApi.getBackups(),
     enabled: false,
   });
@@ -43,7 +47,7 @@ export function useDeleteSkillBackup() {
   return useMutation({
     mutationFn: (backupId: string) => skillsApi.deleteBackup(backupId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "backups"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.skills.backups });
     },
   });
 }
@@ -55,7 +59,7 @@ export function useDeleteSkillBackup() {
  */
 export function useDiscoverableSkills() {
   return useQuery({
-    queryKey: ["skills", "discoverable"],
+    queryKey: queryKeys.skills.discoverable,
     queryFn: () => skillsApi.discoverAvailable(),
     staleTime: Infinity,
     placeholderData: keepPreviousData,
@@ -76,34 +80,13 @@ export function useInstallSkill() {
       skill: DiscoverableSkill;
       currentApp: AppId;
     }) => skillsApi.installUnified(skill, currentApp),
-    onSuccess: (installedSkill, _vars, _ctx) => {
-      const { skill } = _vars;
-      // 直接更新 installed 缓存
+    onSuccess: (installedSkill) => {
+      // Upsert by id: a reinstall/repair or a double click must not add a
+      // second entry with the same id (FE-ARCH-44). Discoverable skills carry
+      // no `installed` flag; install state is derived from this list.
       queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
-        (oldData) => {
-          if (!oldData) return [installedSkill];
-          return [...oldData, installedSkill];
-        },
-      );
-
-      // 更新 discoverable 缓存中对应技能的 installed 状态
-      const installName =
-        skill.directory.split(/[/\\]/).pop()?.toLowerCase() ||
-        skill.directory.toLowerCase();
-      const skillKey = `${installName}:${skill.repoOwner.toLowerCase()}:${skill.repoName.toLowerCase()}`;
-
-      queryClient.setQueryData<DiscoverableSkill[]>(
-        ["skills", "discoverable"],
-        (oldData) => {
-          if (!oldData) return oldData;
-          return oldData.map((s) => {
-            if (s.key === skillKey) {
-              return { ...s, installed: true };
-            }
-            return s;
-          });
-        },
+        queryKeys.skills.installed,
+        (oldData) => upsertInstalledSkill(oldData, installedSkill),
       );
     },
   });
@@ -116,32 +99,11 @@ export function useInstallSkill() {
 export function useUninstallSkill() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, skillKey }: { id: string; skillKey: string }) =>
-      skillsApi
-        .uninstallUnified(id)
-        .then((result) => ({ ...result, skillKey })),
-    onSuccess: ({ skillKey }, _vars) => {
-      // 直接更新 installed 缓存，移除该 skill
+    mutationFn: ({ id }: { id: string }) => skillsApi.uninstallUnified(id),
+    onSuccess: (_result, { id }) => {
       queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
-        (oldData) => {
-          if (!oldData) return oldData;
-          return oldData.filter((s) => s.id !== _vars.id);
-        },
-      );
-
-      // 更新 discoverable 缓存中对应技能的 installed 状态
-      queryClient.setQueryData<DiscoverableSkill[]>(
-        ["skills", "discoverable"],
-        (oldData) => {
-          if (!oldData) return oldData;
-          return oldData.map((s) => {
-            if (s.key === skillKey) {
-              return { ...s, installed: false };
-            }
-            return s;
-          });
-        },
+        queryKeys.skills.installed,
+        (oldData) => oldData?.filter((s) => s.id !== id),
       );
     },
   });
@@ -158,8 +120,8 @@ export function useRestoreSkillBackup() {
       currentApp: AppId;
     }) => skillsApi.restoreBackup(backupId, currentApp),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "installed"] });
-      queryClient.invalidateQueries({ queryKey: ["skills", "backups"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.skills.installed });
+      queryClient.invalidateQueries({ queryKey: queryKeys.skills.backups });
     },
   });
 }
@@ -180,7 +142,7 @@ export function useToggleSkillApp() {
       enabled: boolean;
     }) => skillsApi.toggleApp(id, app, enabled),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "installed"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.skills.installed });
     },
   });
 }
@@ -195,7 +157,7 @@ export function useToggleSkillApp() {
  */
 export function useScanUnmanagedSkills(options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: ["skills", "unmanaged"],
+    queryKey: queryKeys.skills.unmanaged,
     queryFn: () => skillsApi.scanUnmanaged(),
     enabled: options?.enabled ?? false,
     staleTime: 30 * 1000,
@@ -215,11 +177,11 @@ export function useImportSkillsFromApps() {
     onSuccess: (importedSkills) => {
       // 直接更新 installed 缓存
       queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
+        queryKeys.skills.installed,
         (oldData) => mergeImportedSkills(oldData, importedSkills),
       );
       // 刷新 unmanaged 列表（已被导入的应该移除）
-      queryClient.invalidateQueries({ queryKey: ["skills", "unmanaged"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.skills.unmanaged });
     },
   });
 }
@@ -229,7 +191,7 @@ export function useImportSkillsFromApps() {
  */
 export function useSkillRepos() {
   return useQuery({
-    queryKey: ["skills", "repos"],
+    queryKey: queryKeys.skills.repos,
     queryFn: () => skillsApi.getRepos(),
   });
 }
@@ -242,8 +204,10 @@ export function useAddSkillRepo() {
   return useMutation({
     mutationFn: skillsApi.addRepo,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "repos"] });
-      queryClient.invalidateQueries({ queryKey: ["skills", "discoverable"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.skills.repos });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.skills.discoverable,
+      });
     },
   });
 }
@@ -257,8 +221,10 @@ export function useRemoveSkillRepo() {
     mutationFn: ({ owner, name }: { owner: string; name: string }) =>
       skillsApi.removeRepo(owner, name),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "repos"] });
-      queryClient.invalidateQueries({ queryKey: ["skills", "discoverable"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.skills.repos });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.skills.discoverable,
+      });
     },
   });
 }
@@ -280,7 +246,7 @@ export function useInstallSkillsFromZip() {
     onSuccess: (installedSkills) => {
       // 直接更新 installed 缓存
       queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
+        queryKeys.skills.installed,
         (oldData) => {
           if (!oldData) return installedSkills;
           return [...oldData, ...installedSkills];
@@ -297,7 +263,7 @@ export function useInstallSkillsFromZip() {
  */
 export function useCheckSkillUpdates() {
   return useQuery({
-    queryKey: ["skills", "updates"],
+    queryKey: queryKeys.skills.updates,
     queryFn: () => skillsApi.checkUpdates(),
     enabled: false,
     staleTime: 5 * 60 * 1000,
@@ -313,7 +279,7 @@ export function useUpdateSkill() {
     mutationFn: (id: string) => skillsApi.updateSkill(id),
     onSuccess: (updatedSkill) => {
       queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
+        queryKeys.skills.installed,
         (oldData) => {
           if (!oldData) return [updatedSkill];
           return oldData.map((s) =>
@@ -322,7 +288,7 @@ export function useUpdateSkill() {
         },
       );
       queryClient.setQueryData<SkillUpdateInfo[]>(
-        ["skills", "updates"],
+        queryKeys.skills.updates,
         (oldData) => {
           if (!oldData) return oldData;
           return oldData.filter((u) => u.id !== updatedSkill.id);
@@ -344,7 +310,7 @@ export function useSearchSkillsSh(
   offset: number,
 ) {
   return useQuery({
-    queryKey: ["skills", "skillssh", query, limit, offset],
+    queryKey: queryKeys.skills.skillssh(query, limit, offset),
     queryFn: () => skillsApi.searchSkillsSh(query, limit, offset),
     enabled: query.length >= 2,
     staleTime: 5 * 60 * 1000,

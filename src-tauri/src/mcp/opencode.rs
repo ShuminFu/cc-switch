@@ -111,7 +111,8 @@ pub fn convert_to_opencode_format(spec: &Value) -> Result<Value, AppError> {
 ///
 /// Conversion rules:
 /// - `local` → `stdio`, command array → command+args, environment → env
-/// - `remote` → `sse`, url preserved
+/// - `remote` → `http` (streamable HTTP, the current MCP transport; OpenCode
+///   falls back to SSE itself), url preserved
 pub fn convert_from_opencode_format(spec: &Value) -> Result<Value, AppError> {
     let obj = spec
         .as_object()
@@ -150,8 +151,9 @@ pub fn convert_from_opencode_format(spec: &Value) -> Result<Value, AppError> {
             }
         }
         "remote" => {
-            // Convert to "sse" type (default remote protocol)
-            result.insert("type".into(), json!("sse"));
+            // Streamable HTTP is the current MCP remote transport (SSE is
+            // deprecated); importing as "sse" broke such servers in Claude/Codex (CFG-16)
+            result.insert("type".into(), json!("http"));
 
             // Preserve url
             if let Some(url) = obj.get("url") {
@@ -190,11 +192,14 @@ pub fn sync_single_server_to_opencode(
         return Ok(());
     }
 
-    // Convert to OpenCode format
+    // Convert to OpenCode format; keep OpenCode-only keys (timeout, oauth, …)
+    // of an existing entry (CFG-42)
     let opencode_spec = convert_to_opencode_format(server_spec)?;
+    let existing = opencode_config::get_mcp_servers()?;
+    let merged = super::merge::merge_live_json_entry(existing.get(id), opencode_spec);
 
     // Set in OpenCode config
-    opencode_config::set_mcp_server(id, opencode_spec)
+    opencode_config::set_mcp_server(id, merged)
 }
 
 /// Remove a single MCP server from OpenCode live config
@@ -349,7 +354,7 @@ mod tests {
         });
 
         let result = convert_from_opencode_format(&spec).unwrap();
-        assert_eq!(result["type"], "sse");
+        assert_eq!(result["type"], "http");
         assert_eq!(result["url"], "https://example.com/mcp");
         assert_eq!(result["headers"]["Authorization"], "Bearer xxx");
     }

@@ -11,8 +11,8 @@ use cc_switch_lib::{
 mod support;
 use std::collections::HashMap;
 use support::{
-    create_test_state, create_test_state_with_config, enable_codex_official_auth_preservation,
-    ensure_test_home, reset_test_fs, test_mutex,
+    create_disk_test_state_with_config, create_test_state, create_test_state_with_config,
+    enable_codex_official_auth_preservation, ensure_test_home, TestEnv,
 };
 
 fn settings_path(home: &Path) -> PathBuf {
@@ -37,8 +37,7 @@ context_window = 500000
 
 #[test]
 fn grokbuild_import_and_switch_write_live_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
     let live_path = home.join(".grok").join("config.toml");
     std::fs::create_dir_all(live_path.parent().expect("grok config dir"))
@@ -96,8 +95,7 @@ fn grokbuild_import_and_switch_write_live_config() {
 
 #[test]
 fn codex_startup_import_fresh_install_imports_once_and_syncs_current_setting() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let auth = json!({"OPENAI_API_KEY": "fresh-key"});
@@ -171,8 +169,7 @@ fn codex_startup_import_fresh_install_imports_once_and_syncs_current_setting() {
 
 #[test]
 fn codex_startup_import_accepts_config_without_auth_file() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let config_path = get_codex_config_path();
@@ -224,8 +221,7 @@ experimental_bearer_token = "live-key"
 
 #[test]
 fn codex_startup_import_marks_oauth_only_default_official() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let auth = json!({
@@ -263,8 +259,7 @@ command = "echo"
 
 #[test]
 fn codex_startup_import_skips_when_only_official_seed_exists() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let auth = json!({"OPENAI_API_KEY": "fresh-key"});
@@ -312,8 +307,7 @@ fn codex_startup_import_skips_when_only_official_seed_exists() {
 
 #[test]
 fn switch_provider_updates_codex_live_and_state() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     enable_codex_official_auth_preservation();
     let _home = ensure_test_home();
 
@@ -463,8 +457,7 @@ command = "say"
 
 #[test]
 fn switch_provider_missing_provider_returns_error() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
 
     let mut config = MultiAppConfig::default();
     config
@@ -488,8 +481,7 @@ fn switch_provider_missing_provider_returns_error() {
 
 #[test]
 fn switch_provider_updates_claude_live_and_state() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let settings_path = cc_switch_lib::get_claude_settings_path();
@@ -541,7 +533,7 @@ fn switch_provider_updates_claude_live_and_state() {
         );
     }
 
-    let app_state = create_test_state_with_config(&config).expect("create test state");
+    let app_state = create_disk_test_state_with_config(&config).expect("create test state");
 
     switch_provider_test_hook(&app_state, AppType::Claude, "new-provider")
         .expect("switch provider should succeed");
@@ -618,8 +610,7 @@ fn switch_provider_updates_claude_live_and_state() {
 
 #[test]
 fn switch_provider_codex_missing_auth_returns_error_and_keeps_state() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -667,8 +658,7 @@ fn switch_provider_codex_missing_auth_returns_error_and_keeps_state() {
 
 #[test]
 fn import_refuses_live_config_under_proxy_takeover() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     ensure_test_home();
 
     // 接管态 Codex Live：auth 是 PROXY_MANAGED 占位符，不是用户真实配置

@@ -961,23 +961,110 @@ fn parse_gemini_file_json(content: &str) -> GeminiCredentials {
 
 // ── Gemini Token 刷新 ──────────────────────────────────────
 
-/// Gemini OAuth Client 凭据（公开值，来自 Gemini CLI 源码 google-gemini/gemini-cli）
-const GEMINI_OAUTH_CLIENT_ID: &str =
-    "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
-const GEMINI_OAUTH_CLIENT_SECRET: &str = "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";
+/// Gemini CLI OAuth client (SVC-40).
+///
+/// These are the *public* "installed application" client credentials that
+/// the Gemini CLI itself ships with (google-gemini/gemini-cli,
+/// `packages/core/src/code_assist/oauth2.ts`). Google documents that the
+/// secret of an installed-app client is not confidential. Refreshing a token
+/// issued to the Gemini CLI requires the same client, so cc-switch reuses it.
+/// Builds can override both values with the `CC_SWITCH_GEMINI_OAUTH_CLIENT_ID`
+/// / `CC_SWITCH_GEMINI_OAUTH_CLIENT_SECRET` environment variables at compile
+/// time.
+mod gemini_oauth {
+    pub(super) const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+
+    pub(super) fn client_id() -> &'static str {
+        option_env!("CC_SWITCH_GEMINI_OAUTH_CLIENT_ID")
+            .unwrap_or("681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com")
+    }
+
+    pub(super) fn client_secret() -> &'static str {
+        option_env!("CC_SWITCH_GEMINI_OAUTH_CLIENT_SECRET")
+            .unwrap_or("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")
+    }
+}
+
+/// A refreshed Gemini access token kept in memory until shortly before it
+/// expires, so periodic quota polls do not hit the token endpoint every time
+/// (SVC-40).
+#[derive(Clone)]
+struct CachedGeminiToken {
+    /// SHA-256 of the refresh token it was obtained with.
+    refresh_key: String,
+    access_token: String,
+    expires_at: std::time::Instant,
+}
+
+/// Refresh margin: treat a token as expired this long before it really is.
+const GEMINI_TOKEN_EXPIRY_MARGIN: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn gemini_token_cache() -> &'static std::sync::Mutex<Option<CachedGeminiToken>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<Option<CachedGeminiToken>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn refresh_key(refresh_token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(refresh_token.as_bytes()))
+}
+
+fn cached_gemini_token(refresh_token: &str, now: std::time::Instant) -> Option<String> {
+    let key = refresh_key(refresh_token);
+    let cache = gemini_token_cache().lock().ok()?;
+    cache
+        .as_ref()
+        .filter(|c| c.refresh_key == key && now + GEMINI_TOKEN_EXPIRY_MARGIN < c.expires_at)
+        .map(|c| c.access_token.clone())
+}
+
+fn store_gemini_token(
+    refresh_token: &str,
+    access_token: &str,
+    expires_in_secs: u64,
+    now: std::time::Instant,
+) {
+    if let Ok(mut cache) = gemini_token_cache().lock() {
+        *cache = Some(CachedGeminiToken {
+            refresh_key: refresh_key(refresh_token),
+            access_token: access_token.to_string(),
+            expires_at: now + std::time::Duration::from_secs(expires_in_secs),
+        });
+    }
+}
+
+/// Return a valid access token for `refresh_token`, from the cache when
+/// possible, otherwise via `fetch` (which yields `(access_token, expires_in)`).
+async fn gemini_token_with_cache<F, Fut>(refresh_token: &str, fetch: F) -> Option<String>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Option<(String, u64)>>,
+{
+    if let Some(token) = cached_gemini_token(refresh_token, std::time::Instant::now()) {
+        return Some(token);
+    }
+    let (token, expires_in) = fetch().await?;
+    store_gemini_token(refresh_token, &token, expires_in, std::time::Instant::now());
+    Some(token)
+}
 
 /// 使用 refresh_token 刷新 Gemini access token
 ///
 /// Google OAuth access_token 仅有 ~1h 有效期，需要定期用 refresh_token 刷新。
-/// refresh_token 本身不过期（除非用户撤销授权）。
+/// refresh_token 本身不过期（除非用户撤销授权）。结果在内存中缓存到过期前。
 async fn refresh_gemini_token(refresh_token: &str) -> Option<String> {
+    gemini_token_with_cache(refresh_token, || fetch_gemini_token(refresh_token)).await
+}
+
+async fn fetch_gemini_token(refresh_token: &str) -> Option<(String, u64)> {
     let client = crate::proxy::http_client::get();
 
     let resp = client
-        .post("https://oauth2.googleapis.com/token")
+        .post(gemini_oauth::TOKEN_URL)
         .form(&[
-            ("client_id", GEMINI_OAUTH_CLIENT_ID),
-            ("client_secret", GEMINI_OAUTH_CLIENT_SECRET),
+            ("client_id", gemini_oauth::client_id()),
+            ("client_secret", gemini_oauth::client_secret()),
             ("refresh_token", refresh_token),
             ("grant_type", "refresh_token"),
         ])
@@ -991,7 +1078,13 @@ async fn refresh_gemini_token(refresh_token: &str) -> Option<String> {
     }
 
     let body: serde_json::Value = resp.json().await.ok()?;
-    body.get("access_token")?.as_str().map(String::from)
+    let token = body.get("access_token")?.as_str().map(String::from)?;
+    // Google returns `expires_in` (seconds); assume the documented 1 h if absent.
+    let expires_in = body
+        .get("expires_in")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(3600);
+    Some((token, expires_in))
 }
 
 // ── Gemini API 查询 ──────────────────────────────────────
@@ -1356,6 +1449,36 @@ fn now_millis() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn gemini_refresh_is_cached_until_expiry() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = AtomicUsize::new(0);
+        let rt = "refresh-token-for-cache-test";
+        for _ in 0..2 {
+            let token = gemini_token_with_cache(rt, || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Some(("access-1".to_string(), 3600))
+            })
+            .await;
+            assert_eq!(token.as_deref(), Some("access-1"));
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "second query reuses the token"
+        );
+
+        // An almost-expired token is refreshed again.
+        store_gemini_token(rt, "access-old", 30, std::time::Instant::now());
+        let token = gemini_token_with_cache(rt, || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Some(("access-2".to_string(), 3600))
+        })
+        .await;
+        assert_eq!(token.as_deref(), Some("access-2"));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
 
     #[test]
     fn window_seconds_map_to_expected_tier_names() {

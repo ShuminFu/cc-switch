@@ -1,0 +1,70 @@
+name: Deploy GitHub Pages
+
+# Publishes an explicit allowlist of files to https://farion1231.github.io/cc-switch/
+# instead of serving the whole repository root from the branch (CI-32). Today
+# that is only the deep-link generator (deplink.html), linked from the user
+# manual as https://farion1231.github.io/cc-switch/deplink.html, so the URL
+# stays the same.
+#
+# One-time switch for maintainers: Settings → Pages → Build and deployment →
+# Source: "GitHub Actions". Until then this workflow's deploy step fails
+# harmlessly and the branch-root site keeps serving.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deplink.html"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Stage the published files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          cp deplink.html _site/deplink.html
+          cat > _site/index.html <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>CC Switch</title>
+          <meta http-equiv="refresh" content="0; url=https://ccswitch.io">
+          <a href="https://ccswitch.io">ccswitch.io</a> · <a href="deplink.html">Deep link generator</a>
+          HTML
+          touch _site/.nojekyll
+          ls -la _site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

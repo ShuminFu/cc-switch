@@ -81,10 +81,24 @@ impl Database {
                 let endpoints = std::mem::take(&mut meta_clone.custom_endpoints);
 
                 tx.execute(
-                    "INSERT OR REPLACE INTO providers (
+                    // DB-23: an upsert, not REPLACE: REPLACE deletes the parent
+                    // row and cascades to provider_endpoints / provider_health.
+                    "INSERT INTO providers (
                         id, app_type, name, settings_config, website_url, category,
                         created_at, sort_index, notes, icon, icon_color, meta, is_current
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                    ON CONFLICT(id, app_type) DO UPDATE SET
+                        name = excluded.name,
+                        settings_config = excluded.settings_config,
+                        website_url = excluded.website_url,
+                        category = excluded.category,
+                        created_at = excluded.created_at,
+                        sort_index = excluded.sort_index,
+                        notes = excluded.notes,
+                        icon = excluded.icon,
+                        icon_color = excluded.icon_color,
+                        meta = excluded.meta,
+                        is_current = excluded.is_current",
                     params![
                         id,
                         app_type,
@@ -107,7 +121,8 @@ impl Database {
                 for (url, endpoint) in endpoints {
                     tx.execute(
                         "INSERT INTO provider_endpoints (provider_id, app_type, url, added_at)
-                         VALUES (?1, ?2, ?3, ?4)",
+                         VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT(provider_id, app_type, url) DO NOTHING",
                         params![id, app_type, url, endpoint.added_at],
                     )
                     .map_err(|e| AppError::Database(format!("Migrate endpoint failed: {e}")))?;

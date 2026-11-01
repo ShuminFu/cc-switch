@@ -105,12 +105,12 @@ vi.mock("@/components/settings/ImportExportSection", () => ({
     <div>
       <div data-testid="import-status">{status}</div>
       <div data-testid="selected-file">{selectedFile || "none"}</div>
-      <button onClick={onSelectFile}>settings.selectConfigFile</button>
+      <button onClick={onSelectFile}>Select SQL File</button>
       <button onClick={onImport} disabled={!selectedFile || isImporting}>
-        {isImporting ? "settings.importing" : "settings.import"}
+        {isImporting ? "Importing..." : "Import"}
       </button>
-      <button onClick={onExport}>settings.exportConfig</button>
-      <button onClick={onClear}>common.clear</button>
+      <button onClick={onExport}>Export SQL Backup</button>
+      <button onClick={onClear}>Clear</button>
       {errorMessage ? <span>{errorMessage}</span> : null}
     </div>
   ),
@@ -150,12 +150,16 @@ describe("SettingsPage integration", () => {
     await waitFor(() =>
       expect(screen.getByText("language:zh")).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByText("settings.tabAdvanced"));
-    fireEvent.click(screen.getByText("settings.advanced.configDir.title"));
-    const appInput = await screen.findByPlaceholderText(
-      "settings.browsePlaceholderApp",
+    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Configuration Directory"));
+    const appInput = (await screen.findByLabelText(
+      "CC Switch Configuration Directory",
+    )) as HTMLInputElement;
+    // No override: the field is empty and the resolved default is the placeholder.
+    expect(appInput.value).toBe("");
+    await waitFor(() =>
+      expect(appInput.placeholder).toBe("/home/mock/.cc-switch"),
     );
-    expect((appInput as HTMLInputElement).value).toBe("/home/mock/.cc-switch");
   });
 
   it("imports configuration and triggers success callback", async () => {
@@ -166,16 +170,16 @@ describe("SettingsPage integration", () => {
       expect(screen.getByText("language:zh")).toBeInTheDocument(),
     );
 
-    fireEvent.click(screen.getByText("settings.tabAdvanced"));
-    fireEvent.click(screen.getByText("settings.advanced.data.title"));
-    fireEvent.click(screen.getByText("settings.selectConfigFile"));
+    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Data Management"));
+    fireEvent.click(screen.getByText("Select SQL File"));
     await waitFor(() =>
       expect(screen.getByTestId("selected-file").textContent).toContain(
         "/mock/import-settings.json",
       ),
     );
 
-    fireEvent.click(screen.getByText("settings.import"));
+    fireEvent.click(screen.getByText("Import"));
     await waitFor(() => expect(toastSuccessMock).toHaveBeenCalled());
     await waitFor(() => expect(onImportSuccess).toHaveBeenCalled(), {
       timeout: 4000,
@@ -190,21 +194,19 @@ describe("SettingsPage integration", () => {
       expect(screen.getByText("language:zh")).toBeInTheDocument(),
     );
 
-    fireEvent.click(screen.getByText("settings.tabAdvanced"));
-    fireEvent.click(screen.getByText("settings.advanced.configDir.title"));
-    const appInput = await screen.findByPlaceholderText(
-      "settings.browsePlaceholderApp",
+    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Configuration Directory"));
+    const appInput = await screen.findByLabelText(
+      "CC Switch Configuration Directory",
     );
     fireEvent.change(appInput, { target: { value: "/custom/app" } });
-    fireEvent.click(screen.getByText("common.save"));
+    fireEvent.click(screen.getByText("Save"));
 
     await waitFor(() => expect(toastSuccessMock).toHaveBeenCalled());
-    await screen.findByText("settings.restartRequired");
-    fireEvent.click(screen.getByText("settings.restartLater"));
+    await screen.findByText("Restart Required");
+    fireEvent.click(screen.getByText("Restart Later"));
     await waitFor(() =>
-      expect(
-        screen.queryByText("settings.restartRequired"),
-      ).not.toBeInTheDocument(),
+      expect(screen.queryByText("Restart Required")).not.toBeInTheDocument(),
     );
 
     expect(getAppConfigDirOverride()).toBe("/custom/app");
@@ -217,16 +219,21 @@ describe("SettingsPage integration", () => {
       expect(screen.getByText("language:zh")).toBeInTheDocument(),
     );
 
-    fireEvent.click(screen.getByText("settings.tabAdvanced"));
-    fireEvent.click(screen.getByText("settings.advanced.configDir.title"));
+    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Configuration Directory"));
 
-    const browseButtons = screen.getAllByTitle("settings.browseDirectory");
-    const resetButtons = screen.getAllByTitle("settings.resetDefault");
+    const browseButtons = screen.getAllByTitle("Browse Directory");
+    const resetButtons = screen.getAllByTitle(
+      "Reset to default directory (takes effect after saving)",
+    );
 
-    const appInput = (await screen.findByPlaceholderText(
-      "settings.browsePlaceholderApp",
+    const appInput = (await screen.findByLabelText(
+      "CC Switch Configuration Directory",
     )) as HTMLInputElement;
-    expect(appInput.value).toBe("/home/mock/.cc-switch");
+    expect(appInput.value).toBe("");
+    await waitFor(() =>
+      expect(appInput.placeholder).toBe("/home/mock/.cc-switch"),
+    );
 
     fireEvent.click(browseButtons[0]);
     await waitFor(() =>
@@ -234,10 +241,11 @@ describe("SettingsPage integration", () => {
     );
 
     fireEvent.click(resetButtons[0]);
-    await waitFor(() => expect(appInput.value).toBe("/home/mock/.cc-switch"));
+    await waitFor(() => expect(appInput.value).toBe(""));
+    expect(appInput.placeholder).toBe("/home/mock/.cc-switch");
 
-    const claudeInput = (await screen.findByPlaceholderText(
-      "settings.browsePlaceholderClaude",
+    const claudeInput = (await screen.findByLabelText(
+      "Claude Code Configuration Directory",
     )) as HTMLInputElement;
     fireEvent.change(claudeInput, { target: { value: "/custom/claude" } });
     await waitFor(() => expect(claudeInput.value).toBe("/custom/claude"));
@@ -248,7 +256,8 @@ describe("SettingsPage integration", () => {
     );
 
     fireEvent.click(resetButtons[1]);
-    await waitFor(() => expect(claudeInput.value).toBe("/home/mock/.claude"));
+    await waitFor(() => expect(claudeInput.value).toBe(""));
+    expect(claudeInput.placeholder).toBe("/home/mock/.claude");
   });
 
   it("notifies when export fails", async () => {
@@ -257,23 +266,19 @@ describe("SettingsPage integration", () => {
     await waitFor(() =>
       expect(screen.getByText("language:zh")).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByText("settings.tabAdvanced"));
-    fireEvent.click(screen.getByText("settings.advanced.data.title"));
+    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Data Management"));
 
     server.use(
       http.post("http://tauri.local/save_file_dialog", () =>
         HttpResponse.json(null),
       ),
     );
-    fireEvent.click(screen.getByText("settings.exportConfig"));
+    fireEvent.click(screen.getByText("Export SQL Backup"));
 
-    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
-    const cancelMessage = toastErrorMock.mock.calls.at(-1)?.[0] as string;
-    expect(cancelMessage).toMatch(
-      /settings\.selectFileFailed|请选择.*保存路径/,
-    );
-
-    toastErrorMock.mockClear();
+    // Cancelling the save dialog is not an error (FE-UI-08).
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(toastErrorMock).not.toHaveBeenCalled();
 
     server.use(
       http.post("http://tauri.local/save_file_dialog", () =>
@@ -284,7 +289,7 @@ describe("SettingsPage integration", () => {
       ),
     );
 
-    fireEvent.click(screen.getByText("settings.exportConfig"));
+    fireEvent.click(screen.getByText("Export SQL Backup"));
 
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
     const exportMessage = toastErrorMock.mock.calls.at(-1)?.[0] as string;

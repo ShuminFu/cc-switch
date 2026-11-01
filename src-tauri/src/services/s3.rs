@@ -133,7 +133,7 @@ fn sign_request(
     body_hash: &str,
     creds: &S3Credentials,
     now: chrono::DateTime<chrono::Utc>,
-) {
+) -> Result<(), AppError> {
     let timestamp = now.format("%Y%m%dT%H%M%SZ").to_string();
     let datestamp = now.format("%Y%m%d").to_string();
 
@@ -142,9 +142,12 @@ fn sign_request(
         Some(port) => format!("{}:{}", url.host_str().unwrap_or_default(), port),
         None => url.host_str().unwrap_or_default().to_string(),
     };
-    headers.insert("host", host_value.parse().unwrap());
-    headers.insert("x-amz-date", timestamp.parse().unwrap());
-    headers.insert("x-amz-content-sha256", body_hash.parse().unwrap());
+    headers.insert("host", header_value("host", &host_value)?);
+    headers.insert("x-amz-date", header_value("x-amz-date", &timestamp)?);
+    headers.insert(
+        "x-amz-content-sha256",
+        header_value("x-amz-content-sha256", body_hash)?,
+    );
 
     // ── Step 2: Build canonical request ──
 
@@ -223,7 +226,25 @@ fn sign_request(
         "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
         creds.access_key_id, scope, signed_headers, signature
     );
-    headers.insert("authorization", authorization.parse().unwrap());
+    headers.insert(
+        "authorization",
+        header_value("authorization", &authorization)?,
+    );
+    Ok(())
+}
+
+/// Build a header value from user-influenced text (endpoint host, access key,
+/// content type) without panicking on non-visible-ASCII input (SVC-15).
+fn header_value(name: &str, value: &str) -> Result<reqwest::header::HeaderValue, AppError> {
+    reqwest::header::HeaderValue::from_str(value).map_err(|_| {
+        AppError::localized(
+            "s3.header.invalid",
+            format!("S3 请求头 {name} 含有无效字符，请检查端点和凭据"),
+            format!(
+                "S3 request header {name} contains invalid characters; check the endpoint and credentials."
+            ),
+        )
+    })
 }
 
 // ─── Error helpers ───────────────────────────────────────────
@@ -342,7 +363,7 @@ pub(crate) async fn test_connection(creds: &S3Credentials) -> Result<(), AppErro
         &body_hash,
         creds,
         chrono::Utc::now(),
-    );
+    )?;
 
     let resp = client
         .head(url.as_str())
@@ -358,13 +379,33 @@ pub(crate) async fn test_connection(creds: &S3Credentials) -> Result<(), AppErro
     Err(s3_status_error("HEAD bucket", resp.status(), &url_str))
 }
 
-/// Upload bytes to an S3 object.
-pub(crate) async fn put_object(
+/// Result of a conditional PUT.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PutOutcome {
+    Stored,
+    /// `412 Precondition Failed` / `409 ConditionalRequestConflict`: the
+    /// object changed since the ETag passed as `If-Match` was observed.
+    PreconditionFailed,
+}
+
+/// Whether the endpoint is known to honour `If-Match` on PutObject.
+///
+/// AWS S3 supports conditional writes; S3-compatible services vary (some
+/// ignore the header, some reject it), so they rely on the manifest-hash
+/// comparison done before the upload instead.
+pub(crate) fn supports_conditional_put(creds: &S3Credentials) -> bool {
+    is_aws_endpoint(&creds.endpoint)
+}
+
+/// Upload bytes to an S3 object, sending `If-Match: <etag>` when set so the
+/// write only succeeds if the object is still the one that was checked.
+pub(crate) async fn put_object_if_match(
     creds: &S3Credentials,
     key: &str,
     bytes: Vec<u8>,
     content_type: &str,
-) -> Result<(), AppError> {
+    if_match: Option<&str>,
+) -> Result<PutOutcome, AppError> {
     let url_str = build_object_url(creds, key);
     let url = Url::parse(&url_str).map_err(|e| {
         AppError::localized(
@@ -377,7 +418,18 @@ pub(crate) async fn put_object(
     let client = http_client::get();
     let body_hash = sha256_hex(&bytes);
     let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("content-type", content_type.parse().unwrap());
+    headers.insert("content-type", header_value("content-type", content_type)?);
+    if let Some(etag) = if_match {
+        let value = reqwest::header::HeaderValue::from_str(etag).map_err(|_| {
+            AppError::localized(
+                "s3.etag.invalid",
+                "S3 ETag 无效",
+                "Invalid S3 ETag for conditional upload.",
+            )
+        })?;
+        // Inserted before signing so it is covered by the SigV4 signature.
+        headers.insert(reqwest::header::IF_MATCH, value);
+    }
     sign_request(
         "PUT",
         &url,
@@ -385,7 +437,7 @@ pub(crate) async fn put_object(
         &body_hash,
         creds,
         chrono::Utc::now(),
-    );
+    )?;
 
     let resp = client
         .put(url.as_str())
@@ -396,10 +448,16 @@ pub(crate) async fn put_object(
         .await
         .map_err(|e| s3_transport_error("s3.put_failed", "PUT 请求", "PUT request", &e))?;
 
-    if resp.status().is_success() {
-        return Ok(());
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(PutOutcome::Stored);
     }
-    Err(s3_status_error("PUT", resp.status(), &url_str))
+    if if_match.is_some()
+        && (status == StatusCode::PRECONDITION_FAILED || status == StatusCode::CONFLICT)
+    {
+        return Ok(PutOutcome::PreconditionFailed);
+    }
+    Err(s3_status_error("PUT", status, &url_str))
 }
 
 /// Download an S3 object. Returns `None` if the object does not exist (404).
@@ -429,7 +487,7 @@ pub(crate) async fn get_object(
         &body_hash,
         creds,
         chrono::Utc::now(),
-    );
+    )?;
 
     let resp = client
         .get(url.as_str())
@@ -495,7 +553,7 @@ pub(crate) async fn head_object(
         &body_hash,
         creds,
         chrono::Utc::now(),
-    );
+    )?;
 
     let resp = client
         .head(url.as_str())
@@ -735,7 +793,7 @@ mod tests {
         let body_hash = sha256_hex(b"");
 
         let mut headers = reqwest::header::HeaderMap::new();
-        sign_request("GET", &url, &mut headers, &body_hash, &creds, now);
+        sign_request("GET", &url, &mut headers, &body_hash, &creds, now).unwrap();
 
         let auth = headers.get("authorization").unwrap().to_str().unwrap();
 
@@ -776,13 +834,32 @@ mod tests {
 
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("content-type", "application/json".parse().unwrap());
-        sign_request("PUT", &url, &mut headers, &body_hash, &creds, now);
+        sign_request("PUT", &url, &mut headers, &body_hash, &creds, now).unwrap();
 
         let auth = headers.get("authorization").unwrap().to_str().unwrap();
         // content-type must appear in the signed headers
         assert!(
             auth.contains("content-type"),
             "content-type should be in signed headers: {auth}"
+        );
+    }
+
+    #[test]
+    fn signer_rejects_invalid_header_text_instead_of_panicking() {
+        let creds = S3Credentials {
+            access_key_id: "AKIA\u{7f}BAD".to_string(),
+            secret_access_key: "secret".to_string(),
+            region: "us-east-1".to_string(),
+            bucket: "b".to_string(),
+            endpoint: "http://minio.local:9000".to_string(),
+        };
+        let now = chrono::Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let url = Url::parse("http://minio.local:9000/b/key.json").unwrap();
+        let mut headers = reqwest::header::HeaderMap::new();
+        let err = sign_request("GET", &url, &mut headers, &sha256_hex(b""), &creds, now)
+            .expect_err("control char in access key must not panic");
+        assert!(
+            err.to_string().contains("authorization") || matches!(err, AppError::Localized { .. })
         );
     }
 
@@ -898,7 +975,7 @@ mod integration_tests {
         let data = br#"{"test":true,"ts":12345}"#;
 
         // PUT
-        let r = put_object(&creds, key, data.to_vec(), "application/json").await;
+        let r = put_object_if_match(&creds, key, data.to_vec(), "application/json", None).await;
         assert!(r.is_ok(), "PUT failed: {:?}", r.err());
         println!("PASS: put_object {} bytes", data.len());
 

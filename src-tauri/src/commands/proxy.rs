@@ -13,32 +13,59 @@ use std::str::FromStr;
 pub async fn start_proxy_server(
     state: tauri::State<'_, AppState>,
 ) -> Result<ProxyServerInfo, String> {
-    state.proxy_service.start().await
+    state.proxy_service.start().await.map_err(String::from)
 }
 
 /// 停止代理服务器（仅停止服务，不恢复/清理 Live 接管状态）
 #[tauri::command]
+#[specta::specta]
 pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let takeover = state.proxy_service.get_takeover_status().await?;
-    if takeover.claude
-        || takeover.codex
-        || takeover.gemini
-        || takeover.grokbuild
-        || takeover.opencode
-        || takeover.openclaw
-    {
+    if takeover.any_active() {
         return Err(
             "仍有应用处于代理接管状态，请先在设置中关闭对应应用接管后再停止本地路由。".to_string(),
         );
     }
+    // The takeover status counts Claude Desktop when its applied profile uses
+    // this gateway's base URL; also check the live 3P profile itself, which
+    // can point at the proxy's /claude-desktop route (PROXY-30).
+    if claude_desktop_routes_through_proxy(&state).await {
+        return Err(
+            "Claude Desktop 仍通过本地路由访问，请先切换到直连供应商后再停止本地路由。".to_string(),
+        );
+    }
 
-    state.proxy_service.stop().await
+    state.proxy_service.stop().await.map_err(String::from)
+}
+
+async fn claude_desktop_routes_through_proxy(state: &AppState) -> bool {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::claude_desktop_config::live_profile_uses_proxy(&db)
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// Whether Claude Desktop's live profile currently routes through the local
+/// proxy (PROXY-30), read from the live 3P profile file.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_claude_desktop_proxy_dependency(
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    Ok(claude_desktop_routes_through_proxy(&state).await)
 }
 
 /// 停止代理服务器（恢复 Live 配置）
 #[tauri::command]
+#[specta::specta]
 pub async fn stop_proxy_with_restore(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.proxy_service.stop_with_restore().await
+    state
+        .proxy_service
+        .stop_with_restore()
+        .await
+        .map_err(String::from)
 }
 
 /// 获取各应用接管状态
@@ -46,32 +73,40 @@ pub async fn stop_proxy_with_restore(state: tauri::State<'_, AppState>) -> Resul
 pub async fn get_proxy_takeover_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<ProxyTakeoverStatus, String> {
-    state.proxy_service.get_takeover_status().await
+    state
+        .proxy_service
+        .get_takeover_status()
+        .await
+        .map_err(String::from)
 }
 
 /// 为指定应用开启/关闭接管
 #[tauri::command]
+#[specta::specta]
 pub async fn set_proxy_takeover_for_app(
     state: tauri::State<'_, AppState>,
     app_type: String,
     enabled: bool,
 ) -> Result<(), String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     state
         .proxy_service
         .set_takeover_for_app(&app_type, enabled)
         .await
+        .map_err(String::from)
 }
 
 /// 获取代理服务器状态
 #[tauri::command]
 pub async fn get_proxy_status(state: tauri::State<'_, AppState>) -> Result<ProxyStatus, String> {
-    state.proxy_service.get_status().await
+    state.proxy_service.get_status().await.map_err(String::from)
 }
 
 /// 获取代理配置
 #[tauri::command]
 pub async fn get_proxy_config(state: tauri::State<'_, AppState>) -> Result<ProxyConfig, String> {
-    state.proxy_service.get_config().await
+    state.proxy_service.get_config().await.map_err(String::from)
 }
 
 /// 更新代理配置
@@ -80,7 +115,11 @@ pub async fn update_proxy_config(
     state: tauri::State<'_, AppState>,
     config: ProxyConfig,
 ) -> Result<(), String> {
-    state.proxy_service.update_config(&config).await
+    state
+        .proxy_service
+        .update_config(&config)
+        .await
+        .map_err(String::from)
 }
 
 // ==================== Global & Per-App Config ====================
@@ -120,6 +159,8 @@ pub async fn get_proxy_config_for_app(
     state: tauri::State<'_, AppState>,
     app_type: String,
 ) -> Result<AppProxyConfig, String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     let db = &state.db;
     db.get_proxy_config_for_app(&app_type)
         .await
@@ -132,10 +173,19 @@ pub async fn get_proxy_config_for_app(
 #[tauri::command]
 pub async fn update_proxy_config_for_app(
     state: tauri::State<'_, AppState>,
-    config: AppProxyConfig,
+    mut config: AppProxyConfig,
 ) -> Result<(), String> {
     let db = &state.db;
     let app_type = config.app_type.clone();
+    // PROXY-48: `enabled` (takeover) and `auto_failover_enabled` have dedicated
+    // commands with their own invariants (live-config rewrite, queue auto-fill,
+    // P1 switch). A settings-form save carries a possibly stale snapshot of
+    // them, so keep the stored values instead of writing the form's copy.
+    let current = db
+        .get_proxy_config_for_app(&app_type)
+        .await
+        .map_err(|e| e.to_string())?;
+    preserve_switch_flags(&mut config, &current);
     let circuit_config = CircuitBreakerConfig::from(&config);
 
     db.update_proxy_config_for_app(config)
@@ -146,6 +196,12 @@ pub async fn update_proxy_config_for_app(
         .proxy_service
         .update_circuit_breaker_config_for_app(&app_type, circuit_config)
         .await
+        .map_err(String::from)
+}
+
+fn preserve_switch_flags(incoming: &mut AppProxyConfig, current: &AppProxyConfig) {
+    incoming.enabled = current.enabled;
+    incoming.auto_failover_enabled = current.auto_failover_enabled;
 }
 
 async fn get_default_cost_multiplier_internal(
@@ -156,7 +212,7 @@ async fn get_default_cost_multiplier_internal(
     db.get_default_cost_multiplier(app_type).await
 }
 
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub async fn get_default_cost_multiplier_test_hook(
     state: &AppState,
     app_type: &str,
@@ -166,10 +222,13 @@ pub async fn get_default_cost_multiplier_test_hook(
 
 /// 获取默认成本倍率
 #[tauri::command]
+#[specta::specta]
 pub async fn get_default_cost_multiplier(
     state: tauri::State<'_, AppState>,
     app_type: String,
 ) -> Result<String, String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     get_default_cost_multiplier_internal(&state, &app_type)
         .await
         .map_err(|e| e.to_string())
@@ -184,7 +243,7 @@ async fn set_default_cost_multiplier_internal(
     db.set_default_cost_multiplier(app_type, value).await
 }
 
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub async fn set_default_cost_multiplier_test_hook(
     state: &AppState,
     app_type: &str,
@@ -195,11 +254,14 @@ pub async fn set_default_cost_multiplier_test_hook(
 
 /// 设置默认成本倍率
 #[tauri::command]
+#[specta::specta]
 pub async fn set_default_cost_multiplier(
     state: tauri::State<'_, AppState>,
     app_type: String,
     value: String,
 ) -> Result<(), String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     set_default_cost_multiplier_internal(&state, &app_type, &value)
         .await
         .map_err(|e| e.to_string())
@@ -213,7 +275,7 @@ async fn get_pricing_model_source_internal(
     db.get_pricing_model_source(app_type).await
 }
 
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub async fn get_pricing_model_source_test_hook(
     state: &AppState,
     app_type: &str,
@@ -223,10 +285,13 @@ pub async fn get_pricing_model_source_test_hook(
 
 /// 获取计费模式来源
 #[tauri::command]
+#[specta::specta]
 pub async fn get_pricing_model_source(
     state: tauri::State<'_, AppState>,
     app_type: String,
 ) -> Result<String, String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     get_pricing_model_source_internal(&state, &app_type)
         .await
         .map_err(|e| e.to_string())
@@ -241,7 +306,7 @@ async fn set_pricing_model_source_internal(
     db.set_pricing_model_source(app_type, value).await
 }
 
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub async fn set_pricing_model_source_test_hook(
     state: &AppState,
     app_type: &str,
@@ -252,11 +317,14 @@ pub async fn set_pricing_model_source_test_hook(
 
 /// 设置计费模式来源
 #[tauri::command]
+#[specta::specta]
 pub async fn set_pricing_model_source(
     state: tauri::State<'_, AppState>,
     app_type: String,
     value: String,
 ) -> Result<(), String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     set_pricing_model_source_internal(&state, &app_type, &value)
         .await
         .map_err(|e| e.to_string())
@@ -264,23 +332,32 @@ pub async fn set_pricing_model_source(
 
 /// 检查代理服务器是否正在运行
 #[tauri::command]
+#[specta::specta]
 pub async fn is_proxy_running(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     Ok(state.proxy_service.is_running().await)
 }
 
 /// 检查是否处于 Live 接管模式
 #[tauri::command]
+#[specta::specta]
 pub async fn is_live_takeover_active(state: tauri::State<'_, AppState>) -> Result<bool, String> {
-    state.proxy_service.is_takeover_active().await
+    state
+        .proxy_service
+        .is_takeover_active()
+        .await
+        .map_err(String::from)
 }
 
 /// 代理模式下切换供应商（热切换）
 #[tauri::command]
+#[specta::specta]
 pub async fn switch_proxy_provider(
     state: tauri::State<'_, AppState>,
     app_type: String,
     provider_id: String,
 ) -> Result<(), String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     // Codex's built-in official provider can use the client's native OpenAI
     // login through takeover. Other official providers remain blocked.
     let provider = state
@@ -303,6 +380,7 @@ pub async fn switch_proxy_provider(
         .proxy_service
         .switch_proxy_target(&app_type, &provider_id)
         .await
+        .map_err(String::from)
 }
 
 // ==================== 故障转移相关命令 ====================
@@ -314,10 +392,53 @@ pub async fn get_provider_health(
     provider_id: String,
     app_type: String,
 ) -> Result<ProviderHealth, String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     let db = &state.db;
     db.get_provider_health(&provider_id, &app_type)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Health of several providers of one app in one IPC round trip (the
+/// failover queue renders one row per provider). Unknown ids get the default
+/// "healthy, never checked" entry, like `get_provider_health`.
+#[tauri::command]
+pub async fn get_providers_health(
+    state: tauri::State<'_, AppState>,
+    app_type: String,
+    provider_ids: Vec<String>,
+) -> Result<Vec<ProviderHealth>, String> {
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
+    let mut out = Vec::with_capacity(provider_ids.len());
+    for provider_id in provider_ids {
+        out.push(
+            state
+                .db
+                .get_provider_health(&provider_id, &app_type)
+                .await
+                .map_err(|e| e.to_string())?,
+        );
+    }
+    Ok(out)
+}
+
+/// Proxy status and takeover flags together, for pages that need both.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyOverview {
+    pub status: ProxyStatus,
+    pub takeover: ProxyTakeoverStatus,
+}
+
+/// `get_proxy_status` + `get_proxy_takeover_status` in one call.
+#[tauri::command]
+pub async fn get_proxy_overview(
+    state: tauri::State<'_, AppState>,
+) -> Result<ProxyOverview, String> {
+    let status = state.proxy_service.get_status().await?;
+    let takeover = state.proxy_service.get_takeover_status().await?;
+    Ok(ProxyOverview { status, takeover })
 }
 
 /// 重置熔断器
@@ -326,12 +447,15 @@ pub async fn get_provider_health(
 /// 1. 检查自动故障转移是否开启
 /// 2. 如果恢复的供应商在队列中优先级更高（queue_order 更小），则自动切换
 #[tauri::command]
+#[specta::specta]
 pub async fn reset_circuit_breaker(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     provider_id: String,
     app_type: String,
 ) -> Result<(), String> {
+    // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
+    let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     // 1. 重置数据库健康状态
     let db = &state.db;
     db.update_provider_health(&provider_id, &app_type, true, None)
@@ -386,9 +510,10 @@ pub async fn reset_circuit_breaker(
 
                     // 获取供应商名称用于日志和事件
                     let provider_name = db
-                        .get_all_providers(&app_type)
+                        .get_provider_by_id(&provider_id, &app_type)
                         .ok()
-                        .and_then(|providers| providers.get(&provider_id).map(|p| p.name.clone()))
+                        .flatten()
+                        .map(|p| p.name)
                         .unwrap_or_else(|| provider_id.clone());
 
                     // 创建故障转移切换管理器并执行切换
@@ -452,4 +577,27 @@ pub async fn get_circuit_breaker_stats(
     // 目前先返回 None，后续可以通过 ProxyService 暴露接口来实现
     let _ = (state, provider_id, app_type);
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preserve_switch_flags;
+
+    #[tokio::test]
+    async fn settings_save_cannot_flip_takeover_or_failover() {
+        let db = crate::database::Database::memory().unwrap();
+        let mut current = db.get_proxy_config_for_app("claude").await.unwrap();
+        current.enabled = true;
+        current.auto_failover_enabled = true;
+
+        let mut stale_form = current.clone();
+        stale_form.enabled = false;
+        stale_form.auto_failover_enabled = false;
+        stale_form.circuit_failure_threshold = 9;
+
+        preserve_switch_flags(&mut stale_form, &current);
+        assert!(stale_form.enabled);
+        assert!(stale_form.auto_failover_enabled);
+        assert_eq!(stale_form.circuit_failure_threshold, 9);
+    }
 }

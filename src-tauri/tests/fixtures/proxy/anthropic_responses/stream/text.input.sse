@@ -1,0 +1,30 @@
+event: response.created
+data: {"sequence_number": 0, "response": {"id": "resp_s1", "object": "response", "created_at": 1700000000, "status": "in_progress", "model": "gpt-5", "output": []}, "type": "response.created"}
+
+event: response.in_progress
+data: {"sequence_number": 1, "response": {"id": "resp_s1", "object": "response", "created_at": 1700000000, "status": "in_progress", "model": "gpt-5", "output": []}, "type": "response.in_progress"}
+
+event: response.output_item.added
+data: {"sequence_number": 2, "output_index": 0, "item": {"type": "message", "id": "msg_s1", "status": "in_progress", "role": "assistant", "content": []}, "type": "response.output_item.added"}
+
+event: response.content_part.added
+data: {"sequence_number": 3, "item_id": "msg_s1", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": "", "annotations": []}, "type": "response.content_part.added"}
+
+event: response.output_text.delta
+data: {"sequence_number": 4, "item_id": "msg_s1", "output_index": 0, "content_index": 0, "delta": "Au revoir, ", "type": "response.output_text.delta"}
+
+event: response.output_text.delta
+data: {"sequence_number": 5, "item_id": "msg_s1", "output_index": 0, "content_index": 0, "delta": "你好 🙂", "type": "response.output_text.delta"}
+
+event: response.output_text.done
+data: {"sequence_number": 6, "item_id": "msg_s1", "output_index": 0, "content_index": 0, "text": "Au revoir, 你好 🙂", "type": "response.output_text.done"}
+
+event: response.content_part.done
+data: {"sequence_number": 7, "item_id": "msg_s1", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": "Au revoir, 你好 🙂", "annotations": []}, "type": "response.content_part.done"}
+
+event: response.output_item.done
+data: {"sequence_number": 8, "output_index": 0, "item": {"type": "message", "id": "msg_s1", "status": "completed", "role": "assistant", "content": [{"type": "output_text", "text": "Au revoir, 你好 🙂", "annotations": []}]}, "type": "response.output_item.done"}
+
+event: response.completed
+data: {"sequence_number": 9, "response": {"id": "resp_s1", "object": "response", "created_at": 1700000000, "status": "completed", "model": "gpt-5", "output": [{"type": "message", "id": "msg_s1", "status": "completed", "role": "assistant", "content": [{"type": "output_text", "text": "Au revoir, 你好 🙂", "annotations": []}]}], "usage": {"input_tokens": 25, "input_tokens_details": {"cached_tokens": 10}, "output_tokens": 6, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 31}}, "type": "response.completed"}
+

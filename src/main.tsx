@@ -2,15 +2,18 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { DatabaseUpgrade } from "./components/DatabaseUpgrade";
+import { AppLoadingScreen } from "./components/AppLoadingScreen";
 import { UpdateProvider } from "./contexts/UpdateContext";
 import "./index.css";
 // 导入国际化配置
-import i18n from "./i18n";
+import i18n, { i18nReady } from "./i18n";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { MotionConfig } from "framer-motion";
 import { ThemeProvider } from "@/components/theme-provider";
 import { queryClient } from "@/lib/query";
 import { Toaster } from "@/components/ui/sonner";
-import { listen } from "@tauri-apps/api/event";
+import { ErrorBoundary } from "@/app/ErrorBoundary";
+import { manualRestoreUrl } from "@/components/common/manualLinks";
 import { invoke } from "@tauri-apps/api/core";
 import { message } from "@tauri-apps/plugin-dialog";
 import { exit } from "@tauri-apps/plugin-process";
@@ -45,16 +48,21 @@ async function handleConfigLoadError(
   const path = payload?.path ?? "~/.cc-switch/config.json";
   const detail = payload?.error ?? "Unknown error";
 
+  // Point at the manual's step-by-step restore section (DOCS-07).
+  const restoreGuide = i18n.t("errors.configLoadFailedRestoreGuide", {
+    url: manualRestoreUrl(i18n.language),
+    defaultValue: "How to restore a backup by hand:\n{{url}}",
+  });
   await message(
-    i18n.t("errors.configLoadFailedMessage", {
+    `${i18n.t("errors.configLoadFailedMessage", {
       path,
       detail,
       defaultValue:
-        "无法读取配置文件：\n{{path}}\n\n错误详情：\n{{detail}}\n\n请手动检查 JSON 是否有效，或从同目录的备份文件（如 config.json.bak）恢复。\n\n应用将退出以便您进行修复。",
-    }),
+        "Unable to read configuration file:\n{{path}}\n\nError details:\n{{detail}}\n\nPlease check if the JSON is valid, or restore from a backup file (e.g., config.json.bak) in the same directory.\n\nThe app will exit so you can fix this.",
+    })}\n\n${restoreGuide}`,
     {
       title: i18n.t("errors.configLoadFailedTitle", {
-        defaultValue: "配置加载失败",
+        defaultValue: "Configuration Load Failed",
       }),
       kind: "error",
     },
@@ -63,25 +71,33 @@ async function handleConfigLoadError(
   await exit(1);
 }
 
-// 监听后端的配置加载错误事件：仅提醒用户并强制退出，不修改任何配置文件
-try {
-  void listen("configLoadError", async (evt) => {
-    await handleConfigLoadError(evt.payload as ConfigLoadErrorPayload | null);
-  });
-} catch (e) {
-  // 忽略事件订阅异常（例如在非 Tauri 环境下）
-  console.error("订阅 configLoadError 事件失败", e);
-}
+// The backend never emits a `configLoadError` event: init failures are pulled
+// once via `get_init_error` in bootstrap() below (FE-ARCH-19 event contract).
 
 async function bootstrap() {
+  // One root for the whole lifetime; paint a loading screen right away so the
+  // window is not blank while the locale chunk and init check resolve.
+  const root = ReactDOM.createRoot(document.getElementById("root")!);
+  root.render(<AppLoadingScreen />);
+
+  // The locale chunk (no English flash) and the backend init-error check
+  // (avoids the event race) are independent: run them in parallel (PERF-33).
+  const initErrorPromise = (
+    invoke("get_init_error") as Promise<ConfigLoadErrorPayload | null>
+  ).then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+  await i18nReady;
+
   // 启动早期主动查询后端初始化错误，避免事件竞态
   try {
-    const initError = (await invoke(
-      "get_init_error",
-    )) as ConfigLoadErrorPayload | null;
+    const result = await initErrorPromise;
+    if (!result.ok) throw result.error;
+    const initError = result.value;
     if (initError && initError.kind === "db_version_too_new") {
       // 数据库版本过新：渲染应用内「升级应用」恢复界面，不进入正常 App
-      ReactDOM.createRoot(document.getElementById("root")!).render(
+      root.render(
         <React.StrictMode>
           <ThemeProvider defaultTheme="system" storageKey="cc-switch-theme">
             <DatabaseUpgrade payload={initError} />
@@ -101,14 +117,19 @@ async function bootstrap() {
     console.error("拉取初始化错误失败", e);
   }
 
-  ReactDOM.createRoot(document.getElementById("root")!).render(
+  root.render(
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider defaultTheme="system" storageKey="cc-switch-theme">
-          <UpdateProvider>
-            <App />
-            <Toaster />
-          </UpdateProvider>
+          <ErrorBoundary>
+            <UpdateProvider>
+              {/* Honour prefers-reduced-motion for every framer-motion animation (FE-UI-13). */}
+              <MotionConfig reducedMotion="user">
+                <App />
+              </MotionConfig>
+              <Toaster />
+            </UpdateProvider>
+          </ErrorBoundary>
         </ThemeProvider>
       </QueryClientProvider>
     </React.StrictMode>,

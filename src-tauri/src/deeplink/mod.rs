@@ -13,7 +13,9 @@ mod parser;
 mod prompt;
 mod provider;
 mod skill;
+pub mod trust;
 mod utils;
+pub mod v2;
 
 #[cfg(test)]
 mod tests;
@@ -26,6 +28,7 @@ pub use parser::parse_deeplink_url;
 pub use prompt::import_prompt_from_deeplink;
 pub use provider::{import_provider_from_deeplink, parse_and_merge_config};
 pub use skill::import_skill_from_deeplink;
+pub use v2::{build_v2_link, DeepLinkBundle, SignatureStatus};
 
 /// Deep link import request model
 ///
@@ -46,7 +49,10 @@ pub struct DeepLinkImportRequest {
     /// Resource name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Whether to enable after import (default: false)
+    /// Whether to enable after import (default: false). For providers this makes
+    /// the imported provider current; for MCP it writes the servers into the
+    /// target apps' live configs. The confirmation dialog overrides it with the
+    /// user's explicit choice.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
 
@@ -114,7 +120,8 @@ pub struct DeepLinkImportRequest {
     pub config_url: Option<String>,
 
     // ============ Usage script fields (v3.9+) ============
-    /// Whether to enable usage query (default: true if usage_script is provided)
+    /// Whether to enable usage query (default: false; only an explicit `true`
+    /// enables a usage script imported from a deep link)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage_enabled: Option<bool>,
     /// Base64 encoded usage query script code
@@ -135,4 +142,14 @@ pub struct DeepLinkImportRequest {
     /// Auto query interval in minutes (0 to disable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage_auto_interval: Option<u64>,
+
+    // ============ Trust model (v2, SESS-10) ============
+    /// Set by the backend when an OS-delivered link is held as a pending
+    /// import. Import commands only accept requests that carry the nonce of a
+    /// pending link; a request fabricated in the webview is rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
+    /// v2 links: every item plus signature / publisher information.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<Box<DeepLinkBundle>>,
 }

@@ -9,7 +9,6 @@ import { parseOpencodeConfigStrict } from "../helpers/opencodeFormUtils";
 
 interface UseOmoModelSourceParams {
   isOmoCategory: boolean;
-  providerId?: string;
 }
 
 interface OmoModelBuild {
@@ -36,22 +35,14 @@ export interface OmoModelSourceResult {
       limit?: { context?: number; output?: number };
     }
   >;
-  existingOpencodeKeys: string[];
 }
 
 export function useOmoModelSource({
   isOmoCategory,
-  providerId,
 }: UseOmoModelSourceParams): OmoModelSourceResult {
   const { t } = useTranslation();
 
   const { data: opencodeProvidersData } = useProvidersQuery("opencode");
-  const existingOpencodeKeys = useMemo(() => {
-    if (!opencodeProvidersData?.providers) return [];
-    return Object.keys(opencodeProvidersData.providers).filter(
-      (k) => k !== providerId,
-    );
-  }, [opencodeProvidersData?.providers, providerId]);
 
   const [enabledOpencodeProviderIds, setEnabledOpencodeProviderIds] = useState<
     string[] | null
@@ -275,6 +266,5 @@ export function useOmoModelSource({
     omoModelOptions: omoModelBuild.options,
     omoModelVariantsMap: omoModelBuild.variantsMap,
     omoPresetMetaMap: omoModelBuild.presetMetaMap,
-    existingOpencodeKeys,
   };
 }

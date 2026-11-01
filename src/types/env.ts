@@ -26,4 +26,21 @@ export interface BackupInfo {
   timestamp: string;
   /** 被备份的环境变量冲突列表 */
   conflicts: EnvConflict[];
+  /**
+   * Conflicts that were not removed because cc-switch cannot change their
+   * source (process environment from launchd/systemd/the parent shell, SVC-48).
+   */
+  skipped?: SkippedEnv[];
 }
+
+/** A conflict the delete left in place (`SkippedEnv` in env_manager.rs). */
+export interface SkippedEnv {
+  varName: string;
+  sourceType: string;
+  sourcePath: string;
+  /** Stable reason code, e.g. `process_environment_unsupported`. */
+  reason: string;
+}
+
+/** Output syntax of `render_provider_env_profile`. */
+export type EnvShell = "bash" | "fish" | "powershell" | "dotenv";

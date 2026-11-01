@@ -1,0 +1,14 @@
+{
+  "id": "msg_ttl",
+  "type": "message",
+  "model": "claude-sonnet-4-5",
+  "usage": {
+    "input_tokens": 3,
+    "output_tokens": 20,
+    "cache_creation_input_tokens": 900,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 600,
+      "ephemeral_1h_input_tokens": 300
+    }
+  }
+}

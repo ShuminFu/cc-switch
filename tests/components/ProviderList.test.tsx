@@ -89,9 +89,20 @@ vi.mock("@/hooks/useStreamCheck", () => ({
   }),
 }));
 
+const failoverState = vi.hoisted(() => ({
+  autoEnabled: false,
+  queue: [] as Array<{ providerId: string }>,
+  health: new Map<string, unknown>(),
+  healthCalls: [] as unknown[][],
+}));
+
 vi.mock("@/lib/query/failover", () => ({
-  useAutoFailoverEnabled: () => ({ data: false }),
-  useFailoverQueue: () => ({ data: [] }),
+  useAutoFailoverEnabled: () => ({ data: failoverState.autoEnabled }),
+  useFailoverQueue: () => ({ data: failoverState.queue }),
+  useProvidersHealth: (...args: unknown[]) => {
+    failoverState.healthCalls.push(args);
+    return failoverState.health;
+  },
   useAddToFailoverQueue: () => ({ mutate: vi.fn() }),
   useRemoveFromFailoverQueue: () => ({ mutate: vi.fn() }),
   useReorderFailoverQueue: () => ({ mutate: vi.fn() }),
@@ -124,6 +135,10 @@ beforeEach(() => {
   useDragSortMock.mockReset();
   useSortableMock.mockReset();
   providerCardRenderSpy.mockClear();
+  failoverState.autoEnabled = false;
+  failoverState.queue = [];
+  failoverState.health = new Map();
+  failoverState.healthCalls = [];
 
   useSortableMock.mockImplementation(({ id }: { id: string }) => ({
     setNodeRef: vi.fn(),
@@ -186,7 +201,7 @@ describe("ProviderList Component", () => {
     );
 
     const addButton = screen.getByRole("button", {
-      name: "provider.addProvider",
+      name: "Add Provider",
     });
     fireEvent.click(addButton);
 
@@ -235,12 +250,12 @@ describe("ProviderList Component", () => {
     // Drag attributes from useSortable
     expect(
       providerCardRenderSpy.mock.calls[0][0].dragHandleProps?.attributes[
-      "data-dnd-id"
+        "data-dnd-id"
       ],
     ).toBe("b");
     expect(
       providerCardRenderSpy.mock.calls[1][0].dragHandleProps?.attributes[
-      "data-dnd-id"
+        "data-dnd-id"
       ],
     ).toBe("a");
 
@@ -262,6 +277,76 @@ describe("ProviderList Component", () => {
       { a: providerA, b: providerB },
       "claude",
     );
+  });
+
+  it("does not re-render cards when the parent passes new callback identities (PERF-20)", () => {
+    const providerA = createProvider({ id: "a", name: "A" });
+    const providerB = createProvider({ id: "b", name: "B" });
+    const providers = { a: providerA, b: providerB };
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [providerA, providerB],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const latestSwitch = vi.fn();
+    const renderList = (onSwitch: (p: Provider) => void) => (
+      <QueryClientProvider client={queryClient}>
+        <ProviderList
+          providers={providers}
+          currentProviderId="a"
+          appId="claude"
+          onSwitch={onSwitch}
+          onEdit={() => undefined}
+          onDelete={() => undefined}
+          onDuplicate={() => undefined}
+          onOpenWebsite={() => undefined}
+        />
+      </QueryClientProvider>
+    );
+
+    const { rerender } = render(renderList(() => undefined));
+    expect(providerCardRenderSpy).toHaveBeenCalledTimes(2);
+
+    // Simulates a proxy-status poll re-rendering the page with fresh inline
+    // handlers: the memoised cards must not re-render.
+    rerender(renderList(latestSwitch));
+    expect(providerCardRenderSpy).toHaveBeenCalledTimes(2);
+
+    // The stable handler still calls the latest prop.
+    fireEvent.click(screen.getByTestId("switch-a"));
+    expect(latestSwitch).toHaveBeenCalledWith(providerA);
+  });
+
+  it("passes the in-flight mutation state to every card (FE-PROV-49)", () => {
+    const providerA = createProvider({ id: "a", name: "A" });
+    const providerB = createProvider({ id: "b", name: "B" });
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [providerA, providerB],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={{ a: providerA, b: providerB }}
+        currentProviderId="a"
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+        isActionPending
+      />,
+    );
+
+    expect(providerCardRenderSpy).toHaveBeenCalledTimes(2);
+    for (const call of providerCardRenderSpy.mock.calls) {
+      expect(call[0].isActionPending).toBe(true);
+    }
   });
 
   it("filters providers with the search input", () => {
@@ -305,5 +390,202 @@ describe("ProviderList Component", () => {
     expect(
       screen.getByText("No providers match your search."),
     ).toBeInTheDocument();
+  });
+
+  it("matches providers by configured model and endpoint (FE-PROV-54)", () => {
+    const withModel = createProvider({
+      id: "m",
+      name: "Relay One",
+      settingsConfig: {
+        env: {
+          ANTHROPIC_BASE_URL: "https://one.example.com",
+          ANTHROPIC_MODEL: "glm-5.1",
+        },
+      },
+    });
+    const other = createProvider({ id: "o", name: "Relay Two" });
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [withModel, other],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={{ m: withModel, o: other }}
+        currentProviderId=""
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+      />,
+    );
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    const searchInput = screen.getByPlaceholderText(
+      "Search name, notes, or URL...",
+    );
+    fireEvent.change(searchInput, { target: { value: "glm-5" } });
+    expect(screen.getByTestId("provider-card-m")).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-card-o")).not.toBeInTheDocument();
+    fireEvent.change(searchInput, { target: { value: "one.example" } });
+    expect(screen.getByTestId("provider-card-m")).toBeInTheDocument();
+  });
+
+  it("polls health once for the queued providers and hands each card its entry (FE-ARCH-09)", () => {
+    const a = createProvider({ id: "a", name: "A" });
+    const b = createProvider({ id: "b", name: "B" });
+    const healthA = { provider_id: "a", is_healthy: false };
+    failoverState.autoEnabled = true;
+    failoverState.queue = [{ providerId: "a" }];
+    failoverState.health = new Map([["a", healthA]]);
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [a, b],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={{ a, b }}
+        currentProviderId="a"
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+        isProxyRunning
+        isProxyTakeover
+      />,
+    );
+
+    expect(failoverState.healthCalls.at(-1)).toEqual(["claude", ["a"], true]);
+    const lastProps = (id: string) =>
+      providerCardRenderSpy.mock.calls
+        .map(([props]) => props)
+        .filter((props) => props.provider.id === id)
+        .at(-1);
+    expect(lastProps("a").health).toBe(healthA);
+    expect(lastProps("b").health).toBeUndefined();
+  });
+
+  it("virtualises long lists so only part of the cards mount (FE-ARCH-09)", () => {
+    // jsdom has no layout: give the scroll container a viewport-sized box.
+    const heightSpy = vi
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockReturnValue(800);
+    const widthSpy = vi
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockReturnValue(800);
+    const many = Array.from({ length: 120 }, (_, i) =>
+      createProvider({ id: `p${i}`, name: `Provider ${i}` }),
+    );
+    useDragSortMock.mockReturnValue({
+      sortedProviders: many,
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={Object.fromEntries(many.map((p) => [p.id, p]))}
+        currentProviderId="p0"
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("provider-list-virtual")).toBeInTheDocument();
+    expect(screen.getByTestId("provider-card-p0")).toBeInTheDocument();
+    const mounted = screen.queryAllByTestId(/^provider-card-/).length;
+    expect(mounted).toBeGreaterThan(0);
+    expect(mounted).toBeLessThan(many.length);
+    expect(screen.queryByTestId("provider-card-p119")).not.toBeInTheDocument();
+    heightSpy.mockRestore();
+    widthSpy.mockRestore();
+  });
+
+  it("filters by category and failover-queue chips (FE-PROV-33)", () => {
+    const providers = [
+      createProvider({ id: "o1", name: "Off", category: "official" }),
+      ...Array.from({ length: 5 }, (_, i) =>
+        createProvider({
+          id: `a${i}`,
+          name: `Agg ${i}`,
+          category: "aggregator",
+        }),
+      ),
+    ];
+    failoverState.autoEnabled = true;
+    failoverState.queue = [{ providerId: "a1" }];
+    useDragSortMock.mockReturnValue({
+      sortedProviders: providers,
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={Object.fromEntries(providers.map((p) => [p.id, p]))}
+        currentProviderId="o1"
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+        isProxyTakeover
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Official" }));
+    expect(screen.getByTestId("provider-card-o1")).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-card-a0")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "In failover queue" }));
+    expect(screen.getByTestId("provider-card-a1")).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-card-o1")).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId(/^provider-card-/)).toHaveLength(1);
+  });
+
+  it("moves the focused card with Alt+Up / Alt+Down as a keyboard alternative to dragging (PRODUCT-28)", () => {
+    const a = createProvider({ id: "a", name: "A", sortIndex: 0 });
+    const b = createProvider({ id: "b", name: "B", sortIndex: 1 });
+    const reorder = vi.fn(async () => {});
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [a, b],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+      reorder,
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={{ a, b }}
+        currentProviderId="a"
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+      />,
+    );
+
+    const editB = screen.getByTestId("edit-b");
+    fireEvent.keyDown(editB, { key: "ArrowUp", altKey: true });
+    expect(reorder).toHaveBeenCalledWith("b", "a");
+
+    // Without Alt, or past the end of the list, nothing moves.
+    fireEvent.keyDown(editB, { key: "ArrowUp" });
+    fireEvent.keyDown(editB, { key: "ArrowDown", altKey: true });
+    expect(reorder).toHaveBeenCalledTimes(1);
   });
 });

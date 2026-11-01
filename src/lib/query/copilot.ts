@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { copilotGetUsage, copilotGetUsageForAccount } from "@/lib/api/copilot";
 import type { QuotaTier } from "@/types/subscription";
+import { queryKeys } from "./keys";
 
 const REFETCH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
@@ -25,7 +26,7 @@ export function useCopilotQuota(
 ) {
   const { enabled = true, autoQuery = false } = options;
   return useQuery<CopilotQuota>({
-    queryKey: ["copilot", "quota", accountId ?? "default"],
+    queryKey: queryKeys.copilot.quota(accountId),
     queryFn: async (): Promise<CopilotQuota> => {
       const usage = accountId
         ? await copilotGetUsageForAccount(accountId)

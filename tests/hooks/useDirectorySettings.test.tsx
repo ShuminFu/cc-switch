@@ -33,13 +33,6 @@ vi.mock("sonner", () => ({
   },
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: Record<string, unknown>) =>
-      (options?.defaultValue as string) ?? key,
-  }),
-}));
-
 const createSettings = (
   overrides: Partial<SettingsFormState> = {},
 ): SettingsFormState => ({
@@ -97,6 +90,32 @@ describe("useDirectorySettings", () => {
       openclaw: "/remote/openclaw",
       hermes: "/remote/hermes",
     });
+  });
+
+  it("keeps other fields when one app's directory fails to resolve (FE-ARCH-45)", async () => {
+    getConfigDirMock.mockImplementation(async (app: string) => {
+      if (app === "gemini") throw "invalid gemini dir";
+      return `/remote/${app}`;
+    });
+
+    const { result } = renderHook(() =>
+      useDirectorySettings({ settings: createSettings(), onUpdateSettings }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.resolvedDirs.claude).toBe("/remote/claude");
+    expect(result.current.resolvedDirs.codex).toBe("/remote/codex");
+    // The failed field falls back to the default instead of blank.
+    expect(result.current.resolvedDirs.gemini).toBe("/home/mock/.gemini");
+    expect(result.current.loadErrors).toEqual({
+      gemini: "invalid gemini dir",
+    });
+
+    await act(async () => {
+      await result.current.resetDirectory("gemini");
+    });
+    expect(result.current.resolvedDirs.gemini).toBe("/home/mock/.gemini");
   });
 
   it("updates claude directory when browsing succeeds", async () => {

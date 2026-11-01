@@ -3,10 +3,13 @@
 //! 负责选择和管理代理目标供应商，实现智能故障转移
 
 use crate::app_config::AppType;
-use crate::database::Database;
+use crate::database::{Database, ProxyRequestSnapshot};
 use crate::error::AppError;
 use crate::provider::Provider;
-use crate::proxy::circuit_breaker::{AllowResult, CircuitBreaker, CircuitBreakerConfig};
+use crate::proxy::circuit_breaker::{
+    AllowResult, CircuitBreaker, CircuitBreakerConfig, HalfOpenPermit,
+};
+use crate::proxy::routing::RoutingState;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -18,15 +21,28 @@ pub struct ProviderRouter {
     db: Arc<Database>,
     /// 熔断器管理器 - key 格式: "app_type:provider_id"
     circuit_breakers: Arc<RwLock<HashMap<String, Arc<CircuitBreaker>>>>,
+    /// Sticky sessions / strategy / concurrency state (PROXY-19).
+    routing: Arc<RoutingState>,
 }
 
 impl ProviderRouter {
+    /// Shared database handle (used by per-attempt checks such as budget limits).
+    pub fn db(&self) -> &Arc<Database> {
+        &self.db
+    }
+
     /// 创建新的供应商路由器
     pub fn new(db: Arc<Database>) -> Self {
         Self {
             db,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
+            routing: Arc::new(RoutingState::new()),
         }
+    }
+
+    /// Routing state shared across requests (PROXY-19).
+    pub fn routing(&self) -> &Arc<RoutingState> {
+        &self.routing
     }
 
     /// 选择可用的供应商（支持故障转移）
@@ -34,64 +50,70 @@ impl ProviderRouter {
     /// 返回按优先级排序的可用供应商列表：
     /// - 故障转移关闭时：仅返回当前供应商
     /// - 故障转移开启时：仅使用故障转移队列，按队列顺序依次尝试（P1 → P2 → ...）
+    ///
+    /// 配置来自 [`Database::proxy_request_snapshot_async`] 的缓存快照，命中时不访问数据库。
     pub async fn select_providers(&self, app_type: &str) -> Result<Vec<Provider>, AppError> {
+        let snapshot = self.db.proxy_request_snapshot_async(app_type).await?;
+        self.select_providers_from_snapshot(&snapshot).await
+    }
+
+    /// 基于已获取的配置快照选择供应商（请求路径复用同一快照，避免重复查询）。
+    pub async fn select_providers_from_snapshot(
+        &self,
+        snapshot: &ProxyRequestSnapshot,
+    ) -> Result<Vec<Provider>, AppError> {
+        let app_type = snapshot.app_type.as_str();
         let mut result = Vec::new();
         let mut total_providers = 0usize;
         let mut circuit_open_count = 0usize;
 
-        // 检查该应用的自动故障转移开关是否开启（从 proxy_config 表读取）
-        let auto_failover_enabled = match self.db.get_proxy_config_for_app(app_type).await {
-            Ok(config) => config.auto_failover_enabled,
-            Err(e) => {
-                log::error!("[{app_type}] 读取 proxy_config 失败: {e}，默认禁用故障转移");
-                false
-            }
+        // 该应用的自动故障转移开关（proxy_config 表）
+        let auto_failover_enabled = snapshot.app_config.auto_failover_enabled;
+
+        // 故障转移开启时，队列中实际存在的供应商（按 DAO 排序，与前端展示一致）
+        let queued: Vec<&Provider> = if auto_failover_enabled {
+            snapshot
+                .failover_queue
+                .iter()
+                .filter_map(|provider_id| snapshot.providers.get(provider_id))
+                .collect()
+        } else {
+            Vec::new()
         };
 
-        if auto_failover_enabled {
+        if auto_failover_enabled && queued.len() == 1 {
+            // PROXY-11 / PERF-40: a single-entry queue has nothing to fail
+            // over to. Gating it by the breaker would turn four upstream
+            // errors into a local 503 outage for `timeout_seconds`; the
+            // forwarder already bypasses `allow_request` for one provider, so
+            // selection does the same (and skips the breaker-map lookup).
+            total_providers = 1;
+            result.push(queued[0].clone());
+        } else if auto_failover_enabled && !queued.is_empty() {
             // 故障转移开启：仅按队列顺序依次尝试（P1 → P2 → ...）
-            let all_providers = self.db.get_all_providers(app_type)?;
+            total_providers = queued.len();
 
-            // 使用 DAO 返回的排序结果，确保和前端展示一致
-            let ordered_ids: Vec<String> = self
-                .db
-                .get_failover_queue(app_type)?
-                .into_iter()
-                .map(|item| item.provider_id)
-                .collect();
-
-            total_providers = ordered_ids.len();
-
-            for provider_id in ordered_ids {
-                let Some(provider) = all_providers.get(&provider_id).cloned() else {
-                    continue;
-                };
-
+            for provider in queued {
                 let circuit_key = format!("{app_type}:{}", provider.id);
                 let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
 
                 if breaker.is_available().await {
-                    result.push(provider);
+                    result.push(provider.clone());
                 } else {
                     circuit_open_count += 1;
                 }
             }
         } else {
+            if auto_failover_enabled {
+                // PROXY-39: failover is on but the queue is empty (last entry
+                // removed or its provider deleted). Serve the effective current
+                // provider instead of answering every request with 503.
+                log::warn!("[{app_type}] [FO-006] 故障转移已开启但队列为空，回退到当前供应商");
+            }
             // 故障转移关闭：仅使用当前供应商，跳过熔断器检查
-            let current_id = AppType::from_str(app_type)
-                .ok()
-                .and_then(|app_enum| {
-                    crate::settings::get_effective_current_provider(&self.db, &app_enum)
-                        .ok()
-                        .flatten()
-                })
-                .or_else(|| self.db.get_current_provider(app_type).ok().flatten());
-
-            if let Some(current_id) = current_id {
-                if let Some(current) = self.db.get_provider_by_id(&current_id, app_type)? {
-                    total_providers = 1;
-                    result.push(current);
-                }
+            if let Some(current) = Self::effective_current_provider(snapshot) {
+                total_providers = 1;
+                result.push(current);
             }
         }
 
@@ -108,6 +130,27 @@ impl ProviderRouter {
         Ok(result)
     }
 
+    /// 与 settings::get_effective_current_provider 相同的规则：本地 settings 优先
+    /// （且必须存在于数据库），否则回落到数据库的 is_current。
+    fn effective_current_provider(snapshot: &ProxyRequestSnapshot) -> Option<Provider> {
+        let app_type = snapshot.app_type.as_str();
+        let current_id = AppType::from_str(app_type)
+            .ok()
+            .and_then(|app_enum| {
+                let local_id = crate::settings::get_current_provider(&app_enum)?;
+                if snapshot.providers.contains_key(&local_id) {
+                    return Some(local_id);
+                }
+                log::warn!(
+                    "本地 settings 中的供应商 {local_id} ({app_type}) 在数据库中不存在，将清理并 fallback 到数据库"
+                );
+                let _ = crate::settings::set_current_provider(&app_enum, None);
+                None
+            })
+            .or_else(|| snapshot.db_current_provider_id.clone())?;
+        snapshot.providers.get(&current_id).cloned()
+    }
+
     /// 请求执行前获取熔断器“放行许可”
     ///
     /// - Closed：直接放行
@@ -115,11 +158,26 @@ impl ProviderRouter {
     /// - HalfOpen：按限流规则放行探测
     ///
     /// 注意：调用方必须在请求结束后通过 `record_result()` 释放 HalfOpen 名额，
-    /// 否则会导致该 Provider 长时间无法进入探测状态。
+    /// 否则会导致该 Provider 长时间无法进入探测状态。生产路径请使用
+    /// `allow_provider_request_guarded()`，它在请求被取消时也会释放名额。
+    #[allow(dead_code)]
     pub async fn allow_provider_request(&self, provider_id: &str, app_type: &str) -> AllowResult {
         let circuit_key = format!("{app_type}:{provider_id}");
         let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
         breaker.allow_request().await
+    }
+
+    /// Like [`allow_provider_request`](Self::allow_provider_request), but returns an
+    /// RAII [`HalfOpenPermit`] that releases the probe slot if the request future is
+    /// dropped (client disconnect / cancellation) before a result is recorded.
+    pub async fn allow_provider_request_guarded(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+    ) -> (AllowResult, HalfOpenPermit) {
+        let circuit_key = format!("{app_type}:{provider_id}");
+        let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
+        breaker.allow_request_guarded().await
     }
 
     /// 记录供应商请求结果
@@ -131,10 +189,10 @@ impl ProviderRouter {
         success: bool,
         error_msg: Option<String>,
     ) -> Result<(), AppError> {
-        // 1. 按应用独立获取熔断器配置
-        let failure_threshold = match self.db.get_proxy_config_for_app(app_type).await {
-            Ok(app_config) => app_config.circuit_failure_threshold,
-            Err(_) => 5, // 默认值
+        // 1. 按应用独立获取熔断器配置（缓存快照，命中时不访问数据库）
+        let failure_threshold = match self.db.proxy_request_snapshot_async(app_type).await {
+            Ok(snapshot) => snapshot.app_config.circuit_failure_threshold,
+            Err(_) => crate::proxy::circuit_breaker::DEFAULT_FAILURE_THRESHOLD,
         };
 
         // 2. 更新熔断器状态
@@ -148,15 +206,21 @@ impl ProviderRouter {
         }
 
         // 3. 更新数据库健康状态（使用配置的阈值）
-        self.db
-            .update_provider_health_with_threshold(
-                provider_id,
-                app_type,
+        //    同步 SQLite 写入放到阻塞线程池，不在 Tokio worker 上持有 std 互斥锁
+        let db = Arc::clone(&self.db);
+        let provider_id = provider_id.to_string();
+        let app_type = app_type.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.update_provider_health_with_threshold_blocking(
+                &provider_id,
+                &app_type,
                 success,
-                error_msg.clone(),
+                error_msg,
                 failure_threshold,
             )
-            .await?;
+        })
+        .await
+        .map_err(|e| AppError::Database(format!("更新供应商健康状态任务失败: {e}")))??;
 
         Ok(())
     }
@@ -195,8 +259,15 @@ impl ProviderRouter {
 
     /// 更新所有熔断器的配置（热更新）
     pub async fn update_all_configs(&self, config: CircuitBreakerConfig) {
-        let breakers = self.circuit_breakers.read().await;
-        for breaker in breakers.values() {
+        // PROXY-16: snapshot the breakers, then update without holding the map lock.
+        let breakers: Vec<Arc<CircuitBreaker>> = self
+            .circuit_breakers
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect();
+        for breaker in breakers {
             breaker.update_config(config.clone()).await;
         }
     }
@@ -204,11 +275,16 @@ impl ProviderRouter {
     /// 更新指定应用已创建熔断器的配置（热更新）
     pub async fn update_app_configs(&self, app_type: &str, config: CircuitBreakerConfig) {
         let prefix = format!("{app_type}:");
-        let breakers = self.circuit_breakers.read().await;
-        for (key, breaker) in breakers.iter() {
-            if key.starts_with(&prefix) {
-                breaker.update_config(config.clone()).await;
-            }
+        let breakers: Vec<Arc<CircuitBreaker>> = self
+            .circuit_breakers
+            .read()
+            .await
+            .iter()
+            .filter(|(key, _)| key.starts_with(&prefix))
+            .map(|(_, breaker)| breaker.clone())
+            .collect();
+        for breaker in breakers {
+            breaker.update_config(config.clone()).await;
         }
     }
 
@@ -239,18 +315,12 @@ impl ProviderRouter {
             }
         }
 
-        // 如果不存在，获取写锁创建
-        let mut breakers = self.circuit_breakers.write().await;
-
-        // 双重检查，防止竞争条件
-        if let Some(breaker) = breakers.get(key) {
-            return breaker.clone();
-        }
-
         // 从 key 中提取 app_type (格式: "app_type:provider_id")
         let app_type = key.split(':').next().unwrap_or("claude");
 
-        // 按应用独立读取熔断器配置
+        // PROXY-16: read the per-app config *before* taking the write lock so
+        // no SQLite access happens while every other request's breaker lookup
+        // is blocked behind it.
         let config = match self.db.get_proxy_config_for_app(app_type).await {
             Ok(app_config) => crate::proxy::circuit_breaker::CircuitBreakerConfig {
                 failure_threshold: app_config.circuit_failure_threshold,
@@ -262,7 +332,13 @@ impl ProviderRouter {
             Err(_) => crate::proxy::circuit_breaker::CircuitBreakerConfig::default(),
         };
 
-        let breaker = Arc::new(CircuitBreaker::new(config));
+        // 获取写锁创建；双重检查，防止竞争条件
+        let mut breakers = self.circuit_breakers.write().await;
+        if let Some(breaker) = breakers.get(key) {
+            return breaker.clone();
+        }
+
+        let breaker = CircuitBreaker::new_registered(key, config);
         breakers.insert(key.to_string(), breaker.clone());
 
         breaker
@@ -425,6 +501,55 @@ mod tests {
         assert_eq!(providers[0].id, "b");
     }
 
+    /// PERF-05：选择结果来自缓存快照，重复请求不再访问数据库，
+    /// 但任何配置写入（故障转移开关、队列、当前供应商）都会立即生效。
+    #[tokio::test]
+    #[serial]
+    async fn test_select_providers_uses_cache_and_follows_config_writes() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        let provider_a =
+            Provider::with_id("a".to_string(), "Provider A".to_string(), json!({}), None);
+        let mut provider_b =
+            Provider::with_id("b".to_string(), "Provider B".to_string(), json!({}), None);
+        provider_b.sort_index = Some(1);
+        db.save_provider("claude", &provider_a).unwrap();
+        db.save_provider("claude", &provider_b).unwrap();
+        db.set_current_provider("claude", "a").unwrap();
+
+        let router = ProviderRouter::new(db.clone());
+        let providers = router.select_providers("claude").await.unwrap();
+        assert_eq!(providers[0].id, "a");
+
+        // 重复选择命中缓存，不重建快照
+        let builds = db.proxy_request_snapshot_builds();
+        for _ in 0..5 {
+            let providers = router.select_providers("claude").await.unwrap();
+            assert_eq!(providers[0].id, "a");
+        }
+        assert_eq!(db.proxy_request_snapshot_builds(), builds);
+
+        // 切换当前供应商
+        db.set_current_provider("claude", "b").unwrap();
+        let providers = router.select_providers("claude").await.unwrap();
+        assert_eq!(providers[0].id, "b");
+
+        // 启用故障转移并调整队列
+        db.add_to_failover_queue("claude", "a").unwrap();
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+        let providers = router.select_providers("claude").await.unwrap();
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].id, "a");
+
+        db.add_to_failover_queue("claude", "b").unwrap();
+        let providers = router.select_providers("claude").await.unwrap();
+        let ids: Vec<_> = providers.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["b", "a"]);
+    }
+
     #[tokio::test]
     #[serial]
     async fn test_select_providers_does_not_consume_half_open_permit() {
@@ -519,5 +644,99 @@ mod tests {
         let third = router.allow_provider_request("a", "claude").await;
         assert!(third.allowed);
         assert!(third.used_half_open_permit);
+    }
+
+    async fn enable_failover(db: &Database) {
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+    }
+
+    /// PROXY-11: a single-entry queue keeps forwarding after its breaker opens.
+    #[tokio::test]
+    #[serial]
+    async fn test_single_provider_queue_is_not_gated_by_open_breaker() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        db.update_circuit_breaker_config(&CircuitBreakerConfig {
+            failure_threshold: 4,
+            timeout_seconds: 600,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+        let provider_a =
+            Provider::with_id("a".to_string(), "Provider A".to_string(), json!({}), None);
+        db.save_provider("claude", &provider_a).unwrap();
+        db.add_to_failover_queue("claude", "a").unwrap();
+        enable_failover(&db).await;
+
+        let router = ProviderRouter::new(db.clone());
+        for _ in 0..4 {
+            router
+                .record_result("a", "claude", false, false, Some("503".to_string()))
+                .await
+                .unwrap();
+        }
+        let breaker = router.get_or_create_circuit_breaker("claude:a").await;
+        assert!(!breaker.is_available().await, "breaker should be open");
+
+        let providers = router.select_providers("claude").await.unwrap();
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].id, "a");
+    }
+
+    /// With two queued providers an open breaker still filters as before.
+    #[tokio::test]
+    #[serial]
+    async fn test_multi_provider_queue_still_skips_open_breaker() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        db.update_circuit_breaker_config(&CircuitBreakerConfig {
+            failure_threshold: 1,
+            timeout_seconds: 600,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        for id in ["a", "b"] {
+            let p = Provider::with_id(id.to_string(), id.to_uppercase(), json!({}), None);
+            db.save_provider("claude", &p).unwrap();
+            db.add_to_failover_queue("claude", id).unwrap();
+        }
+        enable_failover(&db).await;
+
+        let router = ProviderRouter::new(db.clone());
+        router
+            .record_result("a", "claude", false, false, Some("fail".to_string()))
+            .await
+            .unwrap();
+        let providers = router.select_providers("claude").await.unwrap();
+        assert_eq!(
+            providers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            vec!["b"]
+        );
+    }
+
+    /// PROXY-39: failover on + emptied queue falls back to the current provider.
+    #[tokio::test]
+    #[serial]
+    async fn test_failover_enabled_with_empty_queue_uses_current_provider() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        let provider_a =
+            Provider::with_id("a".to_string(), "Provider A".to_string(), json!({}), None);
+        db.save_provider("claude", &provider_a).unwrap();
+        db.set_current_provider("claude", "a").unwrap();
+        db.add_to_failover_queue("claude", "a").unwrap();
+        enable_failover(&db).await;
+        db.remove_from_failover_queue("claude", "a").unwrap();
+
+        let router = ProviderRouter::new(db.clone());
+        let providers = router.select_providers("claude").await.unwrap();
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].id, "a");
     }
 }

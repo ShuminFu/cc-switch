@@ -1,17 +1,26 @@
-use crate::config::{get_home_dir, write_text_file};
+use crate::config::get_home_dir;
 use crate::error::AppError;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// 获取 Gemini 配置目录路径（支持设置覆盖）
+/// Gemini config directory and where it came from (CFG-12).
+///
+/// cc-switch override → `$GEMINI_CLI_HOME/.gemini` (Gemini CLI's own home
+/// override) → `~/.gemini`.
+pub fn resolve_gemini_dir() -> (PathBuf, crate::config::ConfigDirSource) {
+    crate::config::resolve_tool_dir(
+        crate::settings::get_gemini_override_dir(),
+        crate::config::tool_env_dir("GEMINI_CLI_HOME")
+            .map(|home| ("GEMINI_CLI_HOME", home.join(".gemini"))),
+        || get_home_dir().join(".gemini"),
+    )
+}
+
+/// 获取 Gemini 配置目录路径（设置覆盖 → `GEMINI_CLI_HOME` → `~/.gemini`）
 pub fn get_gemini_dir() -> PathBuf {
-    if let Some(custom) = crate::settings::get_gemini_override_dir() {
-        return custom;
-    }
-
-    get_home_dir().join(".gemini")
+    resolve_gemini_dir().0
 }
 
 /// 获取 Gemini .env 文件路径
@@ -27,26 +36,171 @@ pub fn parse_env_file(content: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
 
     for line in content.lines() {
-        let line = line.trim();
-
-        // 跳过空行和注释
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        // 解析 KEY=VALUE
-        if let Some((key, value)) = line.split_once('=') {
-            let key = key.trim().to_string();
-            let value = value.trim().to_string();
-
-            // 验证 key 是否有效（不为空，只包含字母、数字和下划线）
-            if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                map.insert(key, value);
-            }
+        if let Some(entry) = parse_env_line(line) {
+            map.insert(entry.key, entry.value);
         }
     }
 
     map
+}
+
+/// Quoting used for a value in the `.env` file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EnvQuote {
+    None,
+    Single,
+    Double,
+}
+
+/// One `KEY=VALUE` assignment of a `.env` file (dotenv semantics, as read by
+/// Gemini CLI): optional `export ` prefix, matching quotes stripped, `\"`/`\n`
+/// escapes in double quotes, ` # comment` after unquoted values (CFG-13).
+#[derive(Debug, Clone)]
+struct EnvLine {
+    key: String,
+    value: String,
+    export: bool,
+    quote: EnvQuote,
+}
+
+fn is_env_key(key: &str) -> bool {
+    !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+fn parse_env_line(line: &str) -> Option<EnvLine> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let (export, rest) = match line.strip_prefix("export ") {
+        Some(rest) => (true, rest.trim_start()),
+        None => (false, line),
+    };
+    let (key, raw) = rest.split_once('=')?;
+    let key = key.trim();
+    if !is_env_key(key) {
+        return None;
+    }
+    let raw = raw.trim();
+    let (value, quote) = if raw.len() >= 2 && raw.starts_with('"') && raw[1..].contains('"') {
+        let mut out = String::new();
+        let mut chars = raw[1..].chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' => match chars.next() {
+                    Some('n') => out.push('\n'),
+                    Some('r') => out.push('\r'),
+                    Some('t') => out.push('\t'),
+                    Some(other) => out.push(other),
+                    None => out.push('\\'),
+                },
+                '"' => break,
+                other => out.push(other),
+            }
+        }
+        (out, EnvQuote::Double)
+    } else if raw.len() >= 2 && raw.starts_with('\'') && raw[1..].contains('\'') {
+        let end = raw[1..].find('\'').unwrap_or(raw.len() - 1) + 1;
+        (raw[1..end].to_string(), EnvQuote::Single)
+    } else {
+        let value = match raw.find(" #") {
+            Some(idx) => raw[..idx].trim_end(),
+            None => raw,
+        };
+        (value.to_string(), EnvQuote::None)
+    };
+    Some(EnvLine {
+        key: key.to_string(),
+        value,
+        export,
+        quote,
+    })
+}
+
+fn env_value_needs_quotes(value: &str) -> bool {
+    value.is_empty()
+        || value
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, '#' | '"' | '\'' | '\\' | '$' | '`'))
+}
+
+fn render_env_assignment(key: &str, value: &str, export: bool, quote: EnvQuote) -> String {
+    let quote = match quote {
+        EnvQuote::Single if !value.contains('\'') && !value.contains('\n') => EnvQuote::Single,
+        EnvQuote::None if !env_value_needs_quotes(value) => EnvQuote::None,
+        EnvQuote::None if value.is_empty() => EnvQuote::None,
+        _ => EnvQuote::Double,
+    };
+    let rendered = match quote {
+        EnvQuote::None => value.to_string(),
+        EnvQuote::Single => format!("'{value}'"),
+        EnvQuote::Double => {
+            let escaped = value
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r");
+            format!("\"{escaped}\"")
+        }
+    };
+    let prefix = if export { "export " } else { "" };
+    format!("{prefix}{key}={rendered}")
+}
+
+/// Render `map` as a `.env` file, editing `existing` in place: comments,
+/// blank lines, key order, `export` prefixes and quoting style are kept;
+/// unchanged assignments stay byte-identical, removed keys are dropped and
+/// new keys are appended (sorted). The result ends with a newline and uses
+/// the existing file's line ending (CFG-13).
+pub fn render_env_file(existing: Option<&str>, map: &HashMap<String, String>) -> String {
+    let existing = existing.unwrap_or("");
+    let eol = if existing.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut out = String::with_capacity(existing.len() + 64);
+    let mut seen = std::collections::HashSet::new();
+
+    for line in existing.lines() {
+        match parse_env_line(line) {
+            Some(entry) => {
+                if seen.contains(&entry.key) {
+                    // duplicate assignment: the first one is rewritten, drop the rest
+                    continue;
+                }
+                let Some(new_value) = map.get(&entry.key) else {
+                    continue;
+                };
+                seen.insert(entry.key.clone());
+                if *new_value == entry.value {
+                    out.push_str(line);
+                } else {
+                    out.push_str(&render_env_assignment(
+                        &entry.key,
+                        new_value,
+                        entry.export,
+                        entry.quote,
+                    ));
+                }
+            }
+            None => out.push_str(line),
+        }
+        out.push_str(eol);
+    }
+
+    let mut new_keys: Vec<_> = map.keys().filter(|k| !seen.contains(*k)).collect();
+    new_keys.sort();
+    for key in new_keys {
+        out.push_str(&render_env_assignment(
+            key,
+            &map[key],
+            false,
+            EnvQuote::None,
+        ));
+        out.push_str(eol);
+    }
+    out
 }
 
 /// 严格解析 .env 文件内容，返回详细的错误信息
@@ -70,7 +224,7 @@ pub fn parse_env_file(content: &str) -> HashMap<String, String> {
 /// - 配置文件错误诊断
 ///
 /// 已有完整的测试覆盖，可直接使用。
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn parse_env_file_strict(content: &str) -> Result<HashMap<String, String>, AppError> {
     let mut map = HashMap::new();
 
@@ -122,21 +276,10 @@ pub fn parse_env_file_strict(content: &str) -> Result<HashMap<String, String>, A
     Ok(map)
 }
 
-/// 将键值对序列化为 .env 格式
+/// 将键值对序列化为新的 .env 文件（键排序、以换行结尾）
+#[cfg(test)]
 pub fn serialize_env_file(map: &HashMap<String, String>) -> String {
-    let mut lines = Vec::new();
-
-    // 按键排序以保证输出稳定
-    let mut keys: Vec<_> = map.keys().collect();
-    keys.sort();
-
-    for key in keys {
-        if let Some(value) = map.get(key) {
-            lines.push(format!("{key}={value}"));
-        }
-    }
-
-    lines.join("\n")
+    render_env_file(None, map)
 }
 
 /// 读取 Gemini .env 文件
@@ -147,33 +290,49 @@ pub fn read_gemini_env() -> Result<HashMap<String, String>, AppError> {
         return Ok(HashMap::new());
     }
 
-    let content = fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
+    let content = crate::adapters::live_file::read_text_lenient(&path)?
+        .map(|live| live.text)
+        .unwrap_or_default();
 
     Ok(parse_env_file(&content))
 }
 
 /// 写入 Gemini .env 文件（原子操作）
+///
+/// 在原文件上逐行编辑（保留注释、顺序、引号风格），内容未变化时不写；
+/// 写入前备份旧文件，文件权限为 0600。只有目录由 cc-switch 新建时才收紧
+/// 目录权限为 0700，不再修改用户已有的 `~/.gemini` 目录（CFG-13）。
 pub fn write_gemini_env_atomic(map: &HashMap<String, String>) -> Result<(), AppError> {
     let path = get_gemini_env_path();
 
     // 确保目录存在
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+        if !parent.exists() {
+            fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
 
-        // 设置目录权限为 700（仅所有者可读写执行）
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(parent)
-                .map_err(|e| AppError::io(parent, e))?
-                .permissions();
-            perms.set_mode(0o700);
-            fs::set_permissions(parent, perms).map_err(|e| AppError::io(parent, e))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(parent)
+                    .map_err(|e| AppError::io(parent, e))?
+                    .permissions();
+                perms.set_mode(0o700);
+                fs::set_permissions(parent, perms).map_err(|e| AppError::io(parent, e))?;
+            }
         }
     }
 
-    let content = serialize_env_file(map);
-    write_text_file(&path, &content)?;
+    let existing = crate::adapters::live_file::read_text_lenient(&path)?;
+    let content = render_env_file(existing.as_ref().map(|live| live.text.as_str()), map);
+    let content = match &existing {
+        Some(live) => live.style.apply(&content),
+        None => content,
+    };
+    crate::adapters::live_file::write_live_text(
+        &path,
+        &content,
+        crate::adapters::live_file::WriteOptions::backup("gemini").secret(),
+    )?;
 
     // 设置文件权限为 600（仅所有者可读写）
     #[cfg(unix)]
@@ -182,8 +341,10 @@ pub fn write_gemini_env_atomic(map: &HashMap<String, String>) -> Result<(), AppE
         let mut perms = fs::metadata(&path)
             .map_err(|e| AppError::io(&path, e))?
             .permissions();
-        perms.set_mode(0o600);
-        fs::set_permissions(&path, perms).map_err(|e| AppError::io(&path, e))?;
+        if perms.mode() & 0o777 != 0o600 {
+            perms.set_mode(0o600);
+            fs::set_permissions(&path, perms).map_err(|e| AppError::io(&path, e))?;
+        }
     }
 
     Ok(())
@@ -282,42 +443,107 @@ pub fn get_gemini_settings_path() -> PathBuf {
     get_gemini_dir().join("settings.json")
 }
 
+/// 读取 Gemini `settings.json` 为 JSON 对象
+///
+/// - 文件不存在或内容为空：返回 `{}`；
+/// - Gemini CLI 允许 `//` 注释（strip-json-comments），严格 JSON 解析失败时回退到 JSON5；
+/// - 仍无法解析或顶层不是对象：返回错误，**绝不**以 `{}` 代替用户文件，
+///   避免切换供应商时清空 mcpServers、主题等用户设置。
+pub fn read_gemini_settings_value(path: &Path) -> Result<Value, AppError> {
+    if !path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let raw = fs::read_to_string(path).map_err(|e| AppError::io(path, e))?;
+    let content = raw.trim_start_matches('\u{feff}');
+    if content.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+
+    let value = match serde_json::from_str::<Value>(content) {
+        Ok(v) => v,
+        Err(strict_err) => match json_five::from_str::<Value>(content) {
+            Ok(v) => {
+                log::warn!(
+                    "Gemini settings.json 不是严格 JSON（可能含注释），已按 JSON5 解析: {}",
+                    path.display()
+                );
+                v
+            }
+            Err(_) => {
+                return Err(AppError::localized(
+                    "gemini.settings.unparsable",
+                    format!(
+                        "无法解析 Gemini 配置文件 {}: {strict_err}。请修复该文件后重试，文件未被修改。",
+                        path.display()
+                    ),
+                    format!(
+                        "Failed to parse Gemini settings file {}: {strict_err}. Fix the file and retry; it was not modified.",
+                        path.display()
+                    ),
+                ));
+            }
+        },
+    };
+
+    if !value.is_object() {
+        return Err(AppError::localized(
+            "gemini.settings.not_object",
+            format!(
+                "Gemini 配置文件 {} 的顶层必须是 JSON 对象，文件未被修改。",
+                path.display()
+            ),
+            format!(
+                "Gemini settings file {} must contain a JSON object at the top level; it was not modified.",
+                path.display()
+            ),
+        ));
+    }
+    Ok(value)
+}
+
 /// 更新 Gemini 目录 settings.json 中的 security.auth.selectedType 字段
 ///
 /// 此函数会：
-/// 1. 读取现有的 settings.json（如果存在）
+/// 1. 读取现有的 settings.json（如果存在；无法解析时返回错误且不修改文件）
 /// 2. 只更新 `security.auth.selectedType` 字段，保留其他所有字段
-/// 3. 原子性写入文件
+/// 3. 备份旧文件后原子性写入（值未变化时不写入）
 ///
 /// # 参数
 /// - `selected_type`: 要设置的 selectedType 值（如 "gemini-api-key" 或 "oauth-personal"）
 fn update_selected_type(selected_type: &str) -> Result<(), AppError> {
-    let settings_path = get_gemini_settings_path();
+    update_selected_type_at(&get_gemini_settings_path(), selected_type, true)
+}
 
-    // 确保目录存在
-    if let Some(parent) = settings_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+fn update_selected_type_at(
+    settings_path: &Path,
+    selected_type: &str,
+    backup: bool,
+) -> Result<(), AppError> {
+    let mut settings_content = read_gemini_settings_value(settings_path)?;
+
+    let current = settings_content
+        .pointer("/security/auth/selectedType")
+        .and_then(|v| v.as_str());
+    if settings_path.exists() && current == Some(selected_type) {
+        return Ok(());
     }
-
-    // 读取现有的 settings.json（如果存在）
-    let mut settings_content = if settings_path.exists() {
-        let content =
-            fs::read_to_string(&settings_path).map_err(|e| AppError::io(&settings_path, e))?;
-        serde_json::from_str::<Value>(&content).unwrap_or_else(|_| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
-    };
 
     // 只更新 security.auth.selectedType 字段
     if let Some(obj) = settings_content.as_object_mut() {
         let security = obj
             .entry("security")
             .or_insert_with(|| serde_json::json!({}));
+        if !security.is_object() {
+            *security = serde_json::json!({});
+        }
 
         if let Some(security_obj) = security.as_object_mut() {
             let auth = security_obj
                 .entry("auth")
                 .or_insert_with(|| serde_json::json!({}));
+            if !auth.is_object() {
+                *auth = serde_json::json!({});
+            }
 
             if let Some(auth_obj) = auth.as_object_mut() {
                 auth_obj.insert(
@@ -328,8 +554,14 @@ fn update_selected_type(selected_type: &str) -> Result<(), AppError> {
         }
     }
 
-    // 写入文件
-    crate::config::write_json_file(&settings_path, &settings_content)?;
+    // Gemini CLI allows comments in settings.json: patch the document in
+    // place instead of re-serialising it (comments and key order survive).
+    let opts = if backup {
+        crate::adapters::live_file::WriteOptions::backup("gemini")
+    } else {
+        crate::adapters::live_file::WriteOptions::default()
+    };
+    crate::adapters::live_file::write_json_preserving(settings_path, &settings_content, opts)?;
 
     Ok(())
 }
@@ -375,6 +607,70 @@ mod tests {
     use super::*;
 
     #[test]
+    fn read_gemini_settings_value_rejects_unparsable_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "{").unwrap();
+
+        let err = read_gemini_settings_value(&path).unwrap_err();
+        assert!(err.to_string().contains("settings.json"), "{err}");
+    }
+
+    #[test]
+    fn read_gemini_settings_value_accepts_comments_and_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        assert_eq!(
+            read_gemini_settings_value(&path).unwrap(),
+            serde_json::json!({})
+        );
+
+        fs::write(&path, "// comment\n{ \"mcpServers\": { \"a\": {} } }").unwrap();
+        let value = read_gemini_settings_value(&path).unwrap();
+        assert!(value.get("mcpServers").is_some());
+
+        fs::write(&path, "[1, 2]").unwrap();
+        assert!(read_gemini_settings_value(&path).is_err());
+    }
+
+    #[test]
+    fn update_selected_type_keeps_unparsable_file_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "{ not json").unwrap();
+
+        assert!(update_selected_type_at(&path, "gemini-api-key", false).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{ not json");
+    }
+
+    #[test]
+    fn update_selected_type_preserves_other_keys_and_skips_noop_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            "// keep\n{ \"mcpServers\": { \"x\": { \"command\": \"x\" } }, \"theme\": \"dark\" }",
+        )
+        .unwrap();
+
+        update_selected_type_at(&path, "gemini-api-key", false).unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        // the JSONC comment survives the in-place edit
+        assert!(written.starts_with("// keep\n"), "{written}");
+        let value: Value = json_five::from_str(&written).unwrap();
+        assert_eq!(value["theme"], "dark");
+        assert_eq!(value["mcpServers"]["x"]["command"], "x");
+        assert_eq!(value["security"]["auth"]["selectedType"], "gemini-api-key");
+
+        // 值未变化时不重写文件
+        let before = fs::read_to_string(&path).unwrap();
+        let commented = format!("// user note\n{before}");
+        fs::write(&path, &commented).unwrap();
+        update_selected_type_at(&path, "gemini-api-key", false).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), commented);
+    }
+
+    #[test]
     fn test_parse_env_file() {
         let content = r#"
 # Comment line
@@ -396,6 +692,42 @@ GEMINI_MODEL=gemini-3.5-flash
         assert_eq!(
             map.get("GEMINI_MODEL"),
             Some(&"gemini-3.5-flash".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_env_file_follows_dotenv_quoting() {
+        let content = "export GEMINI_API_KEY=\"abc\"\nGEMINI_MODEL='gemini-pro' \nURL=https://x # note\nESC=\"a\\\"b\"\n";
+        let map = parse_env_file(content);
+        assert_eq!(map["GEMINI_API_KEY"], "abc");
+        assert_eq!(map["GEMINI_MODEL"], "gemini-pro");
+        assert_eq!(map["URL"], "https://x");
+        assert_eq!(map["ESC"], "a\"b");
+    }
+
+    #[test]
+    fn render_env_file_edits_in_place() {
+        let existing = "# my gemini env\r\nexport GEMINI_API_KEY=\"old\"\r\n\r\n# model\r\nGEMINI_MODEL=gemini-pro\r\nSTALE=1\r\n";
+        let mut map = HashMap::new();
+        map.insert("GEMINI_API_KEY".to_string(), "new key".to_string());
+        map.insert("GEMINI_MODEL".to_string(), "gemini-pro".to_string());
+        map.insert(
+            "GOOGLE_GEMINI_BASE_URL".to_string(),
+            "https://g".to_string(),
+        );
+        let out = render_env_file(Some(existing), &map);
+        assert_eq!(
+            out,
+            "# my gemini env\r\nexport GEMINI_API_KEY=\"new key\"\r\n\r\n# model\r\nGEMINI_MODEL=gemini-pro\r\nGOOGLE_GEMINI_BASE_URL=https://g\r\n"
+        );
+        // re-parsing gives back exactly the map
+        assert_eq!(parse_env_file(&out), map);
+        // unchanged map -> identical text
+        assert_eq!(render_env_file(Some(&out), &map), out);
+        // new file: sorted, trailing newline
+        assert_eq!(
+            render_env_file(None, &map),
+            "GEMINI_API_KEY=\"new key\"\nGEMINI_MODEL=gemini-pro\nGOOGLE_GEMINI_BASE_URL=https://g\n"
         );
     }
 

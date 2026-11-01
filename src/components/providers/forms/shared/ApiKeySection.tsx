@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { HintText } from "./HintText";
 import ApiKeyInput from "../ApiKeyInput";
 import type { ProviderCategory } from "@/types";
 
@@ -35,10 +36,10 @@ export function ApiKeySection({
 
   const defaultPlaceholder = {
     official: t("providerForm.officialNoApiKey", {
-      defaultValue: "官方供应商无需 API Key",
+      defaultValue: "Official login does not require API Key, save directly",
     }),
     thirdParty: t("providerForm.apiKeyAutoFill", {
-      defaultValue: "输入 API Key，将自动填充到配置",
+      defaultValue: "Just fill in here, config below will be auto-filled",
     }),
   };
 
@@ -68,7 +69,7 @@ export function ApiKeySection({
             className="text-xs text-blue-400 dark:text-blue-500 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
           >
             {t("providerForm.getApiKey", {
-              defaultValue: "获取 API Key",
+              defaultValue: "Get API Key",
             })}
           </a>
 
@@ -76,10 +77,11 @@ export function ApiKeySection({
           {partnerPromotionKey && (
             <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 p-2.5 border border-blue-200 dark:border-blue-800">
               <p className="text-xs leading-relaxed text-blue-700 dark:text-blue-300">
-                💡{" "}
-                {t(`providerForm.partnerPromotion.${partnerPromotionKey}`, {
-                  defaultValue: "",
-                })}
+                <HintText>
+                  {t(`providerForm.partnerPromotion.${partnerPromotionKey}`, {
+                    defaultValue: "",
+                  })}
+                </HintText>
               </p>
             </div>
           )}

@@ -1,0 +1,39 @@
+{
+  "model": "gpt-5-codex",
+  "system": "You are Codex.",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "What is 6 * 7?"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "42"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "And 6 * 8?"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 8192,
+  "thinking": {
+    "type": "enabled",
+    "budget_tokens": 4096
+  },
+  "stream": false
+}

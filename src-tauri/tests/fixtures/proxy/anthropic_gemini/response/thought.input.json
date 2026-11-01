@@ -1,0 +1,29 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "Six times eight is forty-eight.",
+            "thought": true
+          },
+          {
+            "text": "48"
+          }
+        ]
+      },
+      "index": 0,
+      "finishReason": "STOP"
+    }
+  ],
+  "modelVersion": "gemini-2.5-pro",
+  "responseId": "gem-resp-001",
+  "usageMetadata": {
+    "promptTokenCount": 25,
+    "candidatesTokenCount": 6,
+    "totalTokenCount": 43,
+    "cachedContentTokenCount": 10,
+    "thoughtsTokenCount": 12
+  }
+}

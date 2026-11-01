@@ -30,7 +30,7 @@
 //!     args: ["-y", "@modelcontextprotocol/server-filesystem"]
 //! ```
 
-use crate::config::{atomic_write, get_app_config_dir};
+use crate::config::{atomic_write, atomic_write_secret, get_app_config_dir};
 use crate::error::AppError;
 use crate::settings::{effective_backup_retain_count, get_hermes_override_dir};
 use chrono::Local;
@@ -55,7 +55,9 @@ pub fn get_hermes_dir() -> PathBuf {
         return override_dir;
     }
 
-    if let Some(raw) = std::env::var_os("HERMES_HOME") {
+    // TEST-09: thread-isolated tests must not see an ambient HERMES_HOME.
+    if let Some(raw) = std::env::var_os("HERMES_HOME").filter(|_| !crate::config::thread_isolated())
+    {
         let value = raw.to_string_lossy();
         let trimmed = value.trim();
         if !trimmed.is_empty() {
@@ -70,10 +72,9 @@ pub fn get_hermes_dir() -> PathBuf {
 /// 读 `LOCALAPPDATA` 环境变量,缺失/空时回退 `~\AppData\Local`,再拼 `hermes`。
 #[cfg(target_os = "windows")]
 fn default_hermes_dir() -> PathBuf {
-    windows_local_hermes_dir(
-        std::env::var_os("LOCALAPPDATA").as_deref(),
-        &crate::config::get_home_dir(),
-    )
+    let localappdata =
+        std::env::var_os("LOCALAPPDATA").filter(|_| !crate::config::thread_isolated());
+    windows_local_hermes_dir(localappdata.as_deref(), &crate::config::get_home_dir())
 }
 
 /// 平台默认 Hermes 目录(Mac/Linux):`~/.hermes`。
@@ -112,7 +113,7 @@ fn hermes_write_lock() -> &'static Mutex<()> {
 // ============================================================================
 
 /// Hermes 写入结果
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HermesWriteOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -291,6 +292,26 @@ fn find_yaml_section_range(raw: &str, section_key: &str) -> Option<(usize, usize
     section_start.map(|start| (start, raw.len()))
 }
 
+/// Find the byte range of a top-level section's *content*.
+///
+/// Like [`find_yaml_section_range`], but blank lines and comments after the
+/// section's last content line are left out: they belong to whatever follows
+/// (typically a comment describing the next section), so replacing this
+/// section must not delete them (CFG-08).
+fn find_yaml_section_content_range(raw: &str, section_key: &str) -> Option<(usize, usize)> {
+    let (start, end) = find_yaml_section_range(raw, section_key)?;
+    let mut content_end = start;
+    let mut offset = start;
+    for (i, line) in raw[start..end].split_inclusive('\n').enumerate() {
+        offset += line.len();
+        let trimmed = line.trim();
+        if i == 0 || !(trimmed.is_empty() || trimmed.starts_with('#')) {
+            content_end = offset;
+        }
+    }
+    Some((start, content_end))
+}
+
 /// Serialize a section key + value into a YAML fragment like:
 ///
 /// ```yaml
@@ -322,38 +343,316 @@ fn remove_all_sections(raw: &str, section_key: &str) -> String {
 }
 
 /// Replace a YAML section in raw text, or append it if not found.
+///
+/// Format preservation (CFG-08):
+/// - comments/blank lines after the section (usually describing the next
+///   section) are kept, see [`find_yaml_section_content_range`];
+/// - for mapping and sequence sections only the child entries that changed
+///   are re-serialised; untouched entries keep their comments, quoting and
+///   anchors byte-for-byte (see [`splice_yaml_section`]);
+/// - newly generated text uses the file's line ending (CRLF files stay CRLF).
 fn replace_yaml_section(
     raw: &str,
     section_key: &str,
     value: &serde_yaml::Value,
 ) -> Result<String, AppError> {
-    let serialized = serialize_yaml_section(section_key, value)?;
+    let eol = crate::adapters::live_file::TextStyle::detect(raw).eol();
 
-    if let Some((start, end)) = find_yaml_section_range(raw, section_key) {
-        let mut result = String::with_capacity(raw.len());
+    if let Some((start, end)) = find_yaml_section_content_range(raw, section_key) {
+        let rendered = splice_yaml_section(&raw[start..end], section_key, value, eol)?;
+        let mut result = String::with_capacity(raw.len() + rendered.len());
         result.push_str(&raw[..start]);
-        result.push_str(&serialized);
+        result.push_str(&rendered);
         // Drop duplicate sections of this key from the remainder — configs
         // written before the CRLF fix may carry several appended copies.
         let remainder = remove_all_sections(&raw[end..], section_key);
         // Ensure proper separation between sections
-        if !serialized.ends_with('\n') && !remainder.is_empty() && !remainder.starts_with('\n') {
-            result.push('\n');
+        if !rendered.ends_with('\n')
+            && !remainder.is_empty()
+            && !remainder.starts_with(['\n', '\r'])
+        {
+            result.push_str(eol);
         }
         result.push_str(&remainder);
         Ok(result)
     } else {
         // Section not found — append at end
+        let serialized = crate::adapters::live_file::normalize_eol(
+            &serialize_yaml_section(section_key, value)?,
+            eol,
+        );
         let mut result = raw.to_string();
         if !result.is_empty() && !result.ends_with('\n') {
-            result.push('\n');
+            result.push_str(eol);
         }
         result.push_str(&serialized);
         if !result.ends_with('\n') {
-            result.push('\n');
+            result.push_str(eol);
         }
         Ok(result)
     }
+}
+
+/// Render `section_key: value` reusing as much of `raw_section` as possible.
+///
+/// `raw_section` runs from the section's key line to its last content line.
+/// When the section is a block mapping or block sequence whose entries can be
+/// parsed one by one, entries that did not change are copied verbatim
+/// (including the comments directly above them) and only changed/new entries
+/// are serialised. Anything more exotic falls back to re-serialising the
+/// whole section.
+fn splice_yaml_section(
+    raw_section: &str,
+    section_key: &str,
+    value: &serde_yaml::Value,
+    eol: &str,
+) -> Result<String, AppError> {
+    use crate::adapters::live_file::normalize_eol;
+
+    let old = serde_yaml::from_str::<serde_yaml::Mapping>(raw_section)
+        .ok()
+        .and_then(|m| {
+            m.get(serde_yaml::Value::String(section_key.to_string()))
+                .cloned()
+        });
+    if old.as_ref() == Some(value) {
+        return Ok(raw_section.to_string());
+    }
+    if let Some(old) = old {
+        if let Some(spliced) = splice_yaml_children(raw_section, section_key, &old, value, eol) {
+            return Ok(spliced);
+        }
+    }
+    Ok(normalize_eol(
+        &serialize_yaml_section(section_key, value)?,
+        eol,
+    ))
+}
+
+/// One child entry of a block mapping/sequence section.
+struct YamlChildBlock<'a> {
+    /// Comment/blank lines directly above the entry.
+    comments: Vec<&'a str>,
+    /// The entry's own lines (anchor line + continuation lines).
+    body: Vec<&'a str>,
+    value: serde_yaml::Value,
+}
+
+fn yaml_is_comment_or_blank(line: &str) -> bool {
+    let t = line.trim();
+    t.is_empty() || t.starts_with('#')
+}
+
+fn yaml_indent_of(line: &str) -> usize {
+    line.len() - line.trim_start_matches([' ', '\t']).len()
+}
+
+fn splice_yaml_children(
+    raw_section: &str,
+    section_key: &str,
+    old: &serde_yaml::Value,
+    new: &serde_yaml::Value,
+    eol: &str,
+) -> Option<String> {
+    use crate::adapters::live_file::normalize_eol;
+
+    let is_sequence = match (old, new) {
+        (serde_yaml::Value::Mapping(o), serde_yaml::Value::Mapping(n))
+            if !o.is_empty() && !n.is_empty() =>
+        {
+            false
+        }
+        (serde_yaml::Value::Sequence(o), serde_yaml::Value::Sequence(n))
+            if !o.is_empty() && !n.is_empty() =>
+        {
+            true
+        }
+        _ => return None,
+    };
+
+    let lines: Vec<&str> = raw_section.split_inclusive('\n').collect();
+    let (header, body) = lines.split_first()?;
+    // Only block style headers (`key:` optionally followed by a comment).
+    let after_key = header.strip_prefix(section_key)?.strip_prefix(':')?.trim();
+    if !(after_key.is_empty() || after_key.starts_with('#')) {
+        return None;
+    }
+
+    let first_content = body.iter().find(|l| !yaml_is_comment_or_blank(l))?;
+    let child_indent = &first_content[..yaml_indent_of(first_content)];
+    let is_anchor = |line: &str| {
+        if yaml_is_comment_or_blank(line) || yaml_indent_of(line) != child_indent.len() {
+            return false;
+        }
+        let content = line.trim_start_matches([' ', '\t']);
+        content.starts_with('-') == is_sequence
+    };
+
+    // Split the body into blocks: leading comments + anchor + continuation.
+    let mut blocks: Vec<(Vec<&str>, Vec<&str>)> = Vec::new();
+    let mut pending: Vec<&str> = Vec::new();
+    for line in body {
+        if is_anchor(line) {
+            blocks.push((std::mem::take(&mut pending), vec![*line]));
+        } else if yaml_is_comment_or_blank(line) {
+            pending.push(line);
+        } else if let Some((_, block_body)) = blocks.last_mut() {
+            // continuation line: comments seen in between belong to the entry
+            block_body.append(&mut pending);
+            block_body.push(line);
+        } else {
+            return None;
+        }
+    }
+    // the content range never ends with comments, but stay safe
+    if let Some((_, block_body)) = blocks.last_mut() {
+        block_body.append(&mut pending);
+    }
+
+    let dedent = |lines: &[&str]| -> String {
+        lines
+            .iter()
+            .map(|l| l.strip_prefix(child_indent).unwrap_or(l.trim_start()))
+            .collect::<String>()
+    };
+    let mut parsed: Vec<YamlChildBlock> = Vec::with_capacity(blocks.len());
+    for (comments, body) in blocks {
+        let text = dedent(&body);
+        let value = if is_sequence {
+            let seq: serde_yaml::Sequence = serde_yaml::from_str(&text).ok()?;
+            if seq.len() != 1 {
+                return None;
+            }
+            seq.into_iter().next()?
+        } else {
+            let map: serde_yaml::Mapping = serde_yaml::from_str(&text).ok()?;
+            if map.len() != 1 {
+                return None;
+            }
+            serde_yaml::Value::Mapping(map)
+        };
+        parsed.push(YamlChildBlock {
+            comments,
+            body,
+            value,
+        });
+    }
+
+    // The blocks must describe exactly the old value, otherwise we do not
+    // understand the layout well enough to splice it.
+    let reconstructed = if is_sequence {
+        serde_yaml::Value::Sequence(parsed.iter().map(|b| b.value.clone()).collect())
+    } else {
+        let mut map = serde_yaml::Mapping::new();
+        for b in &parsed {
+            if let serde_yaml::Value::Mapping(m) = &b.value {
+                for (k, v) in m {
+                    map.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        serde_yaml::Value::Mapping(map)
+    };
+    if &reconstructed != old {
+        return None;
+    }
+
+    let render = |entry: serde_yaml::Value| -> Option<String> {
+        let text = serde_yaml::to_string(&entry).ok()?;
+        let mut out = String::new();
+        for line in text.split_inclusive('\n') {
+            out.push_str(child_indent);
+            out.push_str(line);
+        }
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        Some(normalize_eol(&out, eol))
+    };
+    let push_lines = |out: &mut String, lines: &[&str]| {
+        for line in lines {
+            out.push_str(line);
+        }
+        if !lines.is_empty() && !out.ends_with('\n') {
+            out.push_str(eol);
+        }
+    };
+
+    let mut out = String::with_capacity(raw_section.len());
+    out.push_str(header);
+    if !out.ends_with('\n') {
+        out.push_str(eol);
+    }
+
+    if is_sequence {
+        let new_items = new.as_sequence()?;
+        let mut used = vec![false; parsed.len()];
+        for item in new_items {
+            let exact = (0..parsed.len()).find(|&i| !used[i] && parsed[i].value == *item);
+            if let Some(i) = exact {
+                used[i] = true;
+                push_lines(&mut out, &parsed[i].comments);
+                push_lines(&mut out, &parsed[i].body);
+                continue;
+            }
+            // Same `name` → edited entry: keep the comments above it.
+            let same_name = item.get("name").and_then(|name| {
+                (0..parsed.len()).find(|&i| !used[i] && parsed[i].value.get("name") == Some(name))
+            });
+            if let Some(i) = same_name {
+                used[i] = true;
+                push_lines(&mut out, &parsed[i].comments);
+            }
+            out.push_str(&render(serde_yaml::Value::Sequence(vec![item.clone()]))?);
+        }
+    } else {
+        let new_map = new.as_mapping()?;
+        let mut emitted = std::collections::HashSet::new();
+        for block in &parsed {
+            let serde_yaml::Value::Mapping(m) = &block.value else {
+                return None;
+            };
+            let (key, old_value) = m.iter().next()?;
+            match new_map.get(key) {
+                Some(new_value) if new_value == old_value => {
+                    push_lines(&mut out, &block.comments);
+                    push_lines(&mut out, &block.body);
+                }
+                Some(new_value) => {
+                    push_lines(&mut out, &block.comments);
+                    let mut entry = serde_yaml::Mapping::new();
+                    entry.insert(key.clone(), new_value.clone());
+                    out.push_str(&render(serde_yaml::Value::Mapping(entry))?);
+                }
+                None => continue,
+            }
+            emitted.insert(key.clone());
+        }
+        for (key, value) in new_map {
+            if emitted.contains(key) {
+                continue;
+            }
+            let mut entry = serde_yaml::Mapping::new();
+            entry.insert(key.clone(), value.clone());
+            out.push_str(&render(serde_yaml::Value::Mapping(entry))?);
+        }
+    }
+
+    // The rendered section must parse back to exactly the requested value.
+    let check: serde_yaml::Mapping = serde_yaml::from_str(&out).ok()?;
+    if check.get(serde_yaml::Value::String(section_key.to_string())) != Some(new) {
+        return None;
+    }
+    // Keep "no trailing newline at EOF" files that way.
+    if !raw_section.ends_with('\n') {
+        while out.ends_with('\n') {
+            out.pop();
+            if out.ends_with('\r') {
+                out.pop();
+            }
+        }
+    }
+    Some(out)
 }
 
 // ============================================================================
@@ -375,7 +674,7 @@ fn create_hermes_backup(source: &str) -> Result<PathBuf, AppError> {
         counter += 1;
     }
 
-    atomic_write(&backup_path, source.as_bytes())?;
+    atomic_write_secret(&backup_path, source.as_bytes())?;
     cleanup_hermes_backups(&backup_dir)?;
     Ok(backup_path)
 }
@@ -456,7 +755,7 @@ fn write_yaml_section_to_config_locked(
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
 
-    atomic_write(&config_path, new_raw.as_bytes())?;
+    atomic_write_secret(&config_path, new_raw.as_bytes())?;
 
     log::debug!(
         "Hermes config section '{}' written to {:?}",
@@ -808,6 +1107,23 @@ pub fn set_provider(
     let mut normalized = provider_config;
     sanitize_hermes_provider_keys(&mut normalized);
 
+    // `null` in the payload is an explicit delete (CFG-18): the key is dropped
+    // from the entry and not carried over from disk below.
+    let deleted_keys: Vec<String> = normalized
+        .as_object_mut()
+        .map(|obj| {
+            let keys: Vec<String> = obj
+                .iter()
+                .filter(|(_, v)| v.is_null())
+                .map(|(k, _)| k.clone())
+                .collect();
+            for key in &keys {
+                obj.remove(key);
+            }
+            keys
+        })
+        .unwrap_or_default();
+
     // Normalize `models` from UI array to Hermes YAML dict before serializing.
     normalize_provider_models_for_write(&mut normalized);
 
@@ -848,7 +1164,12 @@ pub fn set_provider(
             (existing.as_mapping(), &mut yaml_val)
         {
             for (k, v) in existing_map {
-                new_map.entry(k.clone()).or_insert_with(|| v.clone());
+                let deleted = k
+                    .as_str()
+                    .is_some_and(|key| deleted_keys.iter().any(|d| d == key));
+                if !deleted {
+                    new_map.entry(k.clone()).or_insert_with(|| v.clone());
+                }
             }
         }
         *existing = yaml_val;
@@ -870,6 +1191,29 @@ pub fn remove_provider(name: &str) -> Result<HermesWriteOutcome, AppError> {
     let config = read_hermes_config()?;
 
     ensure_provider_writable(&config, name, "remove")?;
+
+    let exists = config
+        .get("custom_providers")
+        .and_then(|v| v.as_sequence())
+        .is_some_and(|seq| {
+            seq.iter()
+                .any(|p| p.get("name").and_then(|n| n.as_str()) == Some(name))
+        });
+    // PRODUCT-71: refuse to leave `model.provider` pointing at a removed entry.
+    let backs_default = config
+        .get("model")
+        .and_then(|m| m.get("provider"))
+        .and_then(|p| p.as_str())
+        .is_some_and(|p| p == name);
+    if exists && backs_default {
+        return Err(AppError::localized(
+            "hermes.providerBacksDefaultModel",
+            format!("供应商 '{name}' 是当前默认模型的来源（model.provider），请先切换到其他供应商再移除"),
+            format!(
+                "Provider '{name}' is the default model provider (model.provider). Switch to another provider before removing it."
+            ),
+        ));
+    }
 
     let mut providers: Vec<serde_yaml::Value> = config
         .get("custom_providers")
@@ -1019,7 +1363,7 @@ pub(crate) fn json_to_yaml(json: &serde_json::Value) -> Result<serde_yaml::Value
 /// Which of Hermes' two memory files to operate on. Tauri deserializes this
 /// directly from the `"memory"` / `"user"` strings the frontend sends, so an
 /// unknown value is rejected at the IPC boundary instead of deep in the stack.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum MemoryKind {
     Memory,
@@ -1061,7 +1405,7 @@ pub fn write_memory(kind: MemoryKind, content: &str) -> Result<(), AppError> {
 /// Character budget + enable flags for the two memory blobs, as configured
 /// in Hermes' `config.yaml`. Defaults mirror `~/.hermes`'s own defaults so
 /// callers get a usable budget bar even before the user edits config.yaml.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HermesMemoryLimits {
     pub memory: usize,
@@ -1138,1307 +1482,4 @@ pub fn read_memory_limits() -> Result<HermesMemoryLimits, AppError> {
 // ============================================================================
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serial_test::serial;
-    use std::sync::{Mutex, OnceLock};
-
-    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-    }
-
-    /// Run a test with an isolated temp home directory.
-    ///
-    /// Saves and restores `CC_SWITCH_TEST_HOME` to avoid interfering with
-    /// parallel tests in other modules.
-    fn with_test_home<T>(test_fn: impl FnOnce() -> T) -> T {
-        let _guard = test_guard();
-        let tmp = tempfile::tempdir().unwrap();
-        let old_test_home = std::env::var_os("CC_SWITCH_TEST_HOME");
-        std::env::set_var("CC_SWITCH_TEST_HOME", tmp.path());
-        // Neutralize the env vars get_hermes_dir() consults, so an ambient
-        // HERMES_HOME / LOCALAPPDATA (e.g. set by a Hermes install) can't make
-        // tests escape the temp home. Restored below.
-        let old_hermes_home = std::env::var_os("HERMES_HOME");
-        let old_local_appdata = std::env::var_os("LOCALAPPDATA");
-        std::env::remove_var("HERMES_HOME");
-        std::env::remove_var("LOCALAPPDATA");
-        let result = test_fn();
-        match old_local_appdata {
-            Some(value) => std::env::set_var("LOCALAPPDATA", value),
-            None => std::env::remove_var("LOCALAPPDATA"),
-        }
-        match old_hermes_home {
-            Some(value) => std::env::set_var("HERMES_HOME", value),
-            None => std::env::remove_var("HERMES_HOME"),
-        }
-        match old_test_home {
-            Some(value) => std::env::set_var("CC_SWITCH_TEST_HOME", value),
-            None => std::env::remove_var("CC_SWITCH_TEST_HOME"),
-        }
-        result
-    }
-
-    // ---- sanitize_hermes_provider_keys tests ----
-
-    #[test]
-    fn sanitize_rewrites_camel_case_aliases() {
-        let mut v = serde_json::json!({
-            "name": "test",
-            "baseUrl": "https://api.example.com",
-            "apiKey": "sk-123",
-            "apiMode": "chat_completions",
-            "maxTokens": 8192,
-            "contextLength": 200000,
-        });
-        sanitize_hermes_provider_keys(&mut v);
-        let obj = v.as_object().unwrap();
-        assert_eq!(obj.get("base_url").unwrap(), "https://api.example.com");
-        assert_eq!(obj.get("api_key").unwrap(), "sk-123");
-        assert_eq!(obj.get("api_mode").unwrap(), "chat_completions");
-        assert_eq!(obj.get("max_tokens").unwrap(), 8192);
-        assert_eq!(obj.get("context_length").unwrap(), 200000);
-        assert!(obj.get("baseUrl").is_none());
-        assert!(obj.get("apiKey").is_none());
-    }
-
-    #[test]
-    fn sanitize_drops_stale_duplicate_when_snake_case_exists() {
-        let mut v = serde_json::json!({
-            "baseUrl": "https://old.example.com",
-            "base_url": "https://new.example.com",
-        });
-        sanitize_hermes_provider_keys(&mut v);
-        let obj = v.as_object().unwrap();
-        // snake_case wins; stale camelCase is dropped
-        assert_eq!(obj.get("base_url").unwrap(), "https://new.example.com");
-        assert!(obj.get("baseUrl").is_none());
-    }
-
-    #[test]
-    fn sanitize_drops_legacy_api_field() {
-        let mut v = serde_json::json!({
-            "base_url": "https://api.example.com",
-            "api": "openai-completions",
-        });
-        sanitize_hermes_provider_keys(&mut v);
-        let obj = v.as_object().unwrap();
-        assert!(obj.get("api").is_none(), "legacy 'api' key must be removed");
-        assert!(obj.get("base_url").is_some());
-    }
-
-    #[test]
-    fn sanitize_preserves_unknown_fields() {
-        let mut v = serde_json::json!({
-            "base_url": "https://api.example.com",
-            "request_timeout_seconds": 300,
-            "rate_limit_delay": 1.5,
-        });
-        sanitize_hermes_provider_keys(&mut v);
-        let obj = v.as_object().unwrap();
-        // Forward-compat: Hermes' own new fields pass through untouched
-        assert_eq!(obj.get("request_timeout_seconds").unwrap(), 300);
-        assert_eq!(obj.get("rate_limit_delay").unwrap(), 1.5);
-    }
-
-    #[test]
-    fn sanitize_noop_on_non_object() {
-        let mut v = serde_json::json!(["not", "an", "object"]);
-        sanitize_hermes_provider_keys(&mut v);
-        assert!(v.is_array());
-    }
-
-    // ---- find_yaml_section_range tests ----
-
-    #[test]
-    fn find_section_in_multi_section_yaml() {
-        let yaml = "\
-model:
-  default: gpt-4
-  provider: openai
-agent:
-  max_turns: 10
-custom_providers:
-  - name: foo
-";
-        let (start, end) = find_yaml_section_range(yaml, "agent").unwrap();
-        let section = &yaml[start..end];
-        assert!(section.starts_with("agent:"));
-        assert!(section.contains("max_turns"));
-        assert!(!section.contains("custom_providers"));
-    }
-
-    #[test]
-    fn find_section_at_end_of_file() {
-        let yaml = "\
-model:
-  default: gpt-4
-agent:
-  max_turns: 10
-";
-        let (start, end) = find_yaml_section_range(yaml, "agent").unwrap();
-        let section = &yaml[start..end];
-        assert!(section.starts_with("agent:"));
-        assert!(section.contains("max_turns"));
-        assert_eq!(end, yaml.len());
-    }
-
-    #[test]
-    fn find_section_not_found() {
-        let yaml = "\
-model:
-  default: gpt-4
-";
-        assert!(find_yaml_section_range(yaml, "agent").is_none());
-    }
-
-    #[test]
-    fn find_section_with_comments_between() {
-        let yaml = "\
-model:
-  default: gpt-4
-
-# This is a comment
-  # indented comment
-
-agent:
-  max_turns: 10
-";
-        // model section should span from start to "agent:"
-        let (start, end) = find_yaml_section_range(yaml, "model").unwrap();
-        let section = &yaml[start..end];
-        assert!(section.starts_with("model:"));
-        // Comments and blank lines between sections are included in the prior section
-        assert!(section.contains("# This is a comment"));
-    }
-
-    #[test]
-    fn find_section_with_empty_lines() {
-        let yaml = "\
-model:
-  default: gpt-4
-
-agent:
-  max_turns: 10
-";
-        let (start, end) = find_yaml_section_range(yaml, "model").unwrap();
-        let section = &yaml[start..end];
-        assert!(section.starts_with("model:"));
-        // Empty lines don't terminate a section
-        assert!(section.contains('\n'));
-    }
-
-    #[test]
-    fn find_section_does_not_match_substring_key() {
-        let yaml = "\
-model_extra:
-  foo: bar
-model:
-  default: gpt-4
-";
-        let (start, _end) = find_yaml_section_range(yaml, "model").unwrap();
-        let section = &yaml[start..];
-        // Should match "model:", not "model_extra:"
-        assert!(section.starts_with("model:"));
-        assert!(!section.starts_with("model_extra:"));
-    }
-
-    #[test]
-    fn find_section_handles_crlf() {
-        // Regression for #3633: CRLF line endings must not hide sections.
-        let yaml = "model:\r\n  default: gpt-4\r\nagent:\r\n  max_turns: 10\r\n";
-        let (start, end) = find_yaml_section_range(yaml, "model").unwrap();
-        let section = &yaml[start..end];
-        assert!(section.starts_with("model:"));
-        assert!(section.contains("default: gpt-4"));
-        assert!(!section.contains("agent:"));
-    }
-
-    // ---- deduplicate_top_level_keys tests ----
-
-    #[test]
-    fn dedup_keeps_last_occurrence() {
-        // Duplicates come from replace-degraded-to-append, so the last block
-        // is the newest data and must win (PyYAML last-wins, like Hermes).
-        let yaml = "\
-model:
-  default: gpt-4
-agent:
-  max_turns: 10
-model:
-  default: claude-opus-4-8
-";
-        let result = deduplicate_top_level_keys(yaml);
-        assert_eq!(
-            result.lines().filter(|l| *l == "model:").count(),
-            1,
-            "duplicate model: section was not removed"
-        );
-        assert!(result.contains("claude-opus-4-8"));
-        assert!(!result.contains("gpt-4"));
-        assert!(result.contains("max_turns"));
-    }
-
-    #[test]
-    fn dedup_handles_crlf() {
-        let yaml = "model:\r\n  default: gpt-4\r\nagent:\r\n  max_turns: 10\r\nmodel:\r\n  default: claude\r\n";
-        let result = deduplicate_top_level_keys(yaml);
-        assert_eq!(result.lines().filter(|l| l.trim() == "model:").count(), 1);
-        assert!(result.contains("default: claude"));
-        assert!(!result.contains("gpt-4"));
-    }
-
-    #[test]
-    fn dedup_is_identity_without_duplicates() {
-        let yaml = "\
-# Hermes config
-model:
-  default: gpt-4
-
-agent:
-  max_turns: 10
-";
-        assert_eq!(deduplicate_top_level_keys(yaml), yaml);
-    }
-
-    #[test]
-    fn dedup_result_parses_with_last_value() {
-        // End-to-end: a config that serde_yaml rejects today must parse after
-        // healing, and expose the newest (last) value.
-        let yaml = "\
-custom_providers:
-  - name: old-provider
-model:
-  default: gpt-4
-custom_providers:
-  - name: old-provider
-  - name: new-provider
-";
-        let healed = deduplicate_top_level_keys(yaml);
-        let value: serde_yaml::Value = serde_yaml::from_str(&healed).unwrap();
-        let providers = value
-            .get("custom_providers")
-            .unwrap()
-            .as_sequence()
-            .unwrap();
-        assert_eq!(providers.len(), 2);
-        assert_eq!(
-            providers[1].get("name").unwrap().as_str().unwrap(),
-            "new-provider"
-        );
-    }
-
-    // ---- remove_all_sections tests ----
-
-    #[test]
-    fn remove_all_sections_strips_every_occurrence() {
-        let yaml = "\
-model:
-  default: gpt-4
-agent:
-  max_turns: 10
-model:
-  default: claude
-model:
-  default: gemini
-";
-        let result = remove_all_sections(yaml, "model");
-        assert!(!result.contains("model:"));
-        assert!(result.contains("agent:"));
-        assert!(result.contains("max_turns"));
-    }
-
-    // ---- replace_yaml_section tests ----
-
-    #[test]
-    fn replace_existing_section() {
-        let yaml = "\
-model:
-  default: gpt-4
-  provider: openai
-agent:
-  max_turns: 10
-";
-        let new_model = serde_yaml::Value::Mapping({
-            let mut m = serde_yaml::Mapping::new();
-            m.insert(
-                serde_yaml::Value::String("default".to_string()),
-                serde_yaml::Value::String("claude-opus-4-8".to_string()),
-            );
-            m.insert(
-                serde_yaml::Value::String("provider".to_string()),
-                serde_yaml::Value::String("anthropic".to_string()),
-            );
-            m
-        });
-
-        let result = replace_yaml_section(yaml, "model", &new_model).unwrap();
-        // The result should still contain the agent section
-        assert!(result.contains("agent:"));
-        assert!(result.contains("max_turns"));
-        // And the model section should be updated
-        assert!(result.contains("claude-opus-4-8"));
-        assert!(result.contains("anthropic"));
-        assert!(!result.contains("gpt-4"));
-        assert!(!result.contains("openai"));
-    }
-
-    #[test]
-    fn replace_section_in_crlf_config_replaces_in_place() {
-        // Regression for #3633: on CRLF configs every "replace" used to
-        // degrade into an append, piling up duplicate sections.
-        let yaml = "model:\r\n  default: gpt-4\r\nagent:\r\n  max_turns: 10\r\n";
-        let new_model = serde_yaml::Value::Mapping({
-            let mut m = serde_yaml::Mapping::new();
-            m.insert(
-                serde_yaml::Value::String("default".to_string()),
-                serde_yaml::Value::String("claude-opus-4-8".to_string()),
-            );
-            m
-        });
-
-        let result = replace_yaml_section(yaml, "model", &new_model).unwrap();
-        assert_eq!(
-            result.lines().filter(|l| l.trim() == "model:").count(),
-            1,
-            "model: must be replaced in place, not appended"
-        );
-        assert!(result.contains("claude-opus-4-8"));
-        assert!(!result.contains("gpt-4"));
-        assert!(result.contains("max_turns"));
-    }
-
-    #[test]
-    fn replace_section_removes_residual_duplicates() {
-        // A config already broken by the append bug: replacing the section
-        // must also clean the stale duplicate copies after it.
-        let yaml = "\
-model:
-  default: gpt-4
-agent:
-  max_turns: 10
-model:
-  default: stale-copy
-";
-        let new_model = serde_yaml::Value::Mapping({
-            let mut m = serde_yaml::Mapping::new();
-            m.insert(
-                serde_yaml::Value::String("default".to_string()),
-                serde_yaml::Value::String("claude-opus-4-8".to_string()),
-            );
-            m
-        });
-
-        let result = replace_yaml_section(yaml, "model", &new_model).unwrap();
-        assert_eq!(result.lines().filter(|l| *l == "model:").count(), 1);
-        assert!(result.contains("claude-opus-4-8"));
-        assert!(!result.contains("stale-copy"));
-        assert!(result.contains("agent:"));
-        // The healed output must be valid YAML again
-        let parsed: Result<serde_yaml::Value, _> = serde_yaml::from_str(&result);
-        assert!(parsed.is_ok());
-    }
-
-    #[test]
-    fn append_new_section() {
-        let yaml = "\
-model:
-  default: gpt-4
-";
-        let new_agent = serde_yaml::Value::Mapping({
-            let mut m = serde_yaml::Mapping::new();
-            m.insert(
-                serde_yaml::Value::String("max_turns".to_string()),
-                serde_yaml::Value::Number(serde_yaml::Number::from(50)),
-            );
-            m
-        });
-
-        let result = replace_yaml_section(yaml, "agent", &new_agent).unwrap();
-        assert!(result.contains("model:"));
-        assert!(result.contains("gpt-4"));
-        assert!(result.contains("agent:"));
-        assert!(result.contains("max_turns: 50"));
-    }
-
-    #[test]
-    fn replace_section_in_empty_file() {
-        let yaml = "";
-        let new_model = serde_yaml::Value::Mapping({
-            let mut m = serde_yaml::Mapping::new();
-            m.insert(
-                serde_yaml::Value::String("default".to_string()),
-                serde_yaml::Value::String("gpt-4".to_string()),
-            );
-            m
-        });
-
-        let result = replace_yaml_section(yaml, "model", &new_model).unwrap();
-        assert!(result.contains("model:"));
-        assert!(result.contains("gpt-4"));
-        assert!(result.ends_with('\n'));
-    }
-
-    // ---- Provider CRUD via mock config ----
-
-    #[test]
-    #[serial]
-    fn provider_crud_roundtrip() {
-        with_test_home(|| {
-            // Initially no providers
-            let providers = get_providers().unwrap();
-            assert!(providers.is_empty());
-
-            // Add a provider
-            let config = serde_json::json!({
-                "base_url": "https://openrouter.ai/api/v1",
-                "api_key": "sk-or-test"
-            });
-            set_provider("openrouter", config).unwrap();
-
-            let providers = get_providers().unwrap();
-            assert_eq!(providers.len(), 1);
-            assert!(providers.contains_key("openrouter"));
-
-            let provider = get_provider("openrouter").unwrap().unwrap();
-            assert_eq!(provider["base_url"], "https://openrouter.ai/api/v1");
-            assert_eq!(provider["name"], "openrouter");
-
-            // Update the provider
-            let config2 = serde_json::json!({
-                "base_url": "https://openrouter.ai/api/v2",
-                "api_key": "sk-or-updated"
-            });
-            set_provider("openrouter", config2).unwrap();
-
-            let provider = get_provider("openrouter").unwrap().unwrap();
-            assert_eq!(provider["base_url"], "https://openrouter.ai/api/v2");
-
-            // Remove the provider
-            remove_provider("openrouter").unwrap();
-            let providers = get_providers().unwrap();
-            assert!(providers.is_empty());
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn set_provider_preserves_unknown_fields_on_update() {
-        // Hermes keeps adding provider-level fields (e.g.
-        // `request_timeout_seconds`, `key_env`). Users may set those via
-        // Hermes Web UI; a later CC Switch edit must not strip them — set_provider
-        // carries over any existing on-disk fields that the UI payload didn't
-        // submit.
-        with_test_home(|| {
-            let yaml = "\
-custom_providers:
-  - name: acme
-    base_url: https://old.example.com
-    api_key: sk-old
-    request_timeout_seconds: 300
-    key_env: ACME_API_KEY
-";
-            let config_path = get_hermes_config_path();
-            fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-            fs::write(&config_path, yaml).unwrap();
-
-            let update = serde_json::json!({
-                "base_url": "https://new.example.com",
-                "api_key": "sk-new"
-            });
-            set_provider("acme", update).unwrap();
-
-            let provider = get_provider("acme").unwrap().unwrap();
-            assert_eq!(provider["base_url"], "https://new.example.com");
-            assert_eq!(provider["api_key"], "sk-new");
-            assert_eq!(provider["request_timeout_seconds"], 300);
-            assert_eq!(provider["key_env"], "ACME_API_KEY");
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn get_providers_surfaces_providers_dict_as_read_only() {
-        with_test_home(|| {
-            let yaml = "\
-_config_version: 19
-custom_providers:
-  - name: mine
-    base_url: https://mine.example.com
-    api_key: sk-mine
-providers:
-  anthropic:
-    base_url: https://api.anthropic.com
-    api_key: sk-ant
-    model: claude-opus-4.6
-  ollama-local:
-    base_url: http://localhost:11434/v1
-    request_timeout_seconds: 300
-";
-            let config_path = get_hermes_config_path();
-            fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-            fs::write(&config_path, yaml).unwrap();
-
-            let providers = get_providers().unwrap();
-            assert_eq!(providers.len(), 3);
-
-            let mine = providers.get("mine").unwrap();
-            assert_eq!(mine[PROVIDER_SOURCE_FIELD], PROVIDER_SOURCE_CUSTOM_LIST);
-
-            let anthropic = providers.get("anthropic").unwrap();
-            assert_eq!(anthropic[PROVIDER_SOURCE_FIELD], PROVIDER_SOURCE_DICT);
-            assert_eq!(anthropic["provider_key"], "anthropic");
-            assert_eq!(anthropic["base_url"], "https://api.anthropic.com");
-
-            let ollama = providers.get("ollama-local").unwrap();
-            assert_eq!(ollama[PROVIDER_SOURCE_FIELD], PROVIDER_SOURCE_DICT);
-            // Forward-compat fields from the dict pass through untouched
-            assert_eq!(ollama["request_timeout_seconds"], 300);
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn get_providers_list_wins_on_name_collision() {
-        with_test_home(|| {
-            let yaml = "\
-_config_version: 19
-custom_providers:
-  - name: shared
-    base_url: https://writable.example.com
-providers:
-  shared:
-    base_url: https://overlay.example.com
-";
-            let config_path = get_hermes_config_path();
-            fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-            fs::write(&config_path, yaml).unwrap();
-
-            let providers = get_providers().unwrap();
-            assert_eq!(providers.len(), 1);
-            let shared = providers.get("shared").unwrap();
-            assert_eq!(shared["base_url"], "https://writable.example.com");
-            assert_eq!(shared[PROVIDER_SOURCE_FIELD], PROVIDER_SOURCE_CUSTOM_LIST);
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn set_provider_rejects_dict_only_entries() {
-        with_test_home(|| {
-            let yaml = "\
-_config_version: 19
-providers:
-  anthropic:
-    base_url: https://api.anthropic.com
-    model: claude-opus-4.6
-";
-            let config_path = get_hermes_config_path();
-            fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-            fs::write(&config_path, yaml).unwrap();
-
-            let update = serde_json::json!({ "base_url": "https://hacked.example.com" });
-            let err = set_provider("anthropic", update).unwrap_err();
-            assert!(
-                format!("{err}").contains("providers:"),
-                "error message should point user at providers dict: {err}"
-            );
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn remove_provider_rejects_dict_only_entries() {
-        with_test_home(|| {
-            let yaml = "\
-_config_version: 19
-providers:
-  anthropic:
-    base_url: https://api.anthropic.com
-";
-            let config_path = get_hermes_config_path();
-            fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-            fs::write(&config_path, yaml).unwrap();
-
-            assert!(remove_provider("anthropic").is_err());
-        });
-    }
-
-    #[test]
-    fn sanitize_strips_ui_only_markers() {
-        let mut v = serde_json::json!({
-            "base_url": "https://api.example.com",
-            "_cc_source": "providers_dict",
-            "provider_key": "anthropic",
-        });
-        sanitize_hermes_provider_keys(&mut v);
-        let obj = v.as_object().unwrap();
-        assert!(obj.get("_cc_source").is_none());
-        assert!(obj.get("provider_key").is_none());
-        assert!(obj.get("base_url").is_some());
-    }
-
-    #[test]
-    #[serial]
-    fn get_providers_heals_legacy_camel_case_on_read() {
-        // A DB may still hold records from older DeepLink imports that wrote
-        // camelCase fields into `settings_config`. The read path must surface
-        // them in Hermes' native snake_case so UI editors aren't lying to users.
-        with_test_home(|| {
-            let yaml = "\
-custom_providers:
-  - name: legacy
-    baseUrl: https://legacy.example.com
-    apiKey: sk-legacy
-    apiMode: chat_completions
-    api: openai-completions
-";
-            let config_path = get_hermes_config_path();
-            fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-            fs::write(&config_path, yaml).unwrap();
-
-            let provider = get_provider("legacy").unwrap().unwrap();
-            assert_eq!(provider["base_url"], "https://legacy.example.com");
-            assert_eq!(provider["api_key"], "sk-legacy");
-            assert_eq!(provider["api_mode"], "chat_completions");
-            assert!(provider.get("baseUrl").is_none());
-            assert!(provider.get("apiKey").is_none());
-            assert!(provider.get("api").is_none());
-        });
-    }
-
-    // ---- Model config tests ----
-
-    #[test]
-    #[serial]
-    fn model_config_roundtrip() {
-        with_test_home(|| {
-            // Initially none
-            assert!(get_model_config().unwrap().is_none());
-
-            let model = HermesModelConfig {
-                default: Some("anthropic/claude-opus-4-8".to_string()),
-                provider: Some("openrouter".to_string()),
-                base_url: Some("https://openrouter.ai/api/v1".to_string()),
-                context_length: Some(200000),
-                max_tokens: None,
-                extra: HashMap::new(),
-            };
-            set_model_config(&model).unwrap();
-
-            let read_model = get_model_config().unwrap().unwrap();
-            assert_eq!(
-                read_model.default.as_deref(),
-                Some("anthropic/claude-opus-4-8")
-            );
-            assert_eq!(read_model.provider.as_deref(), Some("openrouter"));
-            assert_eq!(read_model.context_length, Some(200000));
-        });
-    }
-
-    // ---- yaml_to_json / json_to_yaml ----
-
-    #[test]
-    fn yaml_json_conversion_roundtrip() {
-        let json = serde_json::json!({
-            "name": "test",
-            "count": 42,
-            "nested": {
-                "flag": true
-            }
-        });
-        let yaml = json_to_yaml(&json).unwrap();
-        let back = yaml_to_json(&yaml).unwrap();
-        assert_eq!(json, back);
-    }
-
-    // ---- models array ↔ dict transforms ----
-
-    #[test]
-    fn models_array_to_dict_strips_id_and_preserves_order() {
-        let arr = vec![
-            serde_json::json!({ "id": "foo", "context_length": 100 }),
-            serde_json::json!({ "id": "bar", "max_tokens": 2000 }),
-            serde_json::json!({ "id": "baz" }),
-        ];
-        let dict = models_array_to_dict(arr);
-        let obj = dict.as_object().unwrap();
-        let keys: Vec<&String> = obj.keys().collect();
-        assert_eq!(keys, vec!["foo", "bar", "baz"]);
-        assert_eq!(obj["foo"]["context_length"], 100);
-        assert_eq!(obj["bar"]["max_tokens"], 2000);
-        assert!(obj["baz"].as_object().unwrap().is_empty());
-        // id must not leak into values
-        assert!(obj["foo"].get("id").is_none());
-    }
-
-    #[test]
-    fn models_array_to_dict_drops_empty_and_missing_ids() {
-        let arr = vec![
-            serde_json::json!({ "id": "", "context_length": 1 }),
-            serde_json::json!({ "id": "   ", "context_length": 2 }),
-            serde_json::json!({ "context_length": 3 }),
-            serde_json::json!({ "id": "kept" }),
-        ];
-        let dict = models_array_to_dict(arr);
-        let obj = dict.as_object().unwrap();
-        assert_eq!(obj.len(), 1);
-        assert!(obj.contains_key("kept"));
-    }
-
-    #[test]
-    fn models_dict_to_array_reinjects_id_and_preserves_order() {
-        let mut map = serde_json::Map::new();
-        map.insert(
-            "alpha".to_string(),
-            serde_json::json!({ "context_length": 10 }),
-        );
-        map.insert("beta".to_string(), serde_json::json!({ "max_tokens": 20 }));
-        map.insert("gamma".to_string(), serde_json::Value::Null);
-        let arr = models_dict_to_array(map);
-        let list = arr.as_array().unwrap();
-        assert_eq!(list.len(), 3);
-        assert_eq!(list[0]["id"], "alpha");
-        assert_eq!(list[0]["context_length"], 10);
-        assert_eq!(list[1]["id"], "beta");
-        assert_eq!(list[2]["id"], "gamma");
-    }
-
-    #[test]
-    #[serial]
-    fn provider_with_models_array_writes_dict_to_yaml() {
-        with_test_home(|| {
-            let config = serde_json::json!({
-                "base_url": "https://api.example.com/v1",
-                "api_key": "sk-test",
-                "api_mode": "chat_completions",
-                "models": [
-                    { "id": "model-a", "context_length": 200000, "max_tokens": 32000 },
-                    { "id": "model-b", "context_length": 100000 },
-                ]
-            });
-            set_provider("demo", config).unwrap();
-
-            // Read raw YAML to verify the on-disk shape is a sequence under `custom_providers:`.
-            let raw = fs::read_to_string(get_hermes_config_path()).unwrap();
-            let yaml: serde_yaml::Value = serde_yaml::from_str(&raw).unwrap();
-            let providers = yaml
-                .get("custom_providers")
-                .and_then(|v| v.as_sequence())
-                .unwrap();
-            let provider = &providers[0];
-            assert_eq!(
-                provider.get("name").and_then(|v| v.as_str()),
-                Some("demo"),
-                "entry should carry a name field"
-            );
-            assert_eq!(
-                provider.get("model").and_then(|v| v.as_str()),
-                Some("model-a"),
-                "entry should carry a singular `model:` field set to the first model id \
-                 so Hermes runtime/picker reads it"
-            );
-            let models = provider.get("models").and_then(|v| v.as_mapping()).unwrap();
-            assert_eq!(models.len(), 2);
-            assert!(models.contains_key(serde_yaml::Value::String("model-a".into())));
-            assert!(models.contains_key(serde_yaml::Value::String("model-b".into())));
-            let model_a = models
-                .get(serde_yaml::Value::String("model-a".into()))
-                .unwrap();
-            assert_eq!(
-                model_a
-                    .get("context_length")
-                    .and_then(|v| v.as_u64())
-                    .unwrap(),
-                200000
-            );
-            // id should not leak into each model value
-            assert!(model_a.get("id").is_none());
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn provider_models_roundtrip_array_dict_array_preserves_order() {
-        with_test_home(|| {
-            let input = serde_json::json!({
-                "base_url": "https://api.example.com/v1",
-                "api_key": "sk-test",
-                "models": [
-                    { "id": "first", "context_length": 1 },
-                    { "id": "second", "context_length": 2 },
-                    { "id": "third", "context_length": 3 },
-                ]
-            });
-            set_provider("order", input).unwrap();
-
-            let providers = get_providers().unwrap();
-            let provider = providers.get("order").unwrap();
-            let models = provider.get("models").and_then(|v| v.as_array()).unwrap();
-            let ids: Vec<&str> = models
-                .iter()
-                .map(|m| m.get("id").and_then(|v| v.as_str()).unwrap())
-                .collect();
-            assert_eq!(ids, vec!["first", "second", "third"]);
-            assert_eq!(models[0].get("context_length").unwrap(), 1);
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn provider_without_models_is_unaffected() {
-        with_test_home(|| {
-            let input = serde_json::json!({
-                "base_url": "https://api.example.com/v1",
-                "api_key": "sk-test"
-            });
-            set_provider("simple", input).unwrap();
-            let providers = get_providers().unwrap();
-            let provider = providers.get("simple").unwrap();
-            assert!(provider.get("models").is_none());
-            assert!(
-                provider.get("model").is_none(),
-                "singular `model:` should not appear when no models are declared"
-            );
-        });
-    }
-
-    // ---- apply_switch_defaults ----
-
-    #[test]
-    #[serial]
-    fn apply_switch_defaults_sets_default_and_provider() {
-        with_test_home(|| {
-            let settings = serde_json::json!({
-                "base_url": "https://api.example.com/v1",
-                "models": [
-                    { "id": "primary-model", "context_length": 200000 },
-                    { "id": "fallback", "context_length": 100000 },
-                ]
-            });
-            apply_switch_defaults("demo", &settings).unwrap();
-
-            let model = get_model_config().unwrap().unwrap();
-            assert_eq!(model.default.as_deref(), Some("primary-model"));
-            assert_eq!(model.provider.as_deref(), Some("demo"));
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn apply_switch_defaults_preserves_user_context_length() {
-        with_test_home(|| {
-            // User previously set a custom context_length via the Model panel.
-            let initial = HermesModelConfig {
-                default: Some("old-model".to_string()),
-                provider: Some("old-provider".to_string()),
-                base_url: Some("https://user-override.example.com".to_string()),
-                context_length: Some(131072),
-                max_tokens: Some(16384),
-                extra: HashMap::new(),
-            };
-            set_model_config(&initial).unwrap();
-
-            let settings = serde_json::json!({
-                "models": [{ "id": "new-model" }]
-            });
-            apply_switch_defaults("new-provider", &settings).unwrap();
-
-            let model = get_model_config().unwrap().unwrap();
-            assert_eq!(model.default.as_deref(), Some("new-model"));
-            assert_eq!(model.provider.as_deref(), Some("new-provider"));
-            // User-customized fields must survive the switch.
-            assert_eq!(
-                model.base_url.as_deref(),
-                Some("https://user-override.example.com")
-            );
-            assert_eq!(model.context_length, Some(131072));
-            assert_eq!(model.max_tokens, Some(16384));
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn apply_switch_defaults_updates_provider_even_without_models() {
-        with_test_home(|| {
-            // Seed an existing `model:` section — the user was already running
-            // some provider before this switch.
-            let initial = HermesModelConfig {
-                default: Some("legacy-default".to_string()),
-                provider: Some("legacy-provider".to_string()),
-                ..Default::default()
-            };
-            set_model_config(&initial).unwrap();
-
-            // New provider has no `models` list — previously this would no-op
-            // and leave `model.provider` pointing at the legacy provider,
-            // causing "switch succeeds but has no effect" bug.
-            let settings = serde_json::json!({
-                "base_url": "https://api.example.com/v1"
-            });
-            apply_switch_defaults("bare", &settings).unwrap();
-
-            let model = get_model_config().unwrap().unwrap();
-            assert_eq!(model.provider.as_deref(), Some("bare"));
-            assert_eq!(model.default.as_deref(), Some("legacy-default"));
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn apply_switch_defaults_keeps_old_default_when_first_model_id_is_blank() {
-        with_test_home(|| {
-            let initial = HermesModelConfig {
-                default: Some("prev-default".to_string()),
-                provider: Some("prev-provider".to_string()),
-                ..Default::default()
-            };
-            set_model_config(&initial).unwrap();
-
-            let settings = serde_json::json!({
-                "models": [{ "id": "   " }, { "id": "real" }]
-            });
-            apply_switch_defaults("edge", &settings).unwrap();
-
-            let model = get_model_config().unwrap().unwrap();
-            // Provider always updates.
-            assert_eq!(model.provider.as_deref(), Some("edge"));
-            // First entry's id is whitespace-only → blank → fall back to old default
-            // (we intentionally don't scan past the first entry for a default).
-            assert_eq!(model.default.as_deref(), Some("prev-default"));
-        });
-    }
-
-    // ---- memory file tests ----
-
-    #[test]
-    #[serial]
-    fn read_memory_returns_empty_when_file_missing() {
-        with_test_home(|| {
-            let memory = read_memory(MemoryKind::Memory).unwrap();
-            let user = read_memory(MemoryKind::User).unwrap();
-            assert!(memory.is_empty());
-            assert!(user.is_empty());
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn write_then_read_memory_round_trip() {
-        with_test_home(|| {
-            let blob = "> note\n§\nfirst entry\n§\nsecond entry\n";
-            write_memory(MemoryKind::Memory, blob).unwrap();
-            assert_eq!(read_memory(MemoryKind::Memory).unwrap(), blob);
-
-            // Writing USER.md doesn't clobber MEMORY.md.
-            write_memory(MemoryKind::User, "user profile").unwrap();
-            assert_eq!(read_memory(MemoryKind::Memory).unwrap(), blob);
-            assert_eq!(read_memory(MemoryKind::User).unwrap(), "user profile");
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn memory_limits_fall_back_to_defaults_when_config_missing() {
-        with_test_home(|| {
-            let limits = read_memory_limits().unwrap();
-            let defaults = HermesMemoryLimits::default();
-            assert_eq!(limits.memory, defaults.memory);
-            assert_eq!(limits.user, defaults.user);
-            assert_eq!(limits.memory_enabled, defaults.memory_enabled);
-            assert_eq!(limits.user_enabled, defaults.user_enabled);
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn set_memory_enabled_preserves_other_fields() {
-        // Flipping one toggle must preserve character budgets and external
-        // provider settings the user configured via Hermes Web UI — otherwise
-        // a CC Switch toggle would silently wipe those fields.
-        with_test_home(|| {
-            let yaml = "\
-memory:
-  memory_char_limit: 4096
-  user_char_limit: 2048
-  memory_enabled: true
-  user_profile_enabled: true
-  provider: mem0
-";
-            let config_path = get_hermes_config_path();
-            fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-            fs::write(&config_path, yaml).unwrap();
-
-            set_memory_enabled(MemoryKind::Memory, false).unwrap();
-
-            let limits = read_memory_limits().unwrap();
-            assert!(!limits.memory_enabled, "toggle applied");
-            assert!(limits.user_enabled, "unrelated toggle untouched");
-            assert_eq!(limits.memory, 4096, "budgets preserved");
-            assert_eq!(limits.user, 2048);
-
-            // Verify the external provider field survived the section replacement.
-            let config = read_hermes_config().unwrap();
-            let provider = config
-                .get("memory")
-                .and_then(|v| v.get("provider"))
-                .and_then(|v| v.as_str());
-            assert_eq!(provider, Some("mem0"));
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn memory_limits_read_from_config_yaml() {
-        with_test_home(|| {
-            let yaml = "\
-memory:
-  memory_char_limit: 4096
-  user_char_limit: 2048
-  memory_enabled: false
-  user_profile_enabled: true
-";
-            let config_path = get_hermes_config_path();
-            fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-            fs::write(&config_path, yaml).unwrap();
-
-            let limits = read_memory_limits().unwrap();
-            assert_eq!(limits.memory, 4096);
-            assert_eq!(limits.user, 2048);
-            assert!(!limits.memory_enabled);
-            assert!(limits.user_enabled);
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn memory_limits_ignore_top_level_keys() {
-        // Regression guard: Hermes nests memory settings under `memory:`, so
-        // identically-named keys at the top level must be ignored rather than
-        // silently consumed.
-        with_test_home(|| {
-            let yaml = "\
-memory_char_limit: 9999
-user_char_limit: 9999
-memory_enabled: false
-user_profile_enabled: false
-";
-            let config_path = get_hermes_config_path();
-            fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-            fs::write(&config_path, yaml).unwrap();
-
-            let limits = read_memory_limits().unwrap();
-            let defaults = HermesMemoryLimits::default();
-            assert_eq!(limits.memory, defaults.memory);
-            assert_eq!(limits.user, defaults.user);
-            assert_eq!(limits.memory_enabled, defaults.memory_enabled);
-            assert_eq!(limits.user_enabled, defaults.user_enabled);
-        });
-    }
-
-    #[test]
-    fn memory_kind_deserializes_from_lowercase_strings() {
-        let memory: MemoryKind = serde_json::from_str("\"memory\"").unwrap();
-        let user: MemoryKind = serde_json::from_str("\"user\"").unwrap();
-        assert_eq!(memory, MemoryKind::Memory);
-        assert_eq!(user, MemoryKind::User);
-        assert!(serde_json::from_str::<MemoryKind>("\"bogus\"").is_err());
-    }
-
-    // ---- get_hermes_dir resolution (platform default + HERMES_HOME) ----
-
-    #[test]
-    #[serial]
-    fn hermes_home_env_takes_precedence_over_platform_default() {
-        with_test_home(|| {
-            // Clear any settings override so resolution reaches the HERMES_HOME branch.
-            let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = None;
-            crate::settings::update_settings(s).unwrap();
-
-            let old = std::env::var_os("HERMES_HOME");
-            let custom = std::env::temp_dir().join("ccs-hermes-home-precedence");
-            std::env::set_var("HERMES_HOME", &custom);
-
-            let dir = get_hermes_dir();
-
-            match old {
-                Some(v) => std::env::set_var("HERMES_HOME", v),
-                None => std::env::remove_var("HERMES_HOME"),
-            }
-
-            assert_eq!(
-                dir, custom,
-                "HERMES_HOME should take precedence over the platform default, got {dir:?}"
-            );
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn settings_override_takes_precedence_over_hermes_home() {
-        with_test_home(|| {
-            let custom = tempfile::tempdir().unwrap();
-            let custom_path = custom.path().to_path_buf();
-
-            let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = Some(custom_path.to_string_lossy().to_string());
-            crate::settings::update_settings(s).unwrap();
-
-            let old = std::env::var_os("HERMES_HOME");
-            std::env::set_var("HERMES_HOME", "/tmp/should-be-ignored");
-
-            let dir = get_hermes_dir();
-
-            match old {
-                Some(v) => std::env::set_var("HERMES_HOME", v),
-                None => std::env::remove_var("HERMES_HOME"),
-            }
-            let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = None;
-            crate::settings::update_settings(s).unwrap();
-
-            assert_eq!(
-                dir, custom_path,
-                "settings override should win over HERMES_HOME, got {dir:?}"
-            );
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn blank_hermes_home_falls_through_to_platform_default() {
-        with_test_home(|| {
-            let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = None;
-            crate::settings::update_settings(s).unwrap();
-
-            let old = std::env::var_os("HERMES_HOME");
-            std::env::set_var("HERMES_HOME", "   ");
-
-            let dir = get_hermes_dir();
-
-            match old {
-                Some(v) => std::env::set_var("HERMES_HOME", v),
-                None => std::env::remove_var("HERMES_HOME"),
-            }
-
-            // Blank HERMES_HOME is ignored (matches Hermes' `.strip()` non-empty check),
-            // so resolution must reach the platform default, never the literal blank path.
-            assert_ne!(dir, PathBuf::from("   "));
-            assert_eq!(dir, default_hermes_dir());
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn default_hermes_dir_without_override_is_platform_correct() {
-        with_test_home(|| {
-            let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = None;
-            crate::settings::update_settings(s).unwrap();
-
-            let old = std::env::var_os("HERMES_HOME");
-            std::env::remove_var("HERMES_HOME");
-
-            let dir = get_hermes_dir();
-
-            if let Some(v) = old {
-                std::env::set_var("HERMES_HOME", v);
-            }
-
-            #[cfg(target_os = "windows")]
-            assert!(
-                dir.ends_with("hermes") && dir.to_string_lossy().to_lowercase().contains("local"),
-                "Windows default should be %LOCALAPPDATA%\\hermes, got {dir:?}"
-            );
-            #[cfg(not(target_os = "windows"))]
-            assert!(
-                dir.ends_with(".hermes"),
-                "Unix default should be ~/.hermes, got {dir:?}"
-            );
-        });
-    }
-
-    #[test]
-    fn windows_local_hermes_dir_uses_localappdata_when_set() {
-        let local = std::ffi::OsString::from("C:\\Users\\tester\\AppData\\Local");
-        let home = Path::new("C:\\Users\\tester");
-        // Uses LOCALAPPDATA (ignoring home) and appends `hermes`. Build the expected
-        // path with `join` so the separator matches the host OS.
-        assert_eq!(
-            windows_local_hermes_dir(Some(local.as_os_str()), home),
-            PathBuf::from(&local).join("hermes"),
-        );
-    }
-
-    #[test]
-    fn windows_local_hermes_dir_falls_back_to_home_when_localappdata_missing_or_empty() {
-        let home = Path::new("C:\\Users\\tester");
-        let expected = home.join("AppData").join("Local").join("hermes");
-        assert_eq!(windows_local_hermes_dir(None, home), expected);
-        let empty = std::ffi::OsString::from("");
-        assert_eq!(
-            windows_local_hermes_dir(Some(empty.as_os_str()), home),
-            expected,
-        );
-    }
-
-    #[test]
-    fn windows_local_hermes_dir_trims_localappdata() {
-        // Mirror Hermes' `os.environ.get("LOCALAPPDATA", "").strip()`.
-        let home = Path::new("C:\\Users\\tester");
-        // Whitespace-only -> treated as unset, fall back to <home>\AppData\Local.
-        let blank = std::ffi::OsString::from("   ");
-        assert_eq!(
-            windows_local_hermes_dir(Some(blank.as_os_str()), home),
-            home.join("AppData").join("Local").join("hermes"),
-        );
-        // Padded value -> trimmed before use.
-        let padded = std::ffi::OsString::from("  C:\\Custom\\Local  ");
-        assert_eq!(
-            windows_local_hermes_dir(Some(padded.as_os_str()), home),
-            PathBuf::from("C:\\Custom\\Local").join("hermes"),
-        );
-    }
-
-    #[test]
-    #[serial]
-    fn with_test_home_neutralizes_hermes_env_vars() {
-        // An ambient HERMES_HOME / LOCALAPPDATA (e.g. set by a Hermes install)
-        // must not leak into the test home — otherwise other tests in this
-        // module would read/write a real Hermes config via get_hermes_config_path().
-        let saved_hh = std::env::var_os("HERMES_HOME");
-        let saved_la = std::env::var_os("LOCALAPPDATA");
-        std::env::set_var("HERMES_HOME", "/ambient/hermes-home");
-        std::env::set_var("LOCALAPPDATA", "/ambient/local-appdata");
-
-        let inside = with_test_home(|| {
-            (
-                std::env::var_os("HERMES_HOME"),
-                std::env::var_os("LOCALAPPDATA"),
-            )
-        });
-
-        match saved_hh {
-            Some(v) => std::env::set_var("HERMES_HOME", v),
-            None => std::env::remove_var("HERMES_HOME"),
-        }
-        match saved_la {
-            Some(v) => std::env::set_var("LOCALAPPDATA", v),
-            None => std::env::remove_var("LOCALAPPDATA"),
-        }
-
-        assert_eq!(
-            inside.0, None,
-            "with_test_home must clear ambient HERMES_HOME"
-        );
-        assert_eq!(
-            inside.1, None,
-            "with_test_home must clear ambient LOCALAPPDATA"
-        );
-    }
-}
+mod tests;

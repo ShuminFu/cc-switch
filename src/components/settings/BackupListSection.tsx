@@ -1,15 +1,17 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Pencil, RotateCcw, Check, X, Download, Trash2 } from "lucide-react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Archive,
+  Check,
+  FolderOpen,
+  Pencil,
+  RotateCcw,
+  Trash2,
+  X,
+} from "lucide-react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { backupsApi } from "@/lib/api";
 import {
   Select,
   SelectContent,
@@ -20,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { parseBackupName } from "./backupNames";
 import { useBackupManager } from "@/hooks/useBackupManager";
 import { extractErrorMessage } from "@/utils/errorUtils";
 
@@ -38,27 +41,18 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatBackupDate(isoString: string): string {
+function formatBackupDate(isoString: string, locale: string): string {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return isoString;
   try {
-    const date = new Date(isoString);
-    return date.toLocaleString();
+    return date.toLocaleString(locale);
   } catch {
-    return isoString;
+    return date.toLocaleString();
   }
 }
 
-/** Parse display name from backup filename */
 function getDisplayName(filename: string): string {
-  // Try to parse db_backup_YYYYMMDD_HHMMSS format
-  const match = filename.match(
-    /^db_backup_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})(?:_\d+)?\.db$/,
-  );
-  if (match) {
-    const [, y, m, d, hh, mm, ss] = match;
-    return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
-  }
-  // Otherwise show filename without .db suffix
-  return filename.replace(/\.db$/, "");
+  return parseBackupName(filename).displayName;
 }
 
 export function BackupListSection({
@@ -66,7 +60,8 @@ export function BackupListSection({
   backupRetainCount,
   onSettingsChange,
 }: BackupListSectionProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const dateLocale = i18n?.resolvedLanguage || i18n?.language || undefined;
   const {
     backups,
     isLoading,
@@ -84,10 +79,13 @@ export function BackupListSection({
   const [editingFilename, setEditingFilename] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
 
-  const handleRestore = async () => {
+  const handleRestore = async (keepUsageHistory: boolean) => {
     if (!confirmFilename) return;
     try {
-      const safetyId = await restore(confirmFilename);
+      const safetyId = await restore({
+        filename: confirmFilename,
+        keepUsageHistory,
+      });
       setConfirmFilename(null);
       toast.success(
         t("settings.backupManager.restoreSuccess", {
@@ -257,39 +255,71 @@ export function BackupListSection({
             {t("settings.backupManager.title", {
               defaultValue: "Database Backups",
             })}
+            {backups.length > 0 && (
+              <span
+                className="ml-1.5 text-xs font-normal text-muted-foreground"
+                data-testid="backup-count"
+              >
+                ({backups.length})
+              </span>
+            )}
           </h4>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            disabled={isCreating || isRestoring}
-            onClick={async () => {
-              try {
-                await create();
-                toast.success(
-                  t("settings.backupManager.createSuccess", {
-                    defaultValue: "Backup created successfully",
-                  }),
-                );
-              } catch (error) {
-                const detail =
-                  extractErrorMessage(error) ||
-                  t("settings.backupManager.createFailed", {
-                    defaultValue: "Backup failed",
-                  });
-                toast.error(detail);
-              }
-            }}
-          >
-            <Download className="h-3 w-3 mr-1" />
-            {isCreating
-              ? t("settings.backupManager.creating", {
-                  defaultValue: "Backing up...",
-                })
-              : t("settings.backupManager.createBackup", {
-                  defaultValue: "Backup Now",
-                })}
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={async () => {
+                try {
+                  await backupsApi.openBackupsFolder();
+                } catch (error) {
+                  toast.error(
+                    extractErrorMessage(error) ||
+                      t("settings.backupManager.openFolderFailed", {
+                        defaultValue: "Could not open the backup folder",
+                      }),
+                  );
+                }
+              }}
+            >
+              <FolderOpen className="h-3 w-3 mr-1" />
+              {t("settings.backupManager.showInFolder", {
+                defaultValue: "Show in folder",
+              })}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={isCreating || isRestoring}
+              onClick={async () => {
+                try {
+                  await create();
+                  toast.success(
+                    t("settings.backupManager.createSuccess", {
+                      defaultValue: "Backup created successfully",
+                    }),
+                  );
+                } catch (error) {
+                  const detail =
+                    extractErrorMessage(error) ||
+                    t("settings.backupManager.createFailed", {
+                      defaultValue: "Backup failed",
+                    });
+                  toast.error(detail);
+                }
+              }}
+            >
+              <Archive className="h-3 w-3 mr-1" />
+              {isCreating
+                ? t("settings.backupManager.creating", {
+                    defaultValue: "Backing up...",
+                  })
+                : t("settings.backupManager.createBackup", {
+                    defaultValue: "Backup Now",
+                  })}
+            </Button>
+          </div>
         </div>
 
         {isLoading ? (
@@ -346,12 +376,15 @@ export function BackupListSection({
                     </div>
                   ) : (
                     <>
-                      <div className="font-mono text-xs truncate">
-                        {getDisplayName(backup.filename)}
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-mono text-xs truncate">
+                          {getDisplayName(backup.filename)}
+                        </span>
+                        <BackupKindBadge filename={backup.filename} />
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {formatBackupDate(backup.createdAt)} &middot;{" "}
-                        {formatBytes(backup.sizeBytes)}
+                        {formatBackupDate(backup.createdAt, dateLocale ?? "en")}{" "}
+                        &middot; {formatBytes(backup.sizeBytes)}
                       </div>
                     </>
                   )}
@@ -406,89 +439,107 @@ export function BackupListSection({
         )}
       </div>
 
-      {/* Restore Confirmation Dialog */}
-      <Dialog
-        open={!!confirmFilename}
-        onOpenChange={(open) => !open && setConfirmFilename(null)}
-      >
-        <DialogContent className="max-w-md" zIndex="alert">
-          <DialogHeader>
-            <DialogTitle>
-              {t("settings.backupManager.confirmTitle", {
-                defaultValue: "Confirm Restore",
-              })}
-            </DialogTitle>
-            <DialogDescription>
-              {t("settings.backupManager.confirmMessage", {
-                defaultValue:
-                  "Restoring this backup will overwrite the current database. A safety backup will be created first.",
-              })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmFilename(null)}
-              disabled={isRestoring}
-            >
-              {t("common.cancel", { defaultValue: "Cancel" })}
-            </Button>
-            <Button onClick={handleRestore} disabled={isRestoring}>
-              {isRestoring
-                ? t("settings.backupManager.restoring", {
-                    defaultValue: "Restoring...",
-                  })
-                : t("settings.backupManager.restore", {
-                    defaultValue: "Restore",
-                  })}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        isOpen={!!confirmFilename}
+        variant="info"
+        title={t("settings.backupManager.confirmTitle", {
+          defaultValue: "Confirm Restore",
+        })}
+        message={t("settings.backupManager.confirmMessage", {
+          defaultValue:
+            "Restoring this backup will overwrite the current database. A safety backup will be created first.",
+        })}
+        confirmText={
+          isRestoring
+            ? t("settings.backupManager.restoring", {
+                defaultValue: "Restoring...",
+              })
+            : t("settings.backupManager.restore", { defaultValue: "Restore" })
+        }
+        checkboxLabel={t("settings.backupManager.keepUsageHistory", {
+          defaultValue:
+            "Keep usage history recorded on this device since the backup",
+        })}
+        checkboxDefaultChecked
+        onConfirm={(keepUsageHistory) => {
+          if (!isRestoring) void handleRestore(keepUsageHistory);
+        }}
+        onCancel={() => {
+          if (!isRestoring) setConfirmFilename(null);
+        }}
+      />
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog
-        open={!!deleteFilename}
-        onOpenChange={(open) => !open && setDeleteFilename(null)}
-      >
-        <DialogContent className="max-w-md" zIndex="alert">
-          <DialogHeader>
-            <DialogTitle>
-              {t("settings.backupManager.deleteConfirmTitle", {
-                defaultValue: "Confirm Delete",
-              })}
-            </DialogTitle>
-            <DialogDescription>
-              {t("settings.backupManager.deleteConfirmMessage", {
-                defaultValue:
-                  "This backup will be permanently deleted. This action cannot be undone.",
-              })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteFilename(null)}
-              disabled={isDeleting}
-            >
-              {t("common.cancel", { defaultValue: "Cancel" })}
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={isDeleting}
-            >
-              {isDeleting
-                ? t("settings.backupManager.deleting", {
-                    defaultValue: "Deleting...",
-                  })
-                : t("settings.backupManager.delete", {
-                    defaultValue: "Delete",
-                  })}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        isOpen={!!deleteFilename}
+        variant="destructive"
+        title={t("settings.backupManager.deleteConfirmTitle", {
+          defaultValue: "Confirm Delete",
+        })}
+        message={t("settings.backupManager.deleteConfirmMessage", {
+          defaultValue:
+            "This backup will be permanently deleted. This action cannot be undone.",
+        })}
+        confirmText={
+          isDeleting
+            ? t("settings.backupManager.deleting", {
+                defaultValue: "Deleting...",
+              })
+            : t("settings.backupManager.delete", { defaultValue: "Delete" })
+        }
+        onConfirm={() => {
+          if (!isDeleting) void handleDelete();
+        }}
+        onCancel={() => {
+          if (!isDeleting) setDeleteFilename(null);
+        }}
+      />
     </div>
+  );
+}
+
+/** Labels the backups the app takes on its own besides the periodic ones. */
+function BackupKindBadge({ filename }: { filename: string }) {
+  const { t } = useTranslation();
+  const { kind } = parseBackupName(filename);
+  if (!kind || kind === "auto") return null;
+
+  const labels = {
+    manual: {
+      label: t("settings.backupManager.kind.manual", {
+        defaultValue: "Manual",
+      }),
+      title: t("settings.backupManager.kind.manualHint", {
+        defaultValue: "Created from Backup Now; never rotated automatically",
+      }),
+    },
+    safety: {
+      label: t("settings.backupManager.kind.safety", {
+        defaultValue: "Safety",
+      }),
+      title: t("settings.backupManager.kind.safetyHint", {
+        defaultValue:
+          "Taken automatically before an import, restore or sync download replaced the database",
+      }),
+    },
+    premigration: {
+      label: t("settings.backupManager.kind.premigration", {
+        defaultValue: "Pre-migration",
+      }),
+      title: t("settings.backupManager.kind.premigrationHint", {
+        defaultValue:
+          "Taken automatically before a database upgrade or rebuild",
+      }),
+    },
+  } as const;
+  const { label, title } = labels[kind];
+
+  return (
+    <span
+      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none bg-muted text-muted-foreground border border-border/60"
+      title={title}
+      data-backup-kind={kind}
+    >
+      {label}
+    </span>
   );
 }

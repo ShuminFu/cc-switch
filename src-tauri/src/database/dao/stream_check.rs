@@ -2,7 +2,28 @@
 
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
-use crate::services::stream_check::{StreamCheckConfig, StreamCheckResult};
+use crate::services::stream_check::{HealthStatus, StreamCheckConfig, StreamCheckResult};
+
+/// The value stored in `stream_check_logs.status` (DB-29): pinned strings, not
+/// the enum's `Debug` output, so renaming a variant cannot change stored data.
+pub(crate) fn health_status_db_str(status: &HealthStatus) -> &'static str {
+    match status {
+        HealthStatus::Operational => "operational",
+        HealthStatus::Degraded => "degraded",
+        HealthStatus::Failed => "failed",
+    }
+}
+
+/// Inverse of [`health_status_db_str`].
+#[allow(dead_code)]
+pub(crate) fn health_status_from_db_str(value: &str) -> Option<HealthStatus> {
+    match value {
+        "operational" => Some(HealthStatus::Operational),
+        "degraded" => Some(HealthStatus::Degraded),
+        "failed" => Some(HealthStatus::Failed),
+        _ => None,
+    }
+}
 
 impl Database {
     /// 保存流式检查日志
@@ -24,7 +45,7 @@ impl Database {
                 provider_id,
                 provider_name,
                 app_type,
-                format!("{:?}", result.status).to_lowercase(),
+                health_status_db_str(&result.status),
                 result.success,
                 result.message,
                 result.response_time_ms.map(|t| t as i64),
@@ -70,5 +91,23 @@ impl Database {
         let json = serde_json::to_string(config)
             .map_err(|e| AppError::Message(format!("序列化配置失败: {e}")))?;
         self.set_setting("stream_check_config", &json)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_status_strings_are_pinned() {
+        for (status, stored) in [
+            (HealthStatus::Operational, "operational"),
+            (HealthStatus::Degraded, "degraded"),
+            (HealthStatus::Failed, "failed"),
+        ] {
+            assert_eq!(health_status_db_str(&status), stored);
+            assert_eq!(health_status_from_db_str(stored), Some(status));
+        }
+        assert_eq!(health_status_from_db_str("Operational"), None);
     }
 }

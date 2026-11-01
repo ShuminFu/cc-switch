@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,18 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/MarkdownEditor";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import type { Prompt, AppId } from "@/lib/api";
+import { useDarkMode } from "@/hooks/useDarkMode";
+
+const PROMPT_FILENAMES: Record<AppId, string> = {
+  claude: "CLAUDE.md",
+  "claude-desktop": "CLAUDE.md",
+  codex: "AGENTS.md",
+  gemini: "GEMINI.md",
+  grokbuild: "AGENTS.md",
+  opencode: "AGENTS.md",
+  openclaw: "AGENTS.md",
+  hermes: "AGENTS.md",
+};
 
 interface PromptFormPanelProps {
   appId: AppId;
@@ -24,45 +36,17 @@ const PromptFormPanel: React.FC<PromptFormPanelProps> = ({
 }) => {
   const { t } = useTranslation();
   const appName = t(`apps.${appId}`);
-  const filenameMap: Record<AppId, string> = {
-    claude: "CLAUDE.md",
-    "claude-desktop": "CLAUDE.md",
-    codex: "AGENTS.md",
-    gemini: "GEMINI.md",
-    grokbuild: "AGENTS.md",
-    opencode: "AGENTS.md",
-    openclaw: "AGENTS.md",
-    hermes: "AGENTS.md",
-  };
-  const filename = filenameMap[appId];
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [content, setContent] = useState("");
+  const filename = PROMPT_FILENAMES[appId];
+  // Hydrated once per mount: the parent keys this panel by prompt id, so a
+  // list refetch (profile switch, deep-link import) cannot wipe edits
+  // (FE-UI-51).
+  const [name, setName] = useState(initialData?.name ?? "");
+  const [description, setDescription] = useState(
+    initialData?.description ?? "",
+  );
+  const [content, setContent] = useState(initialData?.content ?? "");
   const [saving, setSaving] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (initialData) {
-      setName(initialData.name);
-      setDescription(initialData.description || "");
-      setContent(initialData.content);
-    }
-  }, [initialData]);
+  const isDarkMode = useDarkMode();
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -77,7 +61,8 @@ const PromptFormPanel: React.FC<PromptFormPanelProps> = ({
         id,
         name: name.trim(),
         description: description.trim() || undefined,
-        content: content.trim(),
+        // Stored as typed: trailing newlines are meaningful in Markdown files.
+        content,
         enabled: initialData?.enabled || false,
         createdAt: initialData?.createdAt || timestamp,
         updatedAt: timestamp,

@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from "react";
+import { queryKeys } from "@/lib/query/keys";
 import {
   KeyboardSensor,
   PointerSensor,
@@ -12,34 +13,21 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { Provider } from "@/types";
 import { providersApi, type AppId } from "@/lib/api";
+import { providerSortLocale, sortProviders } from "@/utils/providerSort";
+
+interface ProvidersCacheData {
+  providers: Record<string, Provider>;
+  currentProviderId?: string;
+}
 
 export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
   const queryClient = useQueryClient();
   const { t, i18n } = useTranslation();
 
-  const sortedProviders = useMemo(() => {
-    const locale =
-      i18n.language === "zh"
-        ? "zh-CN"
-        : i18n.language === "zh-TW"
-          ? "zh-TW"
-          : "en-US";
-    return Object.values(providers).sort((a, b) => {
-      if (a.sortIndex !== undefined && b.sortIndex !== undefined) {
-        return a.sortIndex - b.sortIndex;
-      }
-      if (a.sortIndex !== undefined) return -1;
-      if (b.sortIndex !== undefined) return 1;
-
-      const timeA = a.createdAt ?? 0;
-      const timeB = b.createdAt ?? 0;
-      if (timeA && timeB && timeA !== timeB) {
-        return timeA - timeB;
-      }
-
-      return a.name.localeCompare(b.name, locale);
-    });
-  }, [providers, i18n.language]);
+  const sortedProviders = useMemo(
+    () => sortProviders(providers, providerSortLocale(i18n.language)),
+    [providers, i18n.language],
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -50,18 +38,18 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
     }),
   );
 
-  const handleDragEnd = useCallback(
-    async (event: DragEndEvent) => {
-      const { active, over } = event;
-      if (!over || active.id === over.id) {
+  /** Move `activeId` to the position of `overId` and persist the order. */
+  const reorder = useCallback(
+    async (activeId: string, overId: string) => {
+      if (activeId === overId) {
         return;
       }
 
       const oldIndex = sortedProviders.findIndex(
-        (provider) => provider.id === active.id,
+        (provider) => provider.id === activeId,
       );
       const newIndex = sortedProviders.findIndex(
-        (provider) => provider.id === over.id,
+        (provider) => provider.id === overId,
       );
 
       if (oldIndex === -1 || newIndex === -1) {
@@ -74,46 +62,71 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
         sortIndex: index,
       }));
 
+      // Apply the new order to the cache first so the list does not snap
+      // back until the refetch lands; roll back if the backend rejects it
+      // (FE-PROV-13).
+      const queryKey = queryKeys.providers.byApp(appId);
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<ProvidersCacheData>(queryKey);
+      if (previous?.providers) {
+        const sortIndexById = new Map(
+          updates.map((update) => [update.id, update.sortIndex]),
+        );
+        const nextProviders: Record<string, Provider> = {};
+        for (const [id, provider] of Object.entries(previous.providers)) {
+          const sortIndex = sortIndexById.get(id);
+          nextProviders[id] =
+            sortIndex === undefined ? provider : { ...provider, sortIndex };
+        }
+        queryClient.setQueryData<ProvidersCacheData>(queryKey, {
+          ...previous,
+          providers: nextProviders,
+        });
+      }
+
       try {
         await providersApi.updateSortOrder(updates, appId);
-        await queryClient.invalidateQueries({
-          queryKey: ["providers", appId],
-        });
-
-        // 刷新故障转移队列（因为队列顺序依赖 sort_index）
-        await queryClient.invalidateQueries({
-          queryKey: ["failoverQueue", appId],
-        });
-
-        // 更新托盘菜单以反映新的排序（失败不影响主操作）
-        try {
-          await providersApi.updateTrayMenu();
-        } catch (trayError) {
-          console.error("Failed to update tray menu after sort", trayError);
-          // 托盘菜单更新失败不影响排序成功
-        }
-
-        toast.success(
-          t("provider.sortUpdated", {
-            defaultValue: "排序已更新",
-          }),
-          { closeButton: true },
-        );
       } catch (error) {
         console.error("Failed to update provider sort order", error);
+        if (previous) queryClient.setQueryData(queryKey, previous);
         toast.error(
           t("provider.sortUpdateFailed", {
-            defaultValue: "排序更新失败",
+            defaultValue: "Failed to update sort order",
           }),
         );
+        return;
+      }
+
+      await queryClient.invalidateQueries({ queryKey });
+      // 刷新故障转移队列（因为队列顺序依赖 sort_index）
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.failover.queue(appId),
+      });
+
+      // 更新托盘菜单以反映新的排序（失败不影响主操作）
+      try {
+        await providersApi.updateTrayMenu();
+      } catch (trayError) {
+        console.error("Failed to update tray menu after sort", trayError);
       }
     },
     [sortedProviders, appId, queryClient, t],
+  );
+
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over) return;
+      await reorder(String(active.id), String(over.id));
+    },
+    [reorder],
   );
 
   return {
     sortedProviders,
     sensors,
     handleDragEnd,
+    /** Keyboard alternative to dragging (PRODUCT-28): Alt+Up / Alt+Down. */
+    reorder,
   };
 }

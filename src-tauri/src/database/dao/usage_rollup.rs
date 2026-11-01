@@ -118,6 +118,11 @@ impl Database {
         let effective_filter = effective_usage_log_filter("l");
         let fresh_detail_input = fresh_input_sql("l");
         let fresh_old_input = fresh_input_sql("old");
+        // DB-14: the merged cost is summed as exact integer nano-dollars and
+        // written back as decimal TEXT without a REAL round-trip.
+        let total_cost_text = crate::database::cost_nanos::nanos_to_decimal_text_sql(
+            "(COALESCE(old.total_cost_nanos, 0) + new_cost_nanos)",
+        );
         // request_model 维度保留路由接管的「客户端别名 → 真实模型」映射，
         // pricing_model 维度保留写入时的计价基准（request 计价模式下与 model 分叉）；
         // 明细行的这两列可能为 NULL（历史/手工数据），归一为 ''。
@@ -137,7 +142,7 @@ impl Database {
                 COALESCE(old.cache_read_tokens, 0) + new_cr,
                 COALESCE(old.cache_creation_tokens, 0) + new_cc,
                 {INPUT_TOKEN_SEMANTICS_FRESH},
-                CAST(COALESCE(CAST(old.total_cost_usd AS REAL), 0) + new_cost AS TEXT),
+                {total_cost_text},
                 CASE WHEN COALESCE(old.request_count, 0) + new_req > 0
                     THEN (COALESCE(old.avg_latency_ms, 0) * COALESCE(old.request_count, 0)
                           + new_lat * new_req)
@@ -155,7 +160,7 @@ impl Database {
                     COALESCE(SUM(l.output_tokens), 0) as new_out,
                     COALESCE(SUM(l.cache_read_tokens), 0) as new_cr,
                     COALESCE(SUM(l.cache_creation_tokens), 0) as new_cc,
-                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as new_cost,
+                    COALESCE(SUM(l.total_cost_nanos), 0) as new_cost_nanos,
                     COALESCE(AVG(l.latency_ms), 0) as new_lat
                 FROM proxy_request_logs l
                 WHERE l.created_at < ?1 AND {effective_filter}
@@ -180,6 +185,133 @@ impl Database {
             .map_err(|e| AppError::Database(format!("Pruning old logs failed: {e}")))?;
 
         Ok(deleted as u64)
+    }
+}
+
+#[cfg(test)]
+mod cost_nanos_tests {
+    use crate::database::Database;
+    use crate::error::AppError;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    /// Tiny deterministic xorshift so the property test needs no new
+    /// dependency and every failure is reproducible from the seed.
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+    }
+
+    fn random_cost(rng: &mut Rng) -> String {
+        // 0 – 99.999999999 with 0–9 fraction digits, written like
+        // `Decimal::to_string` (the logger) or `format!("{:.6}")` (backfill).
+        let whole = rng.next() % 100;
+        let digits = (rng.next() % 10) as u32;
+        if digits == 0 {
+            return whole.to_string();
+        }
+        let frac = rng.next() % 10u64.pow(digits);
+        format!("{whole}.{frac:0width$}", width = digits as usize)
+    }
+
+    /// DB-14 acceptance: SQL sums of the integer column equal the exact
+    /// `Decimal` sum of the stored TEXT costs, for both tables, and a rollup
+    /// writes the merged total back without float drift.
+    #[test]
+    fn integer_cost_sums_match_decimal_sums_exactly() -> Result<(), AppError> {
+        for seed in [0x9E37_79B9_7F4A_7C15_u64, 42, 7_777_777] {
+            let db = Database::memory()?;
+            let mut rng = Rng(seed);
+            let conn = crate::database::lock_conn!(db.conn);
+            let mut expected = Decimal::ZERO;
+            for i in 0..500 {
+                let cost = random_cost(&mut rng);
+                expected += Decimal::from_str(&cost).unwrap();
+                conn.execute(
+                    "INSERT INTO proxy_request_logs (
+                        request_id, provider_id, app_type, model,
+                        input_tokens, output_tokens, total_cost_usd, latency_ms, status_code, created_at
+                    ) VALUES (?1, 'p', 'claude', 'm', 1, 1, ?2, 10, 200, 1000)",
+                    rusqlite::params![format!("r{i}"), cost],
+                )?;
+            }
+            let sum: i64 = conn.query_row(
+                "SELECT SUM(total_cost_nanos) FROM proxy_request_logs",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(
+                Decimal::from_i128_with_scale(sum as i128, 9),
+                expected,
+                "seed {seed}"
+            );
+
+            // Rollup: the merged TEXT total is exact as well.
+            let total_cost_text = crate::database::cost_nanos::nanos_to_decimal_text_sql(
+                "(SELECT SUM(total_cost_nanos) FROM proxy_request_logs)",
+            );
+            let text: String =
+                conn.query_row(&format!("SELECT {total_cost_text}"), [], |row| row.get(0))?;
+            assert_eq!(Decimal::from_str(&text).unwrap(), expected, "seed {seed}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn cost_nanos_parses_every_stored_form() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let conn = crate::database::lock_conn!(db.conn);
+        for (i, (text, nanos)) in [
+            ("0", 0_i64),
+            ("", 0),
+            ("12", 12_000_000_000),
+            ("0.000425730", 425_730),
+            (".5", 500_000_000),
+            ("1.0000000019", 1_000_000_001),
+            ("1.5e-07", 150),
+            ("-0.25", -250_000_000),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            conn.execute(
+                "INSERT INTO usage_daily_rollups (date, app_type, provider_id, model, total_cost_usd)
+                 VALUES (?1, 'claude', 'p', 'm', ?2)",
+                rusqlite::params![format!("2026-01-{:02}", i + 1), text],
+            )?;
+            let got: i64 = conn.query_row(
+                "SELECT total_cost_nanos FROM usage_daily_rollups WHERE date = ?1",
+                [format!("2026-01-{:02}", i + 1)],
+                |row| row.get(0),
+            )?;
+            assert_eq!(got, nanos, "{text:?}");
+        }
+        Ok(())
+    }
+
+    /// The zero-cost backfill scan uses the partial index on the new column.
+    #[test]
+    fn zero_cost_backfill_query_uses_the_integer_cost_index() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let conn = crate::database::lock_conn!(db.conn);
+        let plan: Vec<String> = conn
+            .prepare(&format!(
+                "EXPLAIN QUERY PLAN {}",
+                crate::services::usage_stats::BACKFILL_ZERO_COST_CANDIDATES_SQL
+            ))?
+            .query_map([], |row| row.get::<_, String>(3))?
+            .collect::<Result<_, _>>()?;
+        assert!(
+            plan.iter()
+                .any(|d| d.contains("idx_request_logs_zero_cost_nanos")),
+            "{plan:?}"
+        );
+        Ok(())
     }
 }
 

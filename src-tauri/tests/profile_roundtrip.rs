@@ -13,7 +13,7 @@ use cc_switch_lib::{
 
 #[path = "support.rs"]
 mod support;
-use support::{create_test_state, ensure_test_home, reset_test_fs, test_mutex};
+use support::{create_test_state, ensure_test_home, TestEnv};
 
 fn claude_provider(id: &str, token: &str) -> Provider {
     Provider::with_id(
@@ -100,8 +100,7 @@ fn write_ssot_skill(directory: &str) {
 
 #[test]
 fn profile_snapshot_apply_roundtrip_restores_configuration() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");
@@ -280,8 +279,7 @@ fn profile_snapshot_apply_roundtrip_restores_configuration() {
 
 #[test]
 fn shared_profile_sides_are_isolated_and_mergeable() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");
@@ -394,8 +392,7 @@ fn shared_profile_sides_are_isolated_and_mergeable() {
 
 #[test]
 fn profile_apply_reports_dangling_references_and_continues() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");
@@ -449,9 +446,48 @@ fn profile_apply_reports_dangling_references_and_continues() {
 }
 
 #[test]
+fn applying_profile_without_takeover_leaves_current_live_file_untouched() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+    fs::create_dir_all(home.join(".claude")).expect("create ~/.claude");
+
+    let state = create_test_state().expect("create test state");
+    ProviderService::add(
+        &state,
+        AppType::Claude,
+        claude_provider("p1", "tok-1"),
+        false,
+    )
+    .expect("add provider");
+    ProviderService::switch(&state, AppType::Claude, "p1").expect("switch to p1");
+
+    let settings = cc_switch_lib::get_claude_settings_path();
+    let before_bytes = fs::read(&settings).expect("read live settings");
+    let before_mtime = fs::metadata(&settings)
+        .and_then(|m| m.modified())
+        .expect("mtime");
+
+    let profile = ProfileService::create(&state, "Same Provider", ProfileScope::Claude)
+        .expect("create profile");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    ProfileService::apply(&state, &profile.id, ProfileScope::Claude).expect("apply profile");
+
+    assert_eq!(
+        fs::read(&settings).expect("read live settings"),
+        before_bytes
+    );
+    assert_eq!(
+        fs::metadata(&settings)
+            .and_then(|m| m.modified())
+            .expect("mtime"),
+        before_mtime,
+        "no rewrite when takeover is off and the provider is already current"
+    );
+}
+
+#[test]
 fn clear_current_profile_only_clears_scoped_marker() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");
@@ -489,8 +525,7 @@ fn clear_current_profile_only_clears_scoped_marker() {
 
 #[test]
 fn switching_profile_autosaves_previous_profile_state() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");
@@ -645,8 +680,7 @@ fn switching_profile_autosaves_previous_profile_state() {
 
 #[test]
 fn profile_switch_auto_disables_takeover_before_apply() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");
@@ -751,8 +785,7 @@ fn profile_switch_auto_disables_takeover_before_apply() {
 #[cfg(any(target_os = "macos", windows))]
 #[test]
 fn claude_desktop_profile_scope_is_independent() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");

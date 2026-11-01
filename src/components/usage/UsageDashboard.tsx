@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { UsageHero } from "./UsageHero";
 import { UsageTrendChart } from "./UsageTrendChart";
 import { RequestLogTable } from "./RequestLogTable";
+import { DataSourceBar } from "./DataSourceBar";
 import { ProviderStatsTable } from "./ProviderStatsTable";
 import { ModelStatsTable } from "./ModelStatsTable";
 import {
@@ -19,6 +20,7 @@ import {
   RefreshCw,
   Coins,
   LayoutGrid,
+  Wallet,
 } from "lucide-react";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import {
@@ -38,11 +40,19 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { PricingConfigPanel } from "@/components/usage/PricingConfigPanel";
+import { BudgetLimitsPanel } from "@/components/usage/BudgetLimitsPanel";
 import { cn } from "@/lib/utils";
 import { getLocaleFromLanguage } from "./format";
 import { getUsageRangePresetLabel, resolveUsageRange } from "@/lib/usageRange";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { UsageExportButton } from "./UsageExportButton";
+import { BudgetHeroStrip } from "./BudgetHeroStrip";
+import {
+  getDashboardViewState,
+  saveDashboardViewState,
+  type UsageDashboardViewState,
+} from "./dashboardViewState";
 
 const APP_FILTER_OPTIONS: AppTypeFilter[] = ["all", ...KNOWN_APP_TYPES];
 
@@ -85,12 +95,28 @@ export function UsageDashboard({
 }: UsageDashboardProps = {}) {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
-  const [range, setRange] = useState<UsageRangeSelection>({ preset: "today" });
-  const [appType, setAppType] = useState<AppTypeFilter>("all");
+  // Restored from the in-memory view state so switching Settings tabs
+  // keeps range, filters and the active sub-tab (FE-UI-31).
+  const [initialView] = useState(getDashboardViewState);
+  const [range, setRange] = useState<UsageRangeSelection>(initialView.range);
+  const [appType, setAppType] = useState<AppTypeFilter>(initialView.appType);
   const [providerName, setProviderName] = useState<string | undefined>(
-    undefined,
+    initialView.providerName,
   );
-  const [model, setModel] = useState<string | undefined>(undefined);
+  const [model, setModel] = useState<string | undefined>(initialView.model);
+  const [activeTab, setActiveTab] = useState<UsageDashboardViewState["tab"]>(
+    initialView.tab,
+  );
+
+  useEffect(() => {
+    saveDashboardViewState({
+      range,
+      appType,
+      providerName,
+      model,
+      tab: activeTab,
+    });
+  }, [range, appType, providerName, model, activeTab]);
   const [refreshIntervalMs, setRefreshIntervalMs] = useState(() =>
     normalizeRefreshInterval(savedRefreshIntervalMs),
   );
@@ -327,6 +353,13 @@ export function UsageDashboard({
               triggerLabel={rangeLabel}
               onApply={(nextRange) => setRange(nextRange)}
             />
+
+            <UsageExportButton
+              range={range}
+              appType={appType}
+              providerName={providerName}
+              model={model}
+            />
           </div>
         </div>
       </div>
@@ -339,6 +372,8 @@ export function UsageDashboard({
         refreshIntervalMs={refreshIntervalMs}
       />
 
+      <BudgetHeroStrip appType={appType === "all" ? undefined : appType} />
+
       <UsageTrendChart
         range={range}
         rangeLabel={rangeLabel}
@@ -349,7 +384,13 @@ export function UsageDashboard({
       />
 
       <div className="space-y-4">
-        <Tabs defaultValue="logs" className="w-full">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) =>
+            setActiveTab(v as UsageDashboardViewState["tab"])
+          }
+          className="w-full"
+        >
           <div className="flex items-center justify-between mb-4">
             <TabsList className="bg-muted/50">
               <TabsTrigger value="logs" className="gap-2">
@@ -373,6 +414,7 @@ export function UsageDashboard({
             transition={{ delay: 0.2 }}
           >
             <TabsContent value="logs" className="mt-0">
+              <DataSourceBar refreshIntervalMs={refreshIntervalMs} />
               <RequestLogTable
                 range={range}
                 rangeLabel={rangeLabel}
@@ -408,6 +450,30 @@ export function UsageDashboard({
       </div>
 
       <Accordion type="multiple" defaultValue={[]} className="w-full space-y-4">
+        <AccordionItem
+          value="budget"
+          className="rounded-xl glass-card overflow-hidden"
+        >
+          <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 data-[state=open]:bg-muted/50">
+            <div className="flex items-center gap-3">
+              <Wallet className="h-5 w-5 text-emerald-500" />
+              <div className="text-left">
+                <h3 className="text-base font-semibold">
+                  {t("usage.budget.title", { defaultValue: "Budget limits" })}
+                </h3>
+                <p className="text-sm text-muted-foreground font-normal">
+                  {t("usage.budget.description", {
+                    defaultValue:
+                      "Set daily and monthly spending limits per provider and optionally block requests once a limit is reached.",
+                  })}
+                </p>
+              </div>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="px-6 pb-6 pt-4 border-t border-border/50">
+            <BudgetLimitsPanel />
+          </AccordionContent>
+        </AccordionItem>
         <AccordionItem
           value="pricing"
           className="rounded-xl glass-card overflow-hidden"

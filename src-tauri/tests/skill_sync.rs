@@ -6,7 +6,7 @@ use cc_switch_lib::{
 
 #[path = "support.rs"]
 mod support;
-use support::{create_test_state, ensure_test_home, reset_test_fs, test_mutex};
+use support::{create_test_state, ensure_test_home, TestEnv};
 
 fn write_skill(dir: &std::path::Path, name: &str) {
     fs::create_dir_all(dir).expect("create skill dir");
@@ -29,8 +29,7 @@ fn symlink_dir(src: &std::path::Path, dest: &std::path::Path) {
 
 #[test]
 fn import_from_apps_respects_explicit_app_selection() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     write_skill(
@@ -74,8 +73,7 @@ fn import_from_apps_respects_explicit_app_selection() {
 
 #[test]
 fn import_from_apps_does_not_rewrite_selected_app_directory() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let ssot_skill_dir = home.join(".cc-switch").join("skills").join("codex-skill");
@@ -121,8 +119,7 @@ fn import_from_apps_does_not_rewrite_selected_app_directory() {
 
 #[test]
 fn sync_to_app_removes_disabled_and_orphaned_ssot_symlinks() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let ssot_dir = home.join(".cc-switch").join("skills");
@@ -167,10 +164,144 @@ fn sync_to_app_removes_disabled_and_orphaned_ssot_symlinks() {
     );
 }
 
+fn codex_only_skill(directory: &str, content_hash: Option<String>) -> InstalledSkill {
+    InstalledSkill {
+        id: format!("local:{directory}"),
+        name: directory.to_string(),
+        description: None,
+        directory: directory.to_string(),
+        repo_owner: None,
+        repo_name: None,
+        repo_branch: None,
+        readme_url: None,
+        apps: SkillApps {
+            codex: true,
+            ..Default::default()
+        },
+        installed_at: 0,
+        content_hash,
+        updated_at: 0,
+    }
+}
+
+#[test]
+fn sync_to_app_keeps_user_directory_that_shares_a_managed_name() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+
+    let ssot_skill = home.join(".cc-switch").join("skills").join("foo");
+    write_skill(&ssot_skill, "Managed foo");
+    let hash = SkillService::compute_dir_hash(&ssot_skill).expect("hash ssot");
+
+    let claude_skills = home.join(".claude").join("skills");
+    let user_copy = claude_skills.join("foo");
+    write_skill(&user_copy, "My own foo");
+    fs::write(user_copy.join("notes.md"), "hand edited").expect("write user file");
+
+    let state = create_test_state().expect("create test state");
+    state
+        .db
+        .save_skill(&codex_only_skill("foo", Some(hash)))
+        .expect("save skill");
+
+    SkillService::sync_to_app(&state.db, &AppType::Claude).expect("reconcile claude");
+
+    assert!(
+        user_copy.join("notes.md").exists(),
+        "a user-owned directory with a managed name must survive sync_to_app"
+    );
+    let unmanaged = SkillService::scan_unmanaged(&state.db).expect("scan unmanaged");
+    let entry = unmanaged
+        .iter()
+        .find(|s| s.directory == "foo")
+        .expect("conflicting directory is listed");
+    assert!(entry.conflict, "listed as a conflict");
+    assert!(entry.found_in.iter().any(|f| f == "claude"));
+}
+
+#[test]
+fn sync_to_app_still_removes_symlink_and_identical_copy_of_disabled_skill() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+
+    let ssot = home.join(".cc-switch").join("skills");
+    write_skill(&ssot.join("linked"), "Linked");
+    write_skill(&ssot.join("copied"), "Copied");
+    let copied_hash = SkillService::compute_dir_hash(&ssot.join("copied")).expect("hash");
+
+    let claude_skills = home.join(".claude").join("skills");
+    fs::create_dir_all(&claude_skills).expect("create claude skills dir");
+    symlink_dir(&ssot.join("linked"), &claude_skills.join("linked"));
+    write_skill(&claude_skills.join("copied"), "Copied");
+
+    let state = create_test_state().expect("create test state");
+    state
+        .db
+        .save_skill(&codex_only_skill("linked", None))
+        .expect("save linked");
+    state
+        .db
+        .save_skill(&codex_only_skill("copied", Some(copied_hash)))
+        .expect("save copied");
+
+    SkillService::sync_to_app(&state.db, &AppType::Claude).expect("reconcile claude");
+
+    assert!(!claude_skills.join("linked").exists(), "symlink removed");
+    assert!(
+        !claude_skills.join("copied").exists(),
+        "hash-identical copy removed"
+    );
+}
+
+#[test]
+fn install_from_zip_backs_up_ssot_directory_without_db_row() {
+    use std::io::Write;
+
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+
+    let ssot_foo = home.join(".cc-switch").join("skills").join("foo");
+    write_skill(&ssot_foo, "Old foo");
+    fs::write(ssot_foo.join("notes.txt"), "hand placed").expect("write notes");
+
+    let zip_path = home.join("foo.zip");
+    {
+        let file = fs::File::create(&zip_path).expect("create zip");
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("foo/SKILL.md", options)
+            .expect("start entry");
+        zip.write_all(b"---\nname: New foo\ndescription: from zip\n---\n")
+            .expect("write entry");
+        zip.finish().expect("finish zip");
+    }
+
+    let state = create_test_state().expect("create test state");
+    let installed = SkillService::install_from_zip(&state.db, &zip_path, &AppType::Claude)
+        .expect("install from zip");
+    assert_eq!(installed.len(), 1);
+
+    let skill_md = fs::read_to_string(ssot_foo.join("SKILL.md")).expect("read SKILL.md");
+    assert!(skill_md.contains("New foo"), "zip content installed");
+    assert!(!ssot_foo.join("notes.txt").exists());
+
+    let backups = SkillService::list_backups().expect("list backups");
+    let backup = backups
+        .iter()
+        .find(|b| b.skill.directory == "foo")
+        .expect("orphan SSOT directory was backed up");
+    assert!(
+        std::path::Path::new(&backup.backup_path)
+            .join("skill")
+            .join("notes.txt")
+            .exists(),
+        "backup keeps the original files"
+    );
+}
+
 #[test]
 fn uninstall_skill_creates_backup_before_removing_ssot() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let ssot_skill_dir = home.join(".cc-switch").join("skills").join("backup-skill");
@@ -237,8 +368,7 @@ fn uninstall_skill_creates_backup_before_removing_ssot() {
 
 #[test]
 fn restore_skill_backup_restores_files_to_ssot_and_current_app() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let ssot_skill_dir = home.join(".cc-switch").join("skills").join("restore-skill");
@@ -316,8 +446,7 @@ fn restore_skill_backup_restores_files_to_ssot_and_current_app() {
 
 #[test]
 fn delete_skill_backup_removes_backup_directory() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let ssot_skill_dir = home
@@ -381,8 +510,7 @@ fn delete_skill_backup_removes_backup_directory() {
 
 #[test]
 fn migration_snapshot_overrides_multi_source_directory_inference() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     write_skill(
@@ -423,5 +551,170 @@ fn migration_snapshot_overrides_multi_source_directory_inference() {
     assert!(
         !migrated.apps.opencode,
         "migration should no longer infer OpenCode enablement from a duplicate directory alone"
+    );
+}
+
+fn skill_row(id: &str, directory: &str) -> InstalledSkill {
+    InstalledSkill {
+        id: id.to_string(),
+        name: "Hostile".to_string(),
+        description: None,
+        directory: directory.to_string(),
+        repo_owner: None,
+        repo_name: None,
+        repo_branch: None,
+        readme_url: None,
+        apps: SkillApps {
+            claude: true,
+            ..Default::default()
+        },
+        installed_at: 1,
+        content_hash: None,
+        updated_at: 0,
+    }
+}
+
+#[test]
+fn uninstall_rejects_traversal_directory_from_db_without_touching_fs() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+
+    // A directory outside the skills roots that hostile rows point at.
+    let victim = home.join("victim");
+    write_skill(&victim, "Victim");
+    fs::write(victim.join("keep.txt"), "keep").expect("write victim file");
+    let ssot_dir = home.join(".cc-switch").join("skills");
+    fs::create_dir_all(&ssot_dir).expect("create ssot");
+    fs::create_dir_all(home.join(".claude").join("skills")).expect("create app dir");
+
+    let state = create_test_state().expect("create test state");
+    let absolute = victim.to_string_lossy().to_string();
+    let hostile = [
+        ("hostile:dotdot", "../../victim"),
+        ("hostile:abs", absolute.as_str()),
+        ("hostile:mixed", "a/../../victim"),
+        ("hostile:parent", ".."),
+        ("hostile:backslash", "..\\..\\victim"),
+    ];
+
+    for (id, directory) in hostile {
+        state
+            .db
+            .save_skill(&skill_row(id, directory))
+            .expect("save hostile skill row");
+        let err = SkillService::uninstall(&state.db, id)
+            .expect_err("uninstall must reject a traversal directory");
+        assert!(
+            err.to_string().contains("INVALID_SKILL_DIRECTORY"),
+            "unexpected error for {directory}: {err}"
+        );
+        assert!(
+            state.db.get_installed_skill(id).expect("query").is_some(),
+            "row must be kept when uninstall is refused"
+        );
+        assert!(
+            victim.join("keep.txt").exists(),
+            "uninstall of {directory} must not delete outside the skills root"
+        );
+
+        let err = SkillService::remove_from_app(directory, &AppType::Claude)
+            .expect_err("remove_from_app must reject a traversal directory");
+        assert!(err.to_string().contains("INVALID_SKILL_DIRECTORY"));
+        assert!(victim.join("keep.txt").exists());
+
+        assert!(
+            SkillService::sync_to_app_dir(directory, &AppType::Claude).is_err(),
+            "sync_to_app_dir must reject {directory}"
+        );
+    }
+
+    assert!(
+        fs::read_dir(&ssot_dir).expect("read ssot").next().is_none(),
+        "nothing should be copied into the SSOT for hostile rows"
+    );
+    let backup_dir = home.join(".cc-switch").join("skill-backups");
+    assert!(
+        !backup_dir.exists()
+            || fs::read_dir(&backup_dir)
+                .expect("read backups")
+                .next()
+                .is_none(),
+        "no backup should be taken of a path outside the skills root"
+    );
+
+    // Bulk sync skips the hostile rows instead of failing or escaping.
+    SkillService::sync_to_app(&state.db, &AppType::Claude).expect("bulk sync skips hostile rows");
+    assert!(victim.join("keep.txt").exists());
+}
+
+#[test]
+fn uninstall_still_removes_valid_skill_after_directory_validation() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+
+    let ssot_skill_dir = home.join(".cc-switch").join("skills").join("valid-skill");
+    write_skill(&ssot_skill_dir, "Valid");
+    let state = create_test_state().expect("create test state");
+    state
+        .db
+        .save_skill(&skill_row("local:valid-skill", "valid-skill"))
+        .expect("save skill");
+    SkillService::sync_to_app_dir("valid-skill", &AppType::Claude).expect("sync to claude");
+    let app_skill = home.join(".claude").join("skills").join("valid-skill");
+    assert!(app_skill.join("SKILL.md").exists());
+
+    SkillService::uninstall(&state.db, "local:valid-skill").expect("uninstall valid skill");
+    assert!(!ssot_skill_dir.exists());
+    assert!(!app_skill.exists() && !app_skill.is_symlink());
+}
+
+#[test]
+fn restore_from_backup_rejects_traversal_directory_in_metadata() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+
+    let ssot_skill_dir = home.join(".cc-switch").join("skills").join("meta-skill");
+    write_skill(&ssot_skill_dir, "Meta");
+    let state = create_test_state().expect("create test state");
+    state
+        .db
+        .save_skill(&skill_row("local:meta-skill", "meta-skill"))
+        .expect("save skill");
+
+    let backup_path = SkillService::uninstall(&state.db, "local:meta-skill")
+        .expect("uninstall skill")
+        .backup_path
+        .expect("backup path");
+    let backup_dir = std::path::PathBuf::from(&backup_path);
+    let backup_id = backup_dir
+        .file_name()
+        .expect("backup id")
+        .to_string_lossy()
+        .to_string();
+
+    // Tamper with the metadata so restore would copy outside the SSOT root.
+    let meta_path = backup_dir.join("meta.json");
+    let mut metadata: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&meta_path).expect("read meta"))
+            .expect("parse meta");
+    metadata["skill"]["directory"] = serde_json::Value::String("../../escaped".to_string());
+    fs::write(
+        &meta_path,
+        serde_json::to_string(&metadata).expect("serialize meta"),
+    )
+    .expect("write meta");
+
+    let err = SkillService::restore_from_backup(&state.db, &backup_id, &AppType::Claude)
+        .expect_err("restore must reject a traversal directory");
+    assert!(err.to_string().contains("INVALID_SKILL_DIRECTORY"), "{err}");
+    assert!(!home.join("escaped").exists());
+    assert!(!home.join(".cc-switch").join("escaped").exists());
+    assert!(
+        state
+            .db
+            .get_all_installed_skills()
+            .expect("list skills")
+            .is_empty(),
+        "no row should be written"
     );
 }

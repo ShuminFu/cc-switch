@@ -1,0 +1,24 @@
+{
+  "anthropic": {
+    "model": "gpt-5",
+    "max_tokens": 2048,
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "stop_sequences": ["END"],
+    "thinking": { "type": "enabled", "budget_tokens": 8000 },
+    "tool_choice": "any",
+    "system": "x-anthropic-billing-header: cc_version=1\nSolve carefully.",
+    "messages": [{ "role": "user", "content": "Solve it" }]
+  },
+  "chat": {
+    "model": "gpt-5",
+    "messages": [
+      { "role": "system", "content": "Solve carefully." },
+      { "role": "user", "content": "Solve it" }
+    ],
+    "max_completion_tokens": 2048,
+    "stop": ["END"],
+    "reasoning_effort": "medium",
+    "tool_choice": "required"
+  }
+}

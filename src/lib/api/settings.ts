@@ -1,4 +1,14 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, call, callJson } from "./invoke";
+import { commands } from "@/lib/bindings";
+import type {
+  CodexUnifyHistoryRestoreResult,
+  JsonValue,
+  StartupWarning,
+} from "@/lib/bindings";
+export type {
+  CodexUnifyHistoryRestoreResult,
+  StartupWarning,
+} from "@/lib/bindings";
 import type {
   Settings,
   WebDavSyncSettings,
@@ -17,17 +27,52 @@ export interface ConfigTransferResult {
 export interface WebDavTestResult {
   success: boolean;
   message?: string;
-}
-
-export interface CodexUnifyHistoryRestoreResult {
-  restoredJsonlFiles: number;
-  restoredStateRows: number;
-  /** 还原被跳过的原因（如当前目录没有账本）；存在时不应报成功 */
-  skippedReason?: string;
+  /** The endpoint is plain HTTP (credentials and data are not encrypted). */
+  insecureTransport?: boolean;
 }
 
 export interface WebDavSyncResult {
   status: string;
+  insecureTransport?: boolean;
+  /** Best-effort post-download warning (live config rewrite failed). */
+  warning?: string;
+}
+
+/** Remote snapshot preview returned by `*_sync_fetch_remote_info`. */
+export type CloudRemoteSnapshotInfo = RemoteSnapshotInfo & {
+  /** The remote changed since this device last synced (another device uploaded). */
+  remoteChangedSinceLastSync?: boolean;
+  insecureTransport?: boolean;
+};
+
+export type CloudRemoteInfoResult = CloudRemoteSnapshotInfo | { empty: true };
+
+/** Per-table difference in a sync download preview (ids and key paths only). */
+export interface SyncPreviewTableDiff {
+  table: string;
+  added: string[];
+  removed: string[];
+  changed: { id: string; fields: string[] }[];
+}
+
+/** What downloading the remote snapshot would change locally (SVC-27). */
+export type SyncDownloadPreview =
+  | {
+      deviceName: string;
+      createdAt: string;
+      snapshotId: string;
+      tables: SyncPreviewTableDiff[];
+    }
+  | { empty: true };
+
+/**
+ * Manual upload/download options. `force` defaults to `true` on the backend
+ * for compatibility; pass `false` to get a `sync.conflict.*` error when the
+ * other side changed since the last sync, then retry with `true` once the
+ * user explicitly chose to overwrite.
+ */
+export interface CloudSyncTransferOptions {
+  force?: boolean;
 }
 
 export const settingsApi = {
@@ -39,81 +84,94 @@ export const settingsApi = {
     return await invoke("save_settings", { settings });
   },
 
+  /**
+   * Update only the given fields (camelCase keys, as `get` returns them).
+   * Unlike `save`, a stale settings copy cannot roll back other fields.
+   */
+  async patch(patch: Partial<Settings>): Promise<boolean> {
+    return await call(commands.patchSettings(patch as unknown as JsonValue));
+  },
+
+  /** Non-fatal startup problems to explain (corrupt settings, missing data dir, proxy restore). */
+  async getStartupWarnings(): Promise<StartupWarning[]> {
+    return await call(commands.getStartupWarnings());
+  },
+
   /** 是否存在统一 Codex 会话历史的迁移备份（关闭弹窗据此显示"恢复备份"勾选） */
   async hasCodexUnifyHistoryBackup(): Promise<boolean> {
-    return await invoke("has_codex_unify_history_backup");
+    return await call(commands.hasCodexUnifyHistoryBackup());
   },
 
   /** 按迁移备份账本把当时迁入共享桶的官方会话还原回 openai 桶（幂等） */
   async restoreCodexUnifiedHistory(): Promise<CodexUnifyHistoryRestoreResult> {
-    return await invoke("restore_codex_unified_history");
+    return await call(commands.restoreCodexUnifiedHistory());
   },
 
   async restart(): Promise<boolean> {
-    return await invoke("restart_app");
+    return await call(commands.restartApp());
   },
 
   async installUpdateAndRestart(): Promise<boolean> {
-    return await invoke("install_update_and_restart");
+    return await call(commands.installUpdateAndRestart());
   },
 
   async checkUpdates(): Promise<void> {
-    await invoke("check_for_updates");
+    await call(commands.checkForUpdates());
   },
 
   async isPortable(): Promise<boolean> {
-    return await invoke("is_portable_mode");
+    return await call(commands.isPortableMode());
   },
 
   async getConfigDir(appId: AppId): Promise<string> {
-    return await invoke("get_config_dir", { app: appId });
+    return await call(commands.getConfigDir(appId));
   },
 
   async openConfigFolder(appId: AppId): Promise<void> {
-    await invoke("open_config_folder", { app: appId });
+    await call(commands.openConfigFolder(appId));
   },
 
   async pickDirectory(defaultPath?: string): Promise<string | null> {
-    return await invoke("pick_directory", { defaultPath });
+    return await call(commands.pickDirectory(defaultPath ?? null));
   },
 
   async selectConfigDirectory(defaultPath?: string): Promise<string | null> {
-    return await invoke("pick_directory", { defaultPath });
+    return await call(commands.pickDirectory(defaultPath ?? null));
   },
 
   async getClaudeCodeConfigPath(): Promise<string> {
-    return await invoke("get_claude_code_config_path");
+    return await call(commands.getClaudeCodeConfigPath());
   },
 
   async getAppConfigPath(): Promise<string> {
-    return await invoke("get_app_config_path");
+    return await call(commands.getAppConfigPath());
   },
 
   async openAppConfigFolder(): Promise<void> {
-    await invoke("open_app_config_folder");
+    await call(commands.openAppConfigFolder());
   },
 
   async getAppConfigDirOverride(): Promise<string | null> {
-    return await invoke("get_app_config_dir_override");
+    return await call(commands.getAppConfigDirOverride());
   },
 
   async setAppConfigDirOverride(path: string | null): Promise<boolean> {
-    return await invoke("set_app_config_dir_override", { path });
+    return await call(commands.setAppConfigDirOverride(path ?? null));
   },
 
   async applyClaudePluginConfig(options: {
     official: boolean;
   }): Promise<boolean> {
     const { official } = options;
-    return await invoke("apply_claude_plugin_config", { official });
+    return await call(commands.applyClaudePluginConfig(official));
   },
 
   async applyClaudeOnboardingSkip(): Promise<boolean> {
-    return await invoke("apply_claude_onboarding_skip");
+    return await call(commands.applyClaudeOnboardingSkip());
   },
 
   async clearClaudeOnboardingSkip(): Promise<boolean> {
-    return await invoke("clear_claude_onboarding_skip");
+    return await call(commands.clearClaudeOnboardingSkip());
   },
 
   async saveFileDialog(defaultName: string): Promise<string | null> {
@@ -125,11 +183,11 @@ export const settingsApi = {
   },
 
   async exportConfigToFile(filePath: string): Promise<ConfigTransferResult> {
-    return await invoke("export_config_to_file", { filePath });
+    return await callJson(commands.exportConfigToFile(filePath));
   },
 
   async importConfigFromFile(filePath: string): Promise<ConfigTransferResult> {
-    return await invoke("import_config_from_file", { filePath });
+    return await callJson(commands.importConfigFromFile(filePath));
   },
 
   // ─── WebDAV sync ──────────────────────────────────────────
@@ -144,12 +202,16 @@ export const settingsApi = {
     });
   },
 
-  async webdavSyncUpload(): Promise<WebDavSyncResult> {
-    return await invoke("webdav_sync_upload");
+  async webdavSyncUpload(
+    options: CloudSyncTransferOptions = {},
+  ): Promise<WebDavSyncResult> {
+    return await callJson(commands.webdavSyncUpload(options.force ?? null));
   },
 
-  async webdavSyncDownload(): Promise<WebDavSyncResult> {
-    return await invoke("webdav_sync_download");
+  async webdavSyncDownload(
+    options: CloudSyncTransferOptions = {},
+  ): Promise<WebDavSyncResult> {
+    return await callJson(commands.webdavSyncDownload(options.force ?? null));
   },
 
   async webdavSyncSaveSettings(
@@ -162,10 +224,8 @@ export const settingsApi = {
     });
   },
 
-  async webdavSyncFetchRemoteInfo(): Promise<
-    RemoteSnapshotInfo | { empty: true }
-  > {
-    return await invoke("webdav_sync_fetch_remote_info");
+  async webdavSyncFetchRemoteInfo(): Promise<CloudRemoteInfoResult> {
+    return await callJson(commands.webdavSyncFetchRemoteInfo());
   },
 
   // ===== S3 Sync API =====
@@ -180,12 +240,16 @@ export const settingsApi = {
     });
   },
 
-  async s3SyncUpload(): Promise<WebDavSyncResult> {
-    return await invoke("s3_sync_upload");
+  async s3SyncUpload(
+    options: CloudSyncTransferOptions = {},
+  ): Promise<WebDavSyncResult> {
+    return await callJson(commands.s3SyncUpload(options.force ?? null));
   },
 
-  async s3SyncDownload(): Promise<WebDavSyncResult> {
-    return await invoke("s3_sync_download");
+  async s3SyncDownload(
+    options: CloudSyncTransferOptions = {},
+  ): Promise<WebDavSyncResult> {
+    return await callJson(commands.s3SyncDownload(options.force ?? null));
   },
 
   async s3SyncSaveSettings(
@@ -198,12 +262,19 @@ export const settingsApi = {
     });
   },
 
-  async s3SyncFetchRemoteInfo(): Promise<RemoteSnapshotInfo | { empty: true }> {
-    return await invoke("s3_sync_fetch_remote_info");
+  async s3SyncFetchRemoteInfo(): Promise<CloudRemoteInfoResult> {
+    return await callJson(commands.s3SyncFetchRemoteInfo());
+  },
+
+  /** Dry-run a sync download: diff the remote snapshot against local data. */
+  async previewSyncDownload(
+    backend: "webdav" | "s3",
+  ): Promise<SyncDownloadPreview> {
+    return await invoke("preview_sync_download", { backend });
   },
 
   async syncCurrentProvidersLive(): Promise<void> {
-    const result = (await invoke("sync_current_providers_live")) as {
+    const result = (await callJson(commands.syncCurrentProvidersLive())) as {
       success?: boolean;
       message?: string;
     };
@@ -222,15 +293,15 @@ export const settingsApi = {
     } catch {
       throw new Error("Invalid URL");
     }
-    await invoke("open_external", { url });
+    await call(commands.openExternal(url));
   },
 
   async setAutoLaunch(enabled: boolean): Promise<boolean> {
-    return await invoke("set_auto_launch", { enabled });
+    return await call(commands.setAutoLaunch(enabled));
   },
 
   async getAutoLaunchStatus(): Promise<boolean> {
-    return await invoke("get_auto_launch_status");
+    return await call(commands.getAutoLaunchStatus());
   },
 
   async getToolVersions(
@@ -333,6 +404,10 @@ export interface OptimizerConfig {
   enabled: boolean;
   thinkingOptimizer: boolean;
   cacheInjection: boolean;
+  /** Adaptive models: inject `output_config.effort = "max"` (opt-in, PROXY-47). */
+  thinkingMaxEffort?: boolean;
+  /** Adaptive models: append the `context-1m-2025-08-07` beta (opt-in, PROXY-47). */
+  context1mBeta?: boolean;
 }
 
 export interface LogConfig {
@@ -348,7 +423,7 @@ export interface BackupEntry {
 
 export const backupsApi = {
   async createDbBackup(): Promise<string> {
-    return await invoke("create_db_backup");
+    return await call(commands.createDbBackup());
   },
 
   async listDbBackups(): Promise<BackupEntry[]> {
@@ -356,14 +431,34 @@ export const backupsApi = {
   },
 
   async restoreDbBackup(filename: string): Promise<string> {
-    return await invoke("restore_db_backup", { filename });
+    return await call(commands.restoreDbBackup(filename));
+  },
+
+  /**
+   * Restore a backup; `keepUsageHistory = false` brings back the backup's own
+   * usage logs and statistics instead of keeping this device's (DB-42).
+   */
+  async restoreDbBackupWithOptions(
+    filename: string,
+    keepUsageHistory: boolean,
+  ): Promise<string> {
+    if (keepUsageHistory) return await backupsApi.restoreDbBackup(filename);
+    return await invoke("restore_db_backup_with_options", {
+      filename,
+      keepUsageHistory,
+    });
   },
 
   async renameDbBackup(oldFilename: string, newName: string): Promise<string> {
-    return await invoke("rename_db_backup", { oldFilename, newName });
+    return await call(commands.renameDbBackup(oldFilename, newName));
   },
 
   async deleteDbBackup(filename: string): Promise<void> {
-    await invoke("delete_db_backup", { filename });
+    await call(commands.deleteDbBackup(filename));
+  },
+
+  /** Open the backups directory in the system file manager (FE-UI-37). */
+  async openBackupsFolder(): Promise<void> {
+    await call(commands.openBackupsFolder());
   },
 };

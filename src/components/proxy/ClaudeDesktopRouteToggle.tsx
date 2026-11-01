@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Switch } from "@/components/ui/switch";
 import { useProxyStatus } from "@/hooks/useProxyStatus";
 import { cn } from "@/lib/utils";
+import { useClaudeDesktopProxyDependency } from "@/lib/query/adapters";
 
 interface ClaudeDesktopRouteToggleProps {
   className?: string;
@@ -30,6 +31,14 @@ export function ClaudeDesktopRouteToggle({
       takeoverStatus?.gemini ||
       takeoverStatus?.grokbuild,
   );
+  // PROXY-30: the backend refuses to stop while Claude Desktop's live
+  // profile still points at the local route; explain that up front.
+  const dependency = useClaudeDesktopProxyDependency(isRunning);
+  const desktopDependsOnRoute = isRunning && dependency.data === true;
+  const dependencyMessage = t("claudeDesktop.route.stopBlockedByDesktop", {
+    defaultValue:
+      "Claude Desktop still sends its requests through local routing. Switch Claude Desktop to a direct provider first, then stop local routing.",
+  });
   const routeAddress = status?.address ?? "127.0.0.1";
   const routePort = status?.port ?? 15721;
 
@@ -44,10 +53,16 @@ export function ClaudeDesktopRouteToggle({
         toast.warning(
           t("claudeDesktop.route.stopBlockedByTakeover", {
             defaultValue:
-              "其它应用正在使用代理接管。请先在设置中关闭对应应用接管，再停止本地路由。",
+              "Another app is still using routing takeover. Turn off that app's takeover in Settings first, then stop local routing.",
           }),
           { duration: 5000 },
         );
+        return;
+      }
+
+      const { data: dependsNow } = await dependency.refetch();
+      if (dependsNow) {
+        toast.warning(dependencyMessage, { duration: 5000 });
         return;
       }
 
@@ -75,7 +90,11 @@ export function ClaudeDesktopRouteToggle({
         "flex items-center gap-1 px-1.5 h-8 rounded-lg bg-muted/50 transition-all",
         className,
       )}
-      title={tooltipText}
+      title={
+        desktopDependsOnRoute
+          ? `${tooltipText}\n${dependencyMessage}`
+          : tooltipText
+      }
     >
       {isBusy ? (
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />

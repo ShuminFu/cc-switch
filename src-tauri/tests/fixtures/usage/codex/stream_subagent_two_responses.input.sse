@@ -1,0 +1,6 @@
+event: response.completed
+data: {"type": "response.completed", "response": {"id": "resp_a", "model": "gpt-5-codex", "usage": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}}}
+
+event: response.completed
+data: {"type": "response.completed", "response": {"id": "resp_b", "model": "gpt-5-codex", "usage": {"input_tokens": 200, "output_tokens": 20, "total_tokens": 220}}}
+

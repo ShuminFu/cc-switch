@@ -3,21 +3,28 @@
 //! 提供支持全局代理配置的 HTTP 客户端。
 //! 所有需要发送 HTTP 请求的模块都应使用此模块提供的客户端。
 
-use once_cell::sync::OnceCell;
 use reqwest::Client;
 use std::env;
 use std::net::IpAddr;
+use std::sync::OnceLock;
 use std::sync::RwLock;
 use std::time::Duration;
 
 /// 全局 HTTP 客户端实例
-static GLOBAL_CLIENT: OnceCell<RwLock<Client>> = OnceCell::new();
+static GLOBAL_CLIENT: OnceLock<RwLock<Client>> = OnceLock::new();
+
+/// 与 `GLOBAL_CLIENT` 代理配置相同、但不跟随重定向的客户端。
+///
+/// 用于会携带用户自定义请求头（API Key 等）的请求（如用量查询脚本）：
+/// reqwest 跟随跨域重定向时只剥离 Authorization/Cookie 等少数头，
+/// 自定义头会被原样发往重定向目标，因此由调用方自行校验后再决定是否跟随。
+static GLOBAL_NO_REDIRECT_CLIENT: OnceLock<RwLock<Client>> = OnceLock::new();
 
 /// 当前代理 URL（用于日志和状态查询）
-static CURRENT_PROXY_URL: OnceCell<RwLock<Option<String>>> = OnceCell::new();
+static CURRENT_PROXY_URL: OnceLock<RwLock<Option<String>>> = OnceLock::new();
 
 /// CC Switch 代理服务器当前监听的端口
-static CC_SWITCH_PROXY_PORT: OnceCell<RwLock<u16>> = OnceCell::new();
+static CC_SWITCH_PROXY_PORT: OnceLock<RwLock<u16>> = OnceLock::new();
 
 /// 设置 CC Switch 代理服务器的监听端口
 ///
@@ -53,6 +60,7 @@ fn get_proxy_port() -> u16 {
 pub fn init(proxy_url: Option<&str>) -> Result<(), String> {
     let effective_url = proxy_url.filter(|s| !s.trim().is_empty());
     let client = build_client(effective_url)?;
+    let no_redirect = build_no_redirect_client(effective_url)?;
 
     // 尝试初始化全局客户端，如果已存在则记录警告并使用 apply_proxy 更新
     if GLOBAL_CLIENT.set(RwLock::new(client.clone())).is_err() {
@@ -65,6 +73,7 @@ pub fn init(proxy_url: Option<&str>) -> Result<(), String> {
         // 已初始化，改用 apply_proxy 更新
         return apply_proxy(proxy_url);
     }
+    store_no_redirect_client(no_redirect)?;
 
     // 初始化代理 URL 记录
     let _ = CURRENT_PROXY_URL.set(RwLock::new(effective_url.map(|s| s.to_string())));
@@ -106,6 +115,7 @@ pub fn validate_proxy(proxy_url: Option<&str>) -> Result<(), String> {
 pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
     let effective_url = proxy_url.filter(|s| !s.trim().is_empty());
     let new_client = build_client(effective_url)?;
+    let new_no_redirect = build_no_redirect_client(effective_url)?;
 
     // 更新客户端
     if let Some(lock) = GLOBAL_CLIENT.get() {
@@ -118,6 +128,7 @@ pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
         // 如果还没初始化，则初始化
         return init(proxy_url);
     }
+    store_no_redirect_client(new_no_redirect)?;
 
     // 更新代理 URL 记录
     if let Some(lock) = CURRENT_PROXY_URL.get() {
@@ -150,6 +161,7 @@ pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
 pub fn update_proxy(proxy_url: Option<&str>) -> Result<(), String> {
     let effective_url = proxy_url.filter(|s| !s.trim().is_empty());
     let new_client = build_client(effective_url)?;
+    let new_no_redirect = build_no_redirect_client(effective_url)?;
 
     // 更新客户端
     if let Some(lock) = GLOBAL_CLIENT.get() {
@@ -162,6 +174,7 @@ pub fn update_proxy(proxy_url: Option<&str>) -> Result<(), String> {
         // 如果还没初始化，则初始化
         return init(proxy_url);
     }
+    store_no_redirect_client(new_no_redirect)?;
 
     // 更新代理 URL 记录
     if let Some(lock) = CURRENT_PROXY_URL.get() {
@@ -196,6 +209,38 @@ pub fn get() -> Client {
         })
 }
 
+/// 获取不跟随重定向的全局 HTTP 客户端（代理配置与 [`get`] 相同）
+///
+/// 3xx 响应原样返回给调用方，调用方需自行校验 `Location` 后再决定是否跟随。
+pub fn get_no_redirect() -> Client {
+    GLOBAL_NO_REDIRECT_CLIENT
+        .get()
+        .and_then(|lock| lock.read().ok())
+        .map(|c| c.clone())
+        .unwrap_or_else(|| {
+            log::warn!("[GlobalProxy] [GP-004] No-redirect client not initialized, using fallback");
+            build_no_redirect_client(None).unwrap_or_else(|_| {
+                Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .unwrap_or_default()
+            })
+        })
+}
+
+fn store_no_redirect_client(client: Client) -> Result<(), String> {
+    if let Some(lock) = GLOBAL_NO_REDIRECT_CLIENT.get() {
+        let mut current = lock.write().map_err(|e| {
+            log::error!("[GlobalProxy] [GP-001] Failed to acquire write lock: {e}");
+            "Failed to update proxy: lock poisoned".to_string()
+        })?;
+        *current = client;
+    } else {
+        let _ = GLOBAL_NO_REDIRECT_CLIENT.set(RwLock::new(client));
+    }
+    Ok(())
+}
+
 /// 获取当前代理 URL
 ///
 /// 返回当前配置的代理 URL，None 表示直连。
@@ -214,9 +259,52 @@ pub fn is_proxy_enabled() -> bool {
 
 /// 构建 HTTP 客户端
 fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
+    build_client_with(proxy_url, same_origin_redirect_policy())
+}
+
+/// Follow redirects only within the same origin (scheme, host, port).
+///
+/// reqwest strips `Authorization`/`Cookie` on a cross-host redirect but keeps
+/// every other header, so vendor credentials such as `x-api-key`,
+/// `x-goog-api-key` or a signed S3 request would be sent to whatever host a
+/// redirect names. A cross-origin redirect is returned to the caller as-is
+/// instead.
+fn same_origin_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= 10 {
+            return attempt.error("too many redirects");
+        }
+        let same_origin = attempt
+            .previous()
+            .last()
+            .is_some_and(|prev| is_same_origin(prev, attempt.url()));
+        if same_origin {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    })
+}
+
+fn is_same_origin(a: &reqwest::Url, b: &reqwest::Url) -> bool {
+    a.scheme() == b.scheme()
+        && a.host_str() == b.host_str()
+        && a.port_or_known_default() == b.port_or_known_default()
+}
+
+/// 构建不跟随重定向的 HTTP 客户端
+fn build_no_redirect_client(proxy_url: Option<&str>) -> Result<Client, String> {
+    build_client_with(proxy_url, reqwest::redirect::Policy::none())
+}
+
+fn build_client_with(
+    proxy_url: Option<&str>,
+    redirect: reqwest::redirect::Policy,
+) -> Result<Client, String> {
     let mut builder = Client::builder()
+        .redirect(redirect)
         .timeout(Duration::from_secs(600))
-        .connect_timeout(Duration::from_secs(30))
+        .connect_timeout(crate::proxy::pipeline::timeout::CONNECT_TIMEOUT)
         .pool_max_idle_per_host(10)
         .tcp_keepalive(Duration::from_secs(60))
         // 禁用 reqwest 自动解压：防止 reqwest 覆盖客户端原始 accept-encoding header。
@@ -225,6 +313,9 @@ fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
         .no_brotli()
         .no_deflate()
         .no_zstd();
+    // Same trust recipe as the hyper paths: webpki + native (reqwest features)
+    // plus the optional extra CA bundle (PROXY-40).
+    builder = super::tls_roots::apply_to_reqwest(builder);
 
     // 有代理地址则使用代理，否则跟随系统代理
     if let Some(url) = proxy_url {
@@ -325,19 +416,207 @@ pub fn mask_url(url: &str) -> String {
             None => format!("{}://{}", parsed.scheme(), host),
         }
     } else {
-        // URL 解析失败，返回部分内容
-        if url.len() > 20 {
-            format!("{}...", &url[..20])
+        // URL 解析失败：先去掉可能的 `user:pass@` 凭据，再返回部分内容
+        let without_credentials = match url.rfind('@') {
+            Some(at) => {
+                let scheme_end = url.find("://").map(|i| i + 3).unwrap_or(0);
+                if at >= scheme_end {
+                    format!("{}***@{}", &url[..scheme_end], &url[at + 1..])
+                } else {
+                    url.to_string()
+                }
+            }
+            None => url.to_string(),
+        };
+        if without_credentials.chars().count() > 20 {
+            let head: String = without_credentials.chars().take(20).collect();
+            format!("{head}...")
         } else {
-            url.to_string()
+            without_credentials
         }
     }
+}
+
+/// Maximum number of bytes of a request/response body written to the log.
+///
+/// Logs end up in `cc-switch.log` and are routinely attached to bug reports, so
+/// they must never contain whole prompts, source code or model output.
+pub(crate) const LOG_BODY_EXCERPT_BYTES: usize = 512;
+
+/// Header names whose values are credentials or session identifiers and must
+/// never be written to the log.
+const SENSITIVE_HEADERS: &[&str] = &[
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "x-goog-api-key",
+    "api-key",
+    "cookie",
+    "set-cookie",
+    "chatgpt-account-id",
+    "x-auth-token",
+    "x-amz-security-token",
+];
+
+/// Whether a header's value must be redacted before logging.
+pub(crate) fn is_sensitive_header(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    SENSITIVE_HEADERS.contains(&lower.as_str())
+        || lower.contains("token")
+        || lower.contains("secret")
+        || lower.ends_with("-key")
+}
+
+/// Format headers as `name=value, ...` for logging, with credential values
+/// replaced by `<redacted>`.
+pub(crate) fn format_headers_redacted(headers: &http::HeaderMap) -> String {
+    headers
+        .iter()
+        .map(|(key, value)| {
+            if is_sensitive_header(key.as_str()) {
+                format!("{key}=<redacted>")
+            } else {
+                format!("{key}={}", value.to_str().unwrap_or("<non-utf8>"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Bounded excerpt of a body for logging: at most [`LOG_BODY_EXCERPT_BYTES`]
+/// bytes (cut on a char boundary) followed by the total size when truncated.
+pub(crate) fn log_body_excerpt(text: &str) -> String {
+    if text.len() <= LOG_BODY_EXCERPT_BYTES {
+        return text.to_string();
+    }
+    let mut end = LOG_BODY_EXCERPT_BYTES;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…(truncated, {} bytes total)", &text[..end], text.len())
+}
+
+/// Content-free description of a JSON request body for debug logs: size,
+/// sorted top-level keys and the length of the conversation arrays. Never
+/// contains message text (SEC-13).
+pub(crate) fn describe_body_shape(body: &serde_json::Value, size: usize) -> String {
+    let Some(obj) = body.as_object() else {
+        return format!("{size} bytes (non-object)");
+    };
+    let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    let mut out = format!("{size} bytes, keys=[{}]", keys.join(","));
+    for field in ["messages", "input", "contents", "tools"] {
+        if let Some(arr) = obj.get(field).and_then(|v| v.as_array()) {
+            out.push_str(&format!(", {field}={}", arr.len()));
+        }
+    }
+    out
+}
+
+/// Upper bound for an upstream error body stored in `proxy_request_logs`
+/// (SEC-13): a hostile or verbose upstream must not bloat the database.
+pub(crate) const MAX_STORED_ERROR_BYTES: usize = 2048;
+
+/// Truncate `text` to at most [`MAX_STORED_ERROR_BYTES`] bytes on a char
+/// boundary, appending a marker when something was cut.
+pub(crate) fn truncate_error_text(text: &str) -> String {
+    const MARKER: &str = "…(truncated)";
+    if text.len() <= MAX_STORED_ERROR_BYTES {
+        return text.to_string();
+    }
+    let mut end = MAX_STORED_ERROR_BYTES - MARKER.len();
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{MARKER}", &text[..end])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redirects_are_followed_only_within_the_same_origin() {
+        let base = reqwest::Url::parse("https://api.example.com/v1/models").unwrap();
+        assert!(is_same_origin(
+            &base,
+            &reqwest::Url::parse("https://api.example.com:443/v2/models").unwrap()
+        ));
+        assert!(!is_same_origin(
+            &base,
+            &reqwest::Url::parse("https://evil.example.net/v1/models").unwrap()
+        ));
+        assert!(!is_same_origin(
+            &base,
+            &reqwest::Url::parse("http://api.example.com/v1/models").unwrap()
+        ));
+        assert!(!is_same_origin(
+            &base,
+            &reqwest::Url::parse("https://api.example.com:8443/v1").unwrap()
+        ));
+    }
     use std::sync::{Mutex, OnceLock};
+
+    /// SEC-26: every log statement in the global-proxy code paths that mentions
+    /// a proxy URL goes through `mask_url` (credentials may be embedded as
+    /// `user:pass@`). Scans the sources so a future raw `{url}` log fails here.
+    #[test]
+    fn proxy_url_log_statements_are_masked() {
+        let sources = [
+            ("http_client.rs", include_str!("http_client.rs")),
+            (
+                "commands/global_proxy.rs",
+                include_str!("../commands/global_proxy.rs"),
+            ),
+        ];
+        for (name, source) in sources {
+            let source = source.split("#[cfg(test)]").next().unwrap_or(source);
+            let mut rest = source;
+            while let Some(start) = rest.find("log::") {
+                let tail = &rest[start..];
+                let end = tail.find(");").map(|i| i + 2).unwrap_or(tail.len());
+                let stmt = &tail[..end];
+                rest = &tail[end..];
+                let mentions_proxy_url =
+                    stmt.replace("test_url", "").contains("url") && !stmt.contains("url.len()");
+                assert!(
+                    !mentions_proxy_url || stmt.contains("mask_url"),
+                    "{name}: unmasked proxy URL in log statement: {stmt}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn body_shape_has_no_message_content() {
+        let body = serde_json::json!({
+            "model": "claude",
+            "messages": [{"role": "user", "content": "TOP SECRET PROMPT"}],
+            "system": "SYSTEM SECRET"
+        });
+        let out = describe_body_shape(&body, 99);
+        assert!(!out.contains("SECRET"), "{out}");
+        assert!(out.contains("messages=1"), "{out}");
+        assert!(out.contains("keys=[messages,model,system]"), "{out}");
+    }
+
+    #[test]
+    fn stored_error_text_is_bounded() {
+        let long = "错".repeat(5000);
+        let out = truncate_error_text(&long);
+        assert!(out.len() <= MAX_STORED_ERROR_BYTES, "{}", out.len());
+        assert!(out.ends_with("(truncated)"));
+        assert_eq!(truncate_error_text("short"), "short");
+    }
+
+    #[test]
+    fn mask_url_does_not_panic_on_multibyte_input() {
+        let masked = mask_url("代理服务器：http://127.0.0.1:7890");
+        assert!(masked.ends_with("..."), "{masked}");
+        let err = validate_proxy(Some("代理服务器：http://127.0.0.1:7890")).unwrap_err();
+        assert!(err.contains("Invalid proxy URL"), "{err}");
+    }
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -364,6 +643,74 @@ mod tests {
             mask_url("https://user:pass@proxy.example.com"),
             "https://proxy.example.com"
         );
+    }
+
+    #[test]
+    fn mask_url_fallback_strips_credentials() {
+        let masked = mask_url("::not a url user:hunter2@host");
+        assert!(!masked.contains("hunter2"), "{masked}");
+    }
+
+    #[test]
+    fn redacted_headers_never_contain_credentials() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert("authorization", "Bearer sk-ant-secret".parse().unwrap());
+        headers.insert("x-api-key", "sk-ant-secret".parse().unwrap());
+        headers.insert("x-goog-api-key", "AIza-secret".parse().unwrap());
+        headers.insert("set-cookie", "session=abc".parse().unwrap());
+        headers.insert("cookie", "session=abc".parse().unwrap());
+        headers.insert("chatgpt-account-id", "acct-1".parse().unwrap());
+        headers.insert("content-type", "application/json".parse().unwrap());
+
+        let out = format_headers_redacted(&headers);
+        assert!(!out.contains("Bearer"), "{out}");
+        assert!(!out.contains("secret"), "{out}");
+        assert!(!out.contains("session=abc"), "{out}");
+        assert!(!out.contains("acct-1"), "{out}");
+        assert!(out.contains("content-type=application/json"), "{out}");
+        assert!(out.contains("authorization=<redacted>"), "{out}");
+    }
+
+    #[test]
+    fn body_excerpt_is_bounded_and_char_safe() {
+        assert_eq!(log_body_excerpt("short"), "short");
+        let long = "提示".repeat(1000);
+        let out = log_body_excerpt(&long);
+        assert!(out.len() < LOG_BODY_EXCERPT_BYTES + 64, "{}", out.len());
+        assert!(out.contains(&format!("{} bytes total", long.len())));
+    }
+
+    #[tokio::test]
+    async fn no_redirect_client_returns_3xx_without_following() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                let resp = format!(
+                    "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{port}/next\r\n\
+                     Content-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+
+        let client = build_no_redirect_client(None).unwrap();
+        let resp = client
+            .get(format!("http://127.0.0.1:{port}/start"))
+            .header("x-api-key", "secret")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::FOUND);
+        assert!(resp.url().path().ends_with("/start"));
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]

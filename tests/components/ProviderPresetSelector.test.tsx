@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TFunction } from "i18next";
 import { useForm } from "react-hook-form";
 import { Form } from "@/components/ui/form";
@@ -11,6 +11,8 @@ import {
   getPresetDisplayName,
   getPresetSearchText,
   getVisiblePresetEntries,
+  HIDE_SPONSORED_STORAGE_KEY,
+  isSponsoredPreset,
   sortPresetEntries,
   type PresetSortMode,
 } from "@/components/providers/forms/ProviderPresetSelector";
@@ -61,6 +63,7 @@ type TestPresetEntry = {
     settingsConfig: Record<string, never>;
     category: ProviderCategory;
     primePartner?: boolean;
+    isPartner?: boolean;
   };
 };
 
@@ -136,7 +139,7 @@ function renderSelector({
 
 function getPresetButtonTexts() {
   const knownNames = new Set([
-    "providerPreset.custom",
+    "Custom Configuration",
     ...presetEntries.flatMap((entry) => [
       entry.preset.name,
       entry.preset.nameKey ?? entry.preset.name,
@@ -300,7 +303,7 @@ describe("ProviderPresetSelector", () => {
     renderSelector();
 
     expect(getPresetButtonTexts()).toEqual([
-      "providerPreset.custom",
+      "Custom Configuration",
       "preset.alpha",
       "preset.gamma",
       "Beta Gateway",
@@ -315,7 +318,7 @@ describe("ProviderPresetSelector", () => {
     await user.click(getSortButton());
 
     expect(getPresetButtonTexts()).toEqual([
-      "providerPreset.custom",
+      "Custom Configuration",
       "Beta Gateway",
       "Delta Mirror",
       "preset.alpha",
@@ -325,7 +328,7 @@ describe("ProviderPresetSelector", () => {
     await user.click(getSortButton());
 
     expect(getPresetButtonTexts()).toEqual([
-      "providerPreset.custom",
+      "Custom Configuration",
       "preset.alpha",
       "preset.gamma",
       "Beta Gateway",
@@ -341,7 +344,7 @@ describe("ProviderPresetSelector", () => {
     await user.type(getSearchInput(), "gateway");
 
     expect(
-      screen.getByRole("button", { name: "providerPreset.custom" }),
+      screen.getByRole("button", { name: "Custom Configuration" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Beta Gateway" }),
@@ -365,7 +368,7 @@ describe("ProviderPresetSelector", () => {
     await user.type(getSearchInput(), "not-found");
 
     expect(
-      screen.getByRole("button", { name: "providerPreset.custom" }),
+      screen.getByRole("button", { name: "Custom Configuration" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "preset.gamma" }),
@@ -380,9 +383,7 @@ describe("ProviderPresetSelector", () => {
       screen.queryByRole("button", { name: "Delta Mirror" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText(
-        /providerPreset\.(empty|noResults)|没有匹配|无结果|no matching presets/i,
-      ),
+      screen.getByText("No provider presets match your search."),
     ).toBeInTheDocument();
   });
 
@@ -447,7 +448,7 @@ describe("ProviderPresetSelector", () => {
     renderSelector();
 
     const customButton = screen.getByRole("button", {
-      name: "providerPreset.custom",
+      name: "Custom Configuration",
     });
     const placeholder = customButton.querySelector("span[aria-hidden]");
     expect(placeholder).not.toBeNull();
@@ -572,5 +573,107 @@ describe("ProviderPresetSelector", () => {
     expect(
       screen.getByRole("button", { name: "preset.gamma" }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("ProviderPresetSelector sponsor disclosure (PRODUCT-08)", () => {
+  const sponsoredEntries: TestPresetEntry[] = [
+    ...presetEntries,
+    {
+      id: "partner",
+      preset: {
+        name: "Partner Relay",
+        websiteUrl: "https://partner.example.com/?aff=cc-switch",
+        settingsConfig: {},
+        category: "third_party",
+        isPartner: true,
+      },
+    },
+    {
+      id: "prime",
+      preset: {
+        name: "Prime Relay",
+        websiteUrl: "https://prime.example.com",
+        settingsConfig: {},
+        category: "cn_official",
+        primePartner: true,
+      },
+    },
+  ];
+
+  afterEach(() => {
+    localStorage.removeItem(HIDE_SPONSORED_STORAGE_KEY);
+  });
+
+  it("treats partner and prime partner presets as sponsored", () => {
+    expect(isSponsoredPreset(sponsoredEntries.at(-2)!.preset as any)).toBe(
+      true,
+    );
+    expect(isSponsoredPreset(sponsoredEntries.at(-1)!.preset as any)).toBe(
+      true,
+    );
+    expect(isSponsoredPreset(presetEntries[0].preset as any)).toBe(false);
+  });
+
+  it("can drop sponsored presets from the visible list", () => {
+    const ids = getIds(
+      getVisiblePresetEntries(sponsoredEntries as any, {
+        query: "",
+        sortMode: "original" as PresetSortMode,
+        t,
+        hideSponsored: true,
+      }),
+    );
+    expect(ids).not.toContain("partner");
+    expect(ids).not.toContain("prime");
+    expect(ids).toHaveLength(presetEntries.length);
+  });
+
+  it("shows no disclosure when the catalog has no sponsored presets", () => {
+    renderSelector();
+    expect(screen.queryByTestId("sponsor-disclosure")).not.toBeInTheDocument();
+  });
+
+  it("labels every sponsored preset and shows a one-line disclosure", () => {
+    renderSelector({ entries: sponsoredEntries });
+
+    const partner = screen.getByRole("button", { name: /Partner Relay/ });
+    const prime = screen.getByRole("button", { name: /Prime Relay/ });
+    for (const button of [partner, prime]) {
+      expect(button).toHaveAttribute("data-sponsored", "true");
+      expect(button.getAttribute("title")).toMatch(/referral commission/i);
+    }
+    const plain = screen.getByRole("button", { name: "preset.gamma" });
+    expect(plain).not.toHaveAttribute("data-sponsored");
+    expect(plain.getAttribute("title")).not.toMatch(/referral/i);
+
+    const disclosure = screen.getByTestId("sponsor-disclosure");
+    expect(disclosure).toHaveTextContent(/referral commission/i);
+    expect(
+      within(disclosure).getByRole("button", { name: /sponsor policy/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("persists the hide-sponsored preference", async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderSelector({ entries: sponsoredEntries });
+
+    await user.click(
+      screen.getByRole("button", { name: /hide sponsored presets/i }),
+    );
+    expect(
+      screen.queryByRole("button", { name: /Partner Relay/ }),
+    ).not.toBeInTheDocument();
+    expect(localStorage.getItem(HIDE_SPONSORED_STORAGE_KEY)).toBe("1");
+
+    unmount();
+    renderSelector({ entries: sponsoredEntries });
+    expect(
+      screen.queryByRole("button", { name: /Partner Relay/ }),
+    ).not.toBeInTheDocument();
+    // link targets are untouched: the preset data is not modified
+    expect(sponsoredEntries.at(-2)!.preset.websiteUrl).toContain(
+      "aff=cc-switch",
+    );
   });
 });

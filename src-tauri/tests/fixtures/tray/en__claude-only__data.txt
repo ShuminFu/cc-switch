@@ -1,0 +1,49 @@
+TrayModel {
+    texts: TrayTexts {
+        show_main: "Open main window",
+        open_website: "Open Official Website",
+        no_providers_label: "(no providers)",
+        lightweight_mode: "Lightweight Mode",
+        quit: "Quit",
+        _auto_label: "Auto (Failover)",
+        projects_label: "Projects",
+        no_project_label: "No project",
+    },
+    sections: [
+        TraySectionModel {
+            section: 0,
+            body: Providers {
+                label: "Claude · Relay B",
+                items: [
+                    TrayProviderItem {
+                        id: "official",
+                        label: "Claude Official",
+                        enabled: true,
+                        checked: false,
+                    },
+                    TrayProviderItem {
+                        id: "relay",
+                        label: "Relay B",
+                        enabled: true,
+                        checked: true,
+                    },
+                ],
+            },
+        },
+    ],
+    profile_scopes: [
+        TrayProfileScopeModel {
+            scope: "claude",
+            label: "Claude Code",
+            profiles: [
+                TrayProfileItem {
+                    id: "work",
+                    name: "Work",
+                    checked: true,
+                },
+            ],
+            none_checked: false,
+        },
+    ],
+    lightweight: false,
+}

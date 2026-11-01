@@ -41,6 +41,7 @@ import type {
   SkillsShDiscoverableSkill,
 } from "@/lib/api/skills";
 import { formatSkillError } from "@/lib/errors/skillErrorParser";
+import { showError } from "@/lib/errors/showError";
 
 export type SkillsPageSource = "repos" | "skillssh";
 
@@ -274,11 +275,6 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
       }
     };
 
-    const handleUninstall = async (_directory: string) => {
-      // 在发现面板中，不支持卸载，需要在主面板中操作
-      toast.info(t("skills.uninstallInMainPanel"));
-    };
-
     const handleAddRepo = async (repo: SkillRepo) => {
       try {
         await addRepoMutation.mutateAsync(repo);
@@ -300,9 +296,7 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
           { closeButton: true },
         );
       } catch (error) {
-        toast.error(t("common.error"), {
-          description: String(error),
-        });
+        showError({ title: t("common.error"), error });
       }
     };
 
@@ -313,9 +307,7 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
           closeButton: true,
         });
       } catch (error) {
-        toast.error(t("common.error"), {
-          description: String(error),
-        });
+        showError({ title: t("common.error"), error });
       }
     };
 
@@ -565,7 +557,6 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
                       key={skill.key}
                       skill={skill}
                       onInstall={handleInstall}
-                      onUninstall={handleUninstall}
                     />
                   ))}
                 </div>
@@ -609,7 +600,6 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
                             }}
                             installs={skill.installs}
                             onInstall={handleInstall}
-                            onUninstall={handleUninstall}
                           />
                         );
                       })}

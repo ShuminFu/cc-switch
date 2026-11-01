@@ -49,11 +49,8 @@ pub trait ProviderAdapter: Send + Sync {
         Ok(body)
     }
 
-    /// 转换响应体
-    #[allow(dead_code)]
-    fn transform_response(&self, body: Value) -> Result<Value, ProxyError> {
-        Ok(body)
-    }
+    // Responses are converted by `super::bridge::Bridge` (PROV-21), not by the
+    // adapter: the adapter only knows the provider, not the client protocol.
 }
 
 /// Build an HTTP `HeaderValue` from a credential / token string.

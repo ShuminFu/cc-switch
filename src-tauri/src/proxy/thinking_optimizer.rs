@@ -24,11 +24,32 @@ pub fn optimize(body: &mut Value, config: &OptimizerConfig) {
         return;
     }
 
+    let thinking_type = body
+        .get("thinking")
+        .and_then(|t| t.get("type"))
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_string());
+
+    // PROXY-47: a caller that explicitly disabled thinking (e.g. a cheap
+    // subagent call) is respected; the optimizer only fills in what is absent.
+    if thinking_type.as_deref() == Some("disabled") && !thinking_cannot_be_disabled(&model) {
+        log::info!("[OPT] thinking: skip(caller disabled)");
+        return;
+    }
+
     if uses_adaptive_thinking(&model) {
         log::info!("[OPT] thinking: adaptive({model})");
-        body["thinking"] = json!({"type": "adaptive"});
-        body["output_config"] = json!({"effort": "max"});
-        append_beta(body, "context-1m-2025-08-07");
+        if thinking_type.as_deref() != Some("adaptive") {
+            body["thinking"] = json!({"type": "adaptive"});
+        }
+        // Max effort and the 1M-context beta change cost/latency and are
+        // rejected for accounts without 1M access: opt-in sub-switches only.
+        if config.thinking_max_effort && body.get("output_config").is_none() {
+            body["output_config"] = json!({"effort": "max"});
+        }
+        if config.context_1m_beta {
+            append_beta(body, "context-1m-2025-08-07");
+        }
         return;
     }
 
@@ -40,29 +61,26 @@ pub fn optimize(body: &mut Value, config: &OptimizerConfig) {
         .and_then(|v| v.as_u64())
         .unwrap_or(16384);
 
-    let budget_target = max_tokens.saturating_sub(1);
-
-    let thinking_type = body
-        .get("thinking")
-        .and_then(|t| t.get("type"))
-        .and_then(|t| t.as_str())
-        .map(|s| s.to_string());
+    let budget_target = injected_budget(max_tokens);
 
     match thinking_type.as_deref() {
-        None | Some("disabled") => {
-            body["thinking"] = json!({
-                "type": "enabled",
-                "budget_tokens": budget_target
-            });
+        None => {
+            if budget_target >= MIN_THINKING_BUDGET {
+                body["thinking"] = json!({
+                    "type": "enabled",
+                    "budget_tokens": budget_target
+                });
+            }
             append_beta(body, "interleaved-thinking-2025-05-14");
         }
         Some("enabled") => {
-            let current_budget = body
+            // Never raise a caller-provided budget; only fill a missing one.
+            let has_budget = body
                 .get("thinking")
                 .and_then(|t| t.get("budget_tokens"))
                 .and_then(|b| b.as_u64())
-                .unwrap_or(0);
-            if current_budget < budget_target {
+                .is_some();
+            if !has_budget && budget_target >= MIN_THINKING_BUDGET {
                 body["thinking"]["budget_tokens"] = json!(budget_target);
             }
             append_beta(body, "interleaved-thinking-2025-05-14");
@@ -71,6 +89,17 @@ pub fn optimize(body: &mut Value, config: &OptimizerConfig) {
             append_beta(body, "interleaved-thinking-2025-05-14");
         }
     }
+}
+
+/// Anthropic's minimum `budget_tokens`.
+const MIN_THINKING_BUDGET: u64 = 1024;
+/// Upper bound for an injected thinking budget.
+const MAX_INJECTED_THINKING_BUDGET: u64 = 32_000;
+
+/// Budget injected when the caller sent none: three quarters of `max_tokens`
+/// (so the visible answer keeps room), capped at 32k (PROXY-47).
+fn injected_budget(max_tokens: u64) -> u64 {
+    (max_tokens.saturating_mul(3) / 4).min(MAX_INJECTED_THINKING_BUDGET)
 }
 
 pub(crate) fn uses_adaptive_thinking(model: &str) -> bool {
@@ -137,6 +166,16 @@ mod tests {
             enabled: true,
             thinking_optimizer: true,
             cache_injection: true,
+            thinking_max_effort: true,
+            context_1m_beta: true,
+        }
+    }
+
+    /// Default sub-switches: no max effort, no 1M beta.
+    fn default_subswitch_config() -> OptimizerConfig {
+        OptimizerConfig {
+            enabled: true,
+            ..OptimizerConfig::default()
         }
     }
 
@@ -145,6 +184,57 @@ mod tests {
             enabled: true,
             thinking_optimizer: false,
             cache_injection: true,
+            ..OptimizerConfig::default()
+        }
+    }
+
+    #[test]
+    fn caller_budget_is_kept_and_injected_budget_is_capped() {
+        let mut body = json!({
+            "model": "anthropic.claude-sonnet-4-5-20250514-v1:0",
+            "max_tokens": 4096,
+            "thinking": {"type": "enabled", "budget_tokens": 1024},
+        });
+        optimize(&mut body, &default_subswitch_config());
+        assert_eq!(body["thinking"]["budget_tokens"], 1024);
+
+        let mut body = json!({
+            "model": "anthropic.claude-sonnet-4-5-20250514-v1:0",
+            "max_tokens": 4096,
+        });
+        optimize(&mut body, &default_subswitch_config());
+        assert_eq!(body["thinking"]["budget_tokens"], 3072);
+
+        let mut body = json!({
+            "model": "anthropic.claude-sonnet-4-5-20250514-v1:0",
+            "max_tokens": 128000,
+        });
+        optimize(&mut body, &default_subswitch_config());
+        assert_eq!(body["thinking"]["budget_tokens"], 32000);
+    }
+
+    #[test]
+    fn adaptive_extras_only_with_subswitches() {
+        let mut body = json!({
+            "model": "anthropic.claude-opus-4-6-20250514-v1:0",
+            "max_tokens": 16384,
+        });
+        optimize(&mut body, &default_subswitch_config());
+        assert_eq!(body["thinking"]["type"], "adaptive");
+        assert!(body.get("output_config").is_none());
+        assert!(body.get("anthropic_beta").is_none());
+    }
+
+    #[test]
+    fn caller_disabled_thinking_is_respected() {
+        for model in [
+            "anthropic.claude-sonnet-4-5-20250514-v1:0",
+            "anthropic.claude-opus-4-6-20250514-v1:0",
+        ] {
+            let mut body = json!({"model": model, "thinking": {"type": "disabled"}});
+            let original = body.clone();
+            optimize(&mut body, &enabled_config());
+            assert_eq!(body, original, "{model}");
         }
     }
 
@@ -227,13 +317,13 @@ mod tests {
         optimize(&mut body, &enabled_config());
 
         assert_eq!(body["thinking"]["type"], "enabled");
-        assert_eq!(body["thinking"]["budget_tokens"], 16383);
+        assert_eq!(body["thinking"]["budget_tokens"], 12288);
         let betas = body["anthropic_beta"].as_array().unwrap();
         assert!(betas.iter().any(|v| v == "interleaved-thinking-2025-05-14"));
     }
 
     #[test]
-    fn test_legacy_budget_too_small_upgraded() {
+    fn test_legacy_small_caller_budget_is_not_raised() {
         let mut body = json!({
             "model": "anthropic.claude-sonnet-4-5-20250514-v1:0",
             "max_tokens": 16384,
@@ -244,7 +334,7 @@ mod tests {
         optimize(&mut body, &enabled_config());
 
         assert_eq!(body["thinking"]["type"], "enabled");
-        assert_eq!(body["thinking"]["budget_tokens"], 16383);
+        assert_eq!(body["thinking"]["budget_tokens"], 1024);
     }
 
     #[test]
@@ -295,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn test_legacy_disabled_thinking_injected() {
+    fn test_legacy_disabled_thinking_is_kept() {
         let mut body = json!({
             "model": "anthropic.claude-sonnet-4-5-20250514-v1:0",
             "max_tokens": 8192,
@@ -305,8 +395,7 @@ mod tests {
 
         optimize(&mut body, &enabled_config());
 
-        assert_eq!(body["thinking"]["type"], "enabled");
-        assert_eq!(body["thinking"]["budget_tokens"], 8191);
+        assert_eq!(body["thinking"]["type"], "disabled");
     }
 
     #[test]
@@ -319,7 +408,7 @@ mod tests {
         optimize(&mut body, &enabled_config());
 
         assert_eq!(body["thinking"]["type"], "enabled");
-        assert_eq!(body["thinking"]["budget_tokens"], 16383);
+        assert_eq!(body["thinking"]["budget_tokens"], 12288);
     }
 
     #[test]

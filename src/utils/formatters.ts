@@ -25,7 +25,7 @@ export function formatJSON(value: string): string {
  */
 export function parseSmartMcpJson(jsonText: string): {
   id?: string;
-  config: any;
+  config: Record<string, unknown>;
   formattedConfig: string;
 } {
   let trimmed = jsonText.trim();

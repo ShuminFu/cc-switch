@@ -1,0 +1,33 @@
+{
+  "id": "resp_chatcmpl-004",
+  "object": "response",
+  "created_at": 1700000003,
+  "status": "incomplete",
+  "model": "gpt-4o-mini",
+  "output": [
+    {
+      "id": "resp_chatcmpl-004_msg",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "The answer is",
+          "annotations": []
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 5,
+    "output_tokens": 3,
+    "total_tokens": 8,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "incomplete_details": {
+    "reason": "max_output_tokens"
+  }
+}

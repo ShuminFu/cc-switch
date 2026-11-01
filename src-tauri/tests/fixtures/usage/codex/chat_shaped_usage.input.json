@@ -1,0 +1,13 @@
+{
+  "id": "chatcmpl_1",
+  "object": "chat.completion",
+  "model": "hunyuan-hy3",
+  "usage": {
+    "prompt_tokens": 400,
+    "completion_tokens": 60,
+    "total_tokens": 460,
+    "prompt_tokens_details": {
+      "cached_tokens": 100
+    }
+  }
+}

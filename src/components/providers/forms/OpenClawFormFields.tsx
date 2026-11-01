@@ -1,4 +1,6 @@
 import { useTranslation } from "react-i18next";
+import { ModelOrderButtons, moveItem } from "./shared/ModelOrderButtons";
+import { useEndpointUrlError } from "./shared/useEndpointUrlError";
 import { useState, useRef, useCallback } from "react";
 import { FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -35,11 +37,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ApiKeySection } from "./shared";
-import {
-  fetchModelsForConfig,
-  showFetchModelsError,
-  type FetchedModel,
-} from "@/lib/api/model-fetch";
+import { fetchModelsForConfig, type FetchedModel } from "@/lib/api/model-fetch";
+import { showFetchModelsError } from "./shared/showFetchModelsError";
 import { openclawApiProtocols } from "@/config/openclawProviderPresets";
 import type { ProviderCategory, OpenClawModel } from "@/types";
 
@@ -88,7 +87,10 @@ export function OpenClawFormFields({
   onUserAgentChange,
 }: OpenClawFormFieldsProps) {
   const { t } = useTranslation();
-  const [expandedModels, setExpandedModels] = useState<Record<number, boolean>>(
+  const baseUrlError = useEndpointUrlError(baseUrl);
+  // Keyed by the stable row key, not the index, so deleting a row does not
+  // move the expanded state onto its neighbour (FE-PROV-11).
+  const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>(
     {},
   );
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
@@ -111,7 +113,15 @@ export function OpenClawFormFields({
 
   // Toggle advanced section for a model
   const toggleModelAdvanced = (index: number) => {
-    setExpandedModels((prev) => ({ ...prev, [index]: !prev[index] }));
+    const key = modelKeys[index];
+    setExpandedModels((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Reorder models; the first one is the default (primary) model.
+  const handleMoveModel = (from: number, to: number) => {
+    if (to < 0 || to >= models.length) return;
+    modelKeysRef.current = moveItem(modelKeysRef.current, from, to);
+    onModelsChange(moveItem(models, from, to));
   };
 
   // Add a new model entry
@@ -160,14 +170,13 @@ export function OpenClawFormFields({
 
   // Remove a model entry
   const handleRemoveModel = (index: number) => {
-    modelKeysRef.current.splice(index, 1);
+    const [removedKey] = modelKeysRef.current.splice(index, 1);
     const newModels = [...models];
     newModels.splice(index, 1);
     onModelsChange(newModels);
-    // Clean up expanded state
     setExpandedModels((prev) => {
       const updated = { ...prev };
-      delete updated[index];
+      delete updated[removedKey];
       return updated;
     });
   };
@@ -208,14 +217,14 @@ export function OpenClawFormFields({
       <div className="space-y-2">
         <FormLabel htmlFor="openclaw-api">
           {t("openclaw.apiProtocol", {
-            defaultValue: "API 协议",
+            defaultValue: "API Protocol",
           })}
         </FormLabel>
         <Select value={api} onValueChange={onApiChange}>
           <SelectTrigger id="openclaw-api">
             <SelectValue
               placeholder={t("openclaw.selectProtocol", {
-                defaultValue: "选择 API 协议",
+                defaultValue: "Select API Protocol",
               })}
             />
           </SelectTrigger>
@@ -230,7 +239,7 @@ export function OpenClawFormFields({
         <p className="text-xs text-muted-foreground">
           {t("openclaw.apiProtocolHint", {
             defaultValue:
-              "选择与供应商 API 兼容的协议类型。大多数供应商使用 OpenAI Completions 格式。",
+              "Select the protocol type compatible with the provider's API. Most providers use OpenAI Completions format.",
           })}
         </p>
       </div>
@@ -238,19 +247,24 @@ export function OpenClawFormFields({
       {/* Base URL */}
       <div className="space-y-2">
         <FormLabel htmlFor="openclaw-baseurl">
-          {t("openclaw.baseUrl", { defaultValue: "API 端点" })}
+          {t("providerForm.apiEndpoint", { defaultValue: "API Endpoint" })}
         </FormLabel>
         <Input
           id="openclaw-baseurl"
           value={baseUrl}
           onChange={(e) => onBaseUrlChange(e.target.value)}
           placeholder="https://api.example.com/v1"
+          {...baseUrlError.inputProps}
         />
-        <p className="text-xs text-muted-foreground">
-          {t("openclaw.baseUrlHint", {
-            defaultValue: "供应商的 API 端点地址。",
-          })}
-        </p>
+        {baseUrlError.message ? (
+          <p className="text-xs text-destructive">{baseUrlError.message}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t("openclaw.baseUrlHint", {
+              defaultValue: "The provider's API endpoint address.",
+            })}
+          </p>
+        )}
       </div>
 
       {/* API Key */}
@@ -270,11 +284,12 @@ export function OpenClawFormFields({
       <div className="flex items-center justify-between">
         <div className="space-y-0.5">
           <FormLabel>
-            {t("openclaw.userAgent", { defaultValue: "发送 User-Agent" })}
+            {t("openclaw.userAgent", { defaultValue: "Send User-Agent" })}
           </FormLabel>
           <p className="text-xs text-muted-foreground">
             {t("openclaw.userAgentHint", {
-              defaultValue: "部分供应商需要浏览器 User-Agent 才能正常访问。",
+              defaultValue:
+                "Some providers require a browser User-Agent header to work properly.",
             })}
           </p>
         </div>
@@ -285,7 +300,7 @@ export function OpenClawFormFields({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <FormLabel>
-            {t("openclaw.models", { defaultValue: "模型列表" })}
+            {t("openclaw.models", { defaultValue: "Models" })}
           </FormLabel>
           <div className="flex gap-1">
             <Button
@@ -311,7 +326,7 @@ export function OpenClawFormFields({
               className="h-7 gap-1"
             >
               <Plus className="h-3.5 w-3.5" />
-              {t("openclaw.addModel", { defaultValue: "添加模型" })}
+              {t("openclaw.addModel", { defaultValue: "Add Model" })}
             </Button>
           </div>
         </div>
@@ -319,7 +334,8 @@ export function OpenClawFormFields({
         {models.length === 0 ? (
           <p className="text-sm text-muted-foreground py-2">
             {t("openclaw.noModels", {
-              defaultValue: "暂无模型配置。点击添加模型来配置可用模型。",
+              defaultValue:
+                "No models configured. Click Add Model to configure available models.",
             })}
           </p>
         ) : (
@@ -340,10 +356,10 @@ export function OpenClawFormFields({
                   >
                     {index === 0
                       ? t("openclaw.primaryModel", {
-                          defaultValue: "默认模型",
+                          defaultValue: "Primary Model",
                         })
                       : t("openclaw.fallbackModel", {
-                          defaultValue: "回退模型",
+                          defaultValue: "Fallback Model",
                         })}
                   </span>
                 </div>
@@ -351,7 +367,7 @@ export function OpenClawFormFields({
                 <div className="flex items-center gap-2">
                   <div className="flex-1 space-y-1">
                     <label className="text-xs text-muted-foreground">
-                      {t("openclaw.modelId", { defaultValue: "模型 ID" })}
+                      {t("openclaw.modelId", { defaultValue: "Model ID" })}
                     </label>
                     <div className="flex gap-1">
                       <Input
@@ -370,6 +386,9 @@ export function OpenClawFormFields({
                             <Button
                               variant="outline"
                               size="icon"
+                              aria-label={t("providerForm.chooseModel", {
+                                defaultValue: "Choose a model",
+                              })}
                               className="shrink-0"
                             >
                               <ChevronDown className="h-4 w-4" />
@@ -416,7 +435,9 @@ export function OpenClawFormFields({
                   </div>
                   <div className="flex-1 space-y-1">
                     <label className="text-xs text-muted-foreground">
-                      {t("openclaw.modelName", { defaultValue: "显示名称" })}
+                      {t("openclaw.modelName", {
+                        defaultValue: "Display Name",
+                      })}
                     </label>
                     <Input
                       value={model.name}
@@ -428,11 +449,19 @@ export function OpenClawFormFields({
                       })}
                     />
                   </div>
+                  <ModelOrderButtons
+                    index={index}
+                    count={models.length}
+                    onMove={handleMoveModel}
+                  />
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
                     onClick={() => handleRemoveModel(index)}
+                    aria-label={t("providerForm.removeModel", {
+                      defaultValue: "Remove model",
+                    })}
                     className="h-9 w-9 mt-5 text-muted-foreground hover:text-destructive"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -441,7 +470,7 @@ export function OpenClawFormFields({
 
                 {/* Advanced Options (Collapsible) */}
                 <Collapsible
-                  open={expandedModels[index] ?? false}
+                  open={expandedModels[modelKeys[index]] ?? false}
                   onOpenChange={() => toggleModelAdvanced(index)}
                 >
                   <CollapsibleTrigger asChild>
@@ -451,13 +480,13 @@ export function OpenClawFormFields({
                       size="sm"
                       className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
                     >
-                      {expandedModels[index] ? (
+                      {expandedModels[modelKeys[index]] ? (
                         <ChevronDown className="h-3.5 w-3.5" />
                       ) : (
                         <ChevronRight className="h-3.5 w-3.5" />
                       )}
                       {t("openclaw.advancedOptions", {
-                        defaultValue: "高级选项",
+                        defaultValue: "Advanced Options",
                       })}
                     </Button>
                   </CollapsibleTrigger>
@@ -467,7 +496,7 @@ export function OpenClawFormFields({
                       <div className="flex-1 space-y-1">
                         <label className="text-xs text-muted-foreground">
                           {t("openclaw.reasoning", {
-                            defaultValue: "推理模式",
+                            defaultValue: "Reasoning Mode",
                           })}
                         </label>
                         <div className="flex items-center h-9 gap-2">
@@ -480,10 +509,10 @@ export function OpenClawFormFields({
                           <span className="text-xs text-muted-foreground">
                             {model.reasoning
                               ? t("openclaw.reasoningOn", {
-                                  defaultValue: "启用",
+                                  defaultValue: "Enabled",
                                 })
                               : t("openclaw.reasoningOff", {
-                                  defaultValue: "关闭",
+                                  defaultValue: "Disabled",
                                 })}
                           </span>
                         </div>
@@ -491,7 +520,7 @@ export function OpenClawFormFields({
                       <div className="flex-1 space-y-1">
                         <label className="text-xs text-muted-foreground">
                           {t("openclaw.inputTypes", {
-                            defaultValue: "输入类型",
+                            defaultValue: "Input Types",
                           })}
                         </label>
                         {/* "text" is checked by default but can be unchecked —
@@ -528,7 +557,7 @@ export function OpenClawFormFields({
                       <div className="flex-1 space-y-1">
                         <label className="text-xs text-muted-foreground">
                           {t("openclaw.contextWindow", {
-                            defaultValue: "上下文窗口",
+                            defaultValue: "Context Window",
                           })}
                         </label>
                         <Input
@@ -549,7 +578,7 @@ export function OpenClawFormFields({
                       <div className="flex-1 space-y-1">
                         <label className="text-xs text-muted-foreground">
                           {t("openclaw.maxTokens", {
-                            defaultValue: "最大输出 Tokens",
+                            defaultValue: "Max Output Tokens",
                           })}
                         </label>
                         <Input
@@ -575,7 +604,7 @@ export function OpenClawFormFields({
                       <div className="flex-1 space-y-1">
                         <label className="text-xs text-muted-foreground">
                           {t("openclaw.inputCost", {
-                            defaultValue: "输入价格 ($/M tokens)",
+                            defaultValue: "Input Cost ($/M tokens)",
                           })}
                         </label>
                         <Input
@@ -591,7 +620,7 @@ export function OpenClawFormFields({
                       <div className="flex-1 space-y-1">
                         <label className="text-xs text-muted-foreground">
                           {t("openclaw.outputCost", {
-                            defaultValue: "输出价格 ($/M tokens)",
+                            defaultValue: "Output Cost ($/M tokens)",
                           })}
                         </label>
                         <Input
@@ -612,7 +641,7 @@ export function OpenClawFormFields({
                       <div className="flex-1 space-y-1">
                         <label className="text-xs text-muted-foreground">
                           {t("openclaw.cacheReadCost", {
-                            defaultValue: "缓存读取价格 ($/M tokens)",
+                            defaultValue: "Cache Read Cost ($/M tokens)",
                           })}
                         </label>
                         <Input
@@ -628,7 +657,7 @@ export function OpenClawFormFields({
                       <div className="flex-1 space-y-1">
                         <label className="text-xs text-muted-foreground">
                           {t("openclaw.cacheWriteCost", {
-                            defaultValue: "缓存写入价格 ($/M tokens)",
+                            defaultValue: "Cache Write Cost ($/M tokens)",
                           })}
                         </label>
                         <Input
@@ -650,7 +679,7 @@ export function OpenClawFormFields({
                     <p className="text-xs text-muted-foreground">
                       {t("openclaw.cacheCostHint", {
                         defaultValue:
-                          "缓存价格用于计算 Prompt Caching 的成本。如不使用缓存可留空。",
+                          "Cache costs are used to calculate Prompt Caching costs. Leave empty if not using caching.",
                       })}
                     </p>
                   </CollapsibleContent>
@@ -661,9 +690,9 @@ export function OpenClawFormFields({
         )}
 
         <p className="text-xs text-muted-foreground">
-          {t("openclaw.modelsHint", {
+          {t("openclaw.modelsOrderHint", {
             defaultValue:
-              "配置该供应商支持的模型。第一个模型为默认模型（Primary），其余为回退模型（Fallback）。拖拽或调整顺序可更改默认模型。",
+              "The first model is the default (Primary); the others are fallbacks. Use the arrows to change the order.",
           })}
         </p>
       </div>

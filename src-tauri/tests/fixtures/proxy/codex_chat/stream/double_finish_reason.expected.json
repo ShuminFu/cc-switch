@@ -1,0 +1,125 @@
+[
+  {
+    "event": "response.created",
+    "data": {
+      "type": "response.created",
+      "response": {
+        "id": "resp_chatcmpl-s5",
+        "object": "response",
+        "created_at": 1700000000,
+        "status": "in_progress",
+        "model": "moonshotai/kimi-k2.6",
+        "output": [],
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        }
+      }
+    }
+  },
+  {
+    "event": "response.in_progress",
+    "data": {
+      "type": "response.in_progress",
+      "response": {
+        "id": "resp_chatcmpl-s5",
+        "object": "response",
+        "created_at": 1700000000,
+        "status": "in_progress",
+        "model": "moonshotai/kimi-k2.6",
+        "output": [],
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        }
+      }
+    }
+  },
+  {
+    "event": "response.output_item.added",
+    "data": {
+      "type": "response.output_item.added",
+      "output_index": 0,
+      "item": {
+        "id": "fc_call_paris",
+        "type": "function_call",
+        "status": "in_progress",
+        "call_id": "call_paris",
+        "name": "get_weather",
+        "arguments": ""
+      }
+    }
+  },
+  {
+    "event": "response.function_call_arguments.delta",
+    "data": {
+      "type": "response.function_call_arguments.delta",
+      "item_id": "fc_call_paris",
+      "output_index": 0,
+      "delta": "{\"city\":\"Paris\"}"
+    }
+  },
+  {
+    "event": "response.function_call_arguments.done",
+    "data": {
+      "type": "response.function_call_arguments.done",
+      "item_id": "fc_call_paris",
+      "output_index": 0,
+      "arguments": "{\"city\":\"Paris\"}"
+    }
+  },
+  {
+    "event": "response.output_item.done",
+    "data": {
+      "type": "response.output_item.done",
+      "output_index": 0,
+      "item": {
+        "id": "fc_call_paris",
+        "type": "function_call",
+        "status": "completed",
+        "call_id": "call_paris",
+        "name": "get_weather",
+        "arguments": "{\"city\":\"Paris\"}"
+      }
+    }
+  },
+  {
+    "event": "response.completed",
+    "data": {
+      "type": "response.completed",
+      "response": {
+        "id": "resp_chatcmpl-s5",
+        "object": "response",
+        "created_at": 1700000000,
+        "status": "completed",
+        "model": "moonshotai/kimi-k2.6",
+        "output": [
+          {
+            "id": "fc_call_paris",
+            "type": "function_call",
+            "status": "completed",
+            "call_id": "call_paris",
+            "name": "get_weather",
+            "arguments": "{\"city\":\"Paris\"}"
+          }
+        ],
+        "usage": {
+          "input_tokens": 25,
+          "output_tokens": 6,
+          "total_tokens": 31,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        }
+      }
+    }
+  }
+]

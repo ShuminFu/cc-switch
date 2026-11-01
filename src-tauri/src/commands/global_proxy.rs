@@ -2,8 +2,8 @@
 //!
 //! 提供获取、设置和测试全局代理的 Tauri 命令。
 
+use super::timed_blocking_with_state;
 use crate::proxy::http_client;
-use crate::store::AppState;
 use serde::Serialize;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::time::{Duration, Instant};
@@ -12,16 +12,20 @@ use std::time::{Duration, Instant};
 ///
 /// 返回当前配置的代理 URL，null 表示直连。
 #[tauri::command]
-pub fn get_global_proxy_url(state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
-    let result = state.db.get_global_proxy_url().map_err(|e| e.to_string())?;
-    log::debug!(
-        "[GlobalProxy] [GP-010] Read from database: {}",
-        result
-            .as_ref()
-            .map(|u| http_client::mask_url(u))
-            .unwrap_or_else(|| "None".to_string())
-    );
-    Ok(result)
+#[specta::specta]
+pub async fn get_global_proxy_url(handle: tauri::AppHandle) -> Result<Option<String>, String> {
+    timed_blocking_with_state("get_global_proxy_url", handle, move |state| {
+        let result = state.db.get_global_proxy_url().map_err(|e| e.to_string())?;
+        log::debug!(
+            "[GlobalProxy] [GP-010] Read from database: {}",
+            result
+                .as_ref()
+                .map(|u| http_client::mask_url(u))
+                .unwrap_or_else(|| "None".to_string())
+        );
+        Ok(result)
+    })
+    .await
 }
 
 /// 设置全局代理 URL
@@ -32,45 +36,50 @@ pub fn get_global_proxy_url(state: tauri::State<'_, AppState>) -> Result<Option<
 /// 执行顺序：先验证 → 写 DB → 再应用
 /// 这样确保 DB 写失败时不会出现运行态与持久化不一致的问题
 #[tauri::command]
-pub fn set_global_proxy_url(state: tauri::State<'_, AppState>, url: String) -> Result<(), String> {
-    // 调试：显示接收到的 URL 信息（不包含敏感内容）
-    let has_auth = url.contains('@') && (url.starts_with("http://") || url.starts_with("socks"));
-    log::debug!(
-        "[GlobalProxy] [GP-011] Received URL: length={}, has_auth={}",
-        url.len(),
-        has_auth
-    );
+#[specta::specta]
+pub async fn set_global_proxy_url(handle: tauri::AppHandle, url: String) -> Result<(), String> {
+    timed_blocking_with_state("set_global_proxy_url", handle, move |state| {
+        // 调试：显示接收到的 URL 信息（不包含敏感内容）
+        let has_auth =
+            url.contains('@') && (url.starts_with("http://") || url.starts_with("socks"));
+        log::debug!(
+            "[GlobalProxy] [GP-011] Received URL: length={}, has_auth={}",
+            url.len(),
+            has_auth
+        );
 
-    let url_opt = if url.trim().is_empty() {
-        None
-    } else {
-        Some(url.as_str())
-    };
+        let url_opt = if url.trim().is_empty() {
+            None
+        } else {
+            Some(url.as_str())
+        };
 
-    // 1. 先验证代理配置是否有效（不应用）
-    http_client::validate_proxy(url_opt)?;
+        // 1. 先验证代理配置是否有效（不应用）
+        http_client::validate_proxy(url_opt)?;
 
-    // 2. 验证成功后保存到数据库
-    state
-        .db
-        .set_global_proxy_url(url_opt)
-        .map_err(|e| e.to_string())?;
+        // 2. 验证成功后保存到数据库
+        state
+            .db
+            .set_global_proxy_url(url_opt)
+            .map_err(|e| e.to_string())?;
 
-    // 3. DB 写入成功后再应用到运行态
-    http_client::apply_proxy(url_opt)?;
+        // 3. DB 写入成功后再应用到运行态
+        http_client::apply_proxy(url_opt)?;
 
-    log::info!(
-        "[GlobalProxy] [GP-009] Configuration updated: {}",
-        url_opt
-            .map(http_client::mask_url)
-            .unwrap_or_else(|| "direct connection".to_string())
-    );
+        log::info!(
+            "[GlobalProxy] [GP-009] Configuration updated: {}",
+            url_opt
+                .map(http_client::mask_url)
+                .unwrap_or_else(|| "direct connection".to_string())
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 /// 代理测试结果
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProxyTestResult {
     /// 是否连接成功
@@ -86,6 +95,7 @@ pub struct ProxyTestResult {
 /// 通过指定的代理 URL 发送测试请求，返回连接结果和延迟。
 /// 使用多个测试目标，任一成功即认为代理可用。
 #[tauri::command]
+#[specta::specta]
 pub async fn test_proxy_url(url: String) -> Result<ProxyTestResult, String> {
     if url.trim().is_empty() {
         return Err("Proxy URL is empty".to_string());
@@ -161,6 +171,7 @@ pub async fn test_proxy_url(url: String) -> Result<ProxyTestResult, String> {
 ///
 /// 返回当前是否启用了出站代理以及代理 URL。
 #[tauri::command]
+#[specta::specta]
 pub fn get_upstream_proxy_status() -> UpstreamProxyStatus {
     let url = http_client::get_current_proxy_url();
     UpstreamProxyStatus {
@@ -170,7 +181,7 @@ pub fn get_upstream_proxy_status() -> UpstreamProxyStatus {
 }
 
 /// 出站代理状态信息
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct UpstreamProxyStatus {
     /// 是否启用代理
@@ -180,7 +191,7 @@ pub struct UpstreamProxyStatus {
 }
 
 /// 检测到的代理信息
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectedProxy {
     /// 代理 URL
@@ -210,6 +221,7 @@ const PROXY_PORTS: &[(u16, &str, bool)] = &[
 /// 检测常见端口是否有代理服务在运行。
 /// 使用异步任务避免阻塞 UI 线程。
 #[tauri::command]
+#[specta::specta]
 pub async fn scan_local_proxies() -> Vec<DetectedProxy> {
     // 使用 spawn_blocking 避免阻塞主线程
     tokio::task::spawn_blocking(|| {

@@ -9,6 +9,7 @@ import {
   Loader2,
   Zap,
   Power,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -19,17 +20,90 @@ import { useProxyStatus } from "@/hooks/useProxyStatus";
 import { toast } from "sonner";
 import { useFailoverQueue } from "@/lib/query/failover";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
-import { useProviderHealth } from "@/lib/query/failover";
+import { useProvidersHealthMap } from "@/lib/query/failover";
 import {
   useProxyTakeoverStatus,
   useSetProxyTakeoverForApp,
   useGlobalProxyConfig,
   useUpdateGlobalProxyConfig,
 } from "@/lib/query/proxy";
-import type { ProxyStatus } from "@/types/proxy";
+import type { ProviderHealth, ProxyStatus } from "@/types/proxy";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "framer-motion";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { PROXY_CAPABLE_APPS, getAppLabel } from "@/config/proxyApps";
+import { copyText } from "@/lib/clipboard";
+import { formatUptime } from "./formatUptime";
+import { RecentRequestsPanel } from "./RecentRequestsPanel";
+import { isLoopbackListenAddress } from "./listenAddress";
+
+interface LanExposureNoticeProps {
+  accessToken?: string;
+}
+
+function LanExposureNotice({ accessToken }: LanExposureNoticeProps) {
+  const { t } = useTranslation();
+
+  const handleCopy = async () => {
+    if (!accessToken) return;
+    try {
+      await copyText(accessToken);
+      toast.success(
+        t("proxy.settings.lanExposure.tokenCopied", {
+          defaultValue: "Access token copied",
+        }),
+        { closeButton: true },
+      );
+    } catch (error) {
+      toast.error(extractErrorMessage(error) || String(error));
+    }
+  };
+
+  return (
+    <div
+      role="alert"
+      className="rounded-md border border-red-500/40 bg-red-500/10 p-3 space-y-2"
+    >
+      <div className="flex items-start gap-2 text-red-600 dark:text-red-400">
+        <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">
+            {t("proxy.settings.lanExposure.title", {
+              defaultValue: "This address exposes the proxy to other devices",
+            })}
+          </p>
+          <p className="text-xs">
+            {t("proxy.settings.lanExposure.description", {
+              defaultValue:
+                'Anyone who can reach this address could spend your provider credits. Requests from other devices must send the access token below as "Authorization: Bearer <token>" (or x-api-key / x-goog-api-key). Apps on this computer keep working without it. Only use this on networks you trust.',
+            })}
+          </p>
+        </div>
+      </div>
+      {accessToken ? (
+        <div className="space-y-1">
+          <Label htmlFor="proxy-access-token" className="text-xs">
+            {t("proxy.settings.lanExposure.tokenLabel", {
+              defaultValue: "Access token",
+            })}
+          </Label>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              id="proxy-access-token"
+              readOnly
+              value={accessToken}
+              className="flex-1 font-mono text-xs"
+              onFocus={(e) => e.currentTarget.select()}
+            />
+            <Button size="sm" variant="outline" onClick={handleCopy}>
+              {t("common.copy")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 interface ProxyPanelProps {
   enableLocalProxy: boolean;
@@ -44,7 +118,7 @@ export function ProxyPanel({
   onToggleProxy,
   isProxyPending,
 }: ProxyPanelProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { status, isRunning } = useProxyStatus();
 
   // 获取应用接管状态
@@ -52,7 +126,11 @@ export function ProxyPanel({
   const setTakeoverForApp = useSetProxyTakeoverForApp();
 
   // 获取全局代理配置
-  const { data: globalConfig } = useGlobalProxyConfig();
+  const { data: globalConfigData } = useGlobalProxyConfig();
+  // `accessToken` is returned by the backend alongside the global config.
+  const globalConfig = globalConfigData as
+    | (typeof globalConfigData & { accessToken?: string })
+    | undefined;
   const updateGlobalConfig = useUpdateGlobalProxyConfig();
 
   // 监听地址/端口的本地状态（端口用字符串以支持完全清空）
@@ -80,12 +158,12 @@ export function ProxyPanel({
       toast.success(
         enabled
           ? t("proxy.takeover.enabled", {
-              app: appType,
-              defaultValue: `${appType} 接管已启用`,
+              app: getAppLabel(appType),
+              defaultValue: `${getAppLabel(appType)} 接管已启用`,
             })
           : t("proxy.takeover.disabled", {
-              app: appType,
-              defaultValue: `${appType} 接管已关闭`,
+              app: getAppLabel(appType),
+              defaultValue: `${getAppLabel(appType)} 接管已关闭`,
             }),
         { closeButton: true },
       );
@@ -198,26 +276,109 @@ export function ProxyPanel({
     }
   };
 
-  const formatUptime = (seconds: number): string => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${secs}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${secs}s`;
-    } else {
-      return `${secs}s`;
-    }
-  };
-
   // 格式化地址用于 URL（IPv6 需要方括号）
   const formatAddressForUrl = (address: string, port: number): string => {
     const isIPv6 = address.includes(":");
     const host = isIPv6 ? `[${address}]` : address;
     return `http://${host}:${port}`;
   };
+
+  // Listen address/port are always visible; while running they are read-only
+  // with a "stop to edit" hint (FE-UI-23).
+  const basicSettings = (
+    <div className="rounded-lg border border-border bg-muted/40 p-4 space-y-4">
+      <div>
+        <h4 className="text-sm font-semibold">
+          {t("proxy.settings.basic.title", {
+            defaultValue: "基础设置",
+          })}
+        </h4>
+        <p className="text-xs text-muted-foreground">
+          {t("proxy.settings.basic.description", {
+            defaultValue: "配置代理服务监听的地址与端口。",
+          })}
+        </p>
+        {isRunning && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+            {t("proxy.settings.restartRequired", {
+              defaultValue: "修改监听地址/端口需要先停止代理服务",
+            })}
+          </p>
+        )}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="listen-address">
+            {t("proxy.settings.fields.listenAddress.label", {
+              defaultValue: "监听地址",
+            })}
+          </Label>
+          <Input
+            id="listen-address"
+            value={listenAddress}
+            onChange={(e) => setListenAddress(e.target.value)}
+            disabled={isRunning}
+            placeholder={t("proxy.settings.fields.listenAddress.placeholder", {
+              defaultValue: "127.0.0.1",
+            })}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("proxy.settings.fields.listenAddress.description", {
+              defaultValue: "代理服务器监听的 IP 地址（推荐 127.0.0.1）",
+            })}
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="listen-port">
+            {t("proxy.settings.fields.listenPort.label", {
+              defaultValue: "监听端口",
+            })}
+          </Label>
+          <Input
+            id="listen-port"
+            type="number"
+            value={listenPort}
+            onChange={(e) => setListenPort(e.target.value)}
+            disabled={isRunning}
+            placeholder={t("proxy.settings.fields.listenPort.placeholder", {
+              defaultValue: "15721",
+            })}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("proxy.settings.fields.listenPort.description", {
+              defaultValue: "代理服务器监听的端口号（1024 ~ 65535）",
+            })}
+          </p>
+        </div>
+      </div>
+
+      {!isLoopbackListenAddress(listenAddress) && (
+        <LanExposureNotice accessToken={globalConfig?.accessToken} />
+      )}
+
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          onClick={handleSaveBasicConfig}
+          disabled={isRunning || updateGlobalConfig.isPending}
+        >
+          {updateGlobalConfig.isPending ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              {t("common.saving", { defaultValue: "保存中..." })}
+            </>
+          ) : (
+            <>
+              <Save className="mr-2 h-4 w-4" />
+              {t("common.save", { defaultValue: "保存" })}
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+  );
 
   return (
     <>
@@ -274,31 +435,29 @@ export function ProxyPanel({
                   })}
                 </p>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                  {(["claude", "codex", "gemini", "grokbuild"] as const).map(
-                    (appType) => {
-                      const isEnabled =
-                        takeoverStatus?.[
-                          appType as keyof typeof takeoverStatus
-                        ] ?? false;
-                      return (
-                        <div
-                          key={appType}
-                          className="flex items-center justify-between rounded-md border border-primary/20 bg-background/60 px-3 py-2"
-                        >
-                          <span className="text-sm font-medium capitalize">
-                            {appType === "grokbuild" ? "Grok Build" : appType}
-                          </span>
-                          <Switch
-                            checked={isEnabled}
-                            onCheckedChange={(checked) =>
-                              handleTakeoverChange(appType, checked)
-                            }
-                            disabled={setTakeoverForApp.isPending}
-                          />
-                        </div>
-                      );
-                    },
-                  )}
+                  {PROXY_CAPABLE_APPS.map((appType) => {
+                    const isEnabled =
+                      takeoverStatus?.[
+                        appType as keyof typeof takeoverStatus
+                      ] ?? false;
+                    return (
+                      <div
+                        key={appType}
+                        className="flex items-center justify-between rounded-md border border-primary/20 bg-background/60 px-3 py-2"
+                      >
+                        <span className="text-sm font-medium">
+                          {getAppLabel(appType)}
+                        </span>
+                        <Switch
+                          checked={isEnabled}
+                          onCheckedChange={(checked) =>
+                            handleTakeoverChange(appType, checked)
+                          }
+                          disabled={setTakeoverForApp.isPending}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {t("proxy.takeover.hint", {
@@ -329,16 +488,25 @@ export function ProxyPanel({
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => {
-                      navigator.clipboard.writeText(
-                        formatAddressForUrl(status.address, status.port),
-                      );
-                      toast.success(
-                        t("proxy.panel.addressCopied", {
-                          defaultValue: "地址已复制",
-                        }),
-                        { closeButton: true },
-                      );
+                    onClick={async () => {
+                      try {
+                        await copyText(
+                          formatAddressForUrl(status.address, status.port),
+                        );
+                        toast.success(
+                          t("proxy.panel.addressCopied", {
+                            defaultValue: "地址已复制",
+                          }),
+                          { closeButton: true },
+                        );
+                      } catch (error) {
+                        toast.error(
+                          t("common.copyFailed", {
+                            defaultValue: "Copy failed",
+                          }),
+                          { description: String(error) },
+                        );
+                      }
                     }}
                   >
                     {t("common.copy")}
@@ -349,6 +517,13 @@ export function ProxyPanel({
                     defaultValue: "修改监听地址/端口需要先停止代理服务",
                   })}
                 </p>
+                {!isLoopbackListenAddress(status.address) && (
+                  <div className="mt-3">
+                    <LanExposureNotice
+                      accessToken={globalConfig?.accessToken}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="pt-3 border-t border-border space-y-2">
@@ -501,106 +676,30 @@ export function ProxyPanel({
                   defaultValue: "成功率",
                 })}
                 value={`${status.success_rate.toFixed(1)}%`}
-                variant={status.success_rate > 90 ? "success" : "warning"}
+                variant={
+                  status.total_requests === 0
+                    ? "default"
+                    : status.success_rate > 90
+                      ? "success"
+                      : "warning"
+                }
               />
               <StatCard
                 icon={<Clock className="h-4 w-4" />}
                 label={t("proxy.panel.stats.uptime", {
                   defaultValue: "运行时间",
                 })}
-                value={formatUptime(status.uptime_seconds)}
+                value={formatUptime(status.uptime_seconds, i18n.language)}
               />
             </div>
+
+            <RecentRequestsPanel status={status} />
+
+            {basicSettings}
           </div>
         ) : (
           <div className="space-y-6">
-            {/* [8] Basic settings — address/port (only when stopped) */}
-            <div className="rounded-lg border border-border bg-muted/40 p-4 space-y-4">
-              <div>
-                <h4 className="text-sm font-semibold">
-                  {t("proxy.settings.basic.title", {
-                    defaultValue: "基础设置",
-                  })}
-                </h4>
-                <p className="text-xs text-muted-foreground">
-                  {t("proxy.settings.basic.description", {
-                    defaultValue: "配置代理服务监听的地址与端口。",
-                  })}
-                </p>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="listen-address">
-                    {t("proxy.settings.fields.listenAddress.label", {
-                      defaultValue: "监听地址",
-                    })}
-                  </Label>
-                  <Input
-                    id="listen-address"
-                    value={listenAddress}
-                    onChange={(e) => setListenAddress(e.target.value)}
-                    placeholder={t(
-                      "proxy.settings.fields.listenAddress.placeholder",
-                      {
-                        defaultValue: "127.0.0.1",
-                      },
-                    )}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {t("proxy.settings.fields.listenAddress.description", {
-                      defaultValue:
-                        "代理服务器监听的 IP 地址（推荐 127.0.0.1）",
-                    })}
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="listen-port">
-                    {t("proxy.settings.fields.listenPort.label", {
-                      defaultValue: "监听端口",
-                    })}
-                  </Label>
-                  <Input
-                    id="listen-port"
-                    type="number"
-                    value={listenPort}
-                    onChange={(e) => setListenPort(e.target.value)}
-                    placeholder={t(
-                      "proxy.settings.fields.listenPort.placeholder",
-                      {
-                        defaultValue: "15721",
-                      },
-                    )}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {t("proxy.settings.fields.listenPort.description", {
-                      defaultValue: "代理服务器监听的端口号（1024 ~ 65535）",
-                    })}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex justify-end">
-                <Button
-                  size="sm"
-                  onClick={handleSaveBasicConfig}
-                  disabled={updateGlobalConfig.isPending}
-                >
-                  {updateGlobalConfig.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {t("common.saving", { defaultValue: "保存中..." })}
-                    </>
-                  ) : (
-                    <>
-                      <Save className="mr-2 h-4 w-4" />
-                      {t("common.save", { defaultValue: "保存" })}
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
+            {basicSettings}
 
             {/* Stopped hint */}
             <div className="text-center py-6 text-muted-foreground">
@@ -672,6 +771,10 @@ function ProviderQueueGroup({
   const activeTarget = status.active_targets?.find(
     (t) => t.app_type === appType,
   );
+  const { data: healthMap } = useProvidersHealthMap(
+    appType,
+    targets.map((target) => target.id),
+  );
 
   return (
     <div className="space-y-2">
@@ -690,7 +793,7 @@ function ProviderQueueGroup({
             key={target.id}
             provider={target}
             priority={index + 1}
-            appType={appType}
+            health={healthMap?.[target.id]}
             isCurrent={activeTarget?.provider_id === target.id}
           />
         ))}
@@ -705,18 +808,17 @@ interface ProviderQueueItemProps {
     name: string;
   };
   priority: number;
-  appType: string;
+  health?: ProviderHealth;
   isCurrent: boolean;
 }
 
 function ProviderQueueItem({
   provider,
   priority,
-  appType,
+  health,
   isCurrent,
 }: ProviderQueueItemProps) {
   const { t } = useTranslation();
-  const { data: health } = useProviderHealth(provider.id, appType);
 
   return (
     <div

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,61 +11,56 @@ import {
   saveStreamCheckConfig,
   type StreamCheckConfig,
 } from "@/lib/api/connectivity-check";
+import { queryKeys } from "@/lib/query/keys";
+import { useBackendConfig } from "@/components/settings/useBackendConfig";
+import { ConfigLoadErrorAlert } from "@/components/settings/ConfigLoadErrorAlert";
+import {
+  STREAM_CHECK_LIMITS,
+  parseStreamCheckDraft,
+  toStreamCheckDraft,
+  type StreamCheckDraft,
+  type StreamCheckField,
+} from "./streamCheckDraft";
 
 export function ConnectivityCheckConfigPanel() {
   const { t } = useTranslation();
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // 使用字符串状态以支持完全清空数字输入框
-  const [config, setConfig] = useState({
-    timeoutSecs: "8",
-    maxRetries: "1",
-    degradedThresholdMs: "6000",
-  });
+  const {
+    config: saved,
+    isLoading,
+    error,
+    refetch,
+    isSaving,
+    saveAsync,
+  } = useBackendConfig<StreamCheckConfig>(
+    queryKeys.backendConfig.streamCheck,
+    getStreamCheckConfig,
+    saveStreamCheckConfig,
+  );
+  // String drafts so a number input can be cleared while typing.
+  const [config, setConfig] = useState<StreamCheckDraft | null>(null);
+  const [showErrors, setShowErrors] = useState(false);
 
   useEffect(() => {
-    loadConfig();
-  }, []);
+    if (saved && config === null) setConfig(toStreamCheckDraft(saved));
+  }, [saved, config]);
 
-  async function loadConfig() {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const data = await getStreamCheckConfig();
-      setConfig({
-        timeoutSecs: String(data.timeoutSecs),
-        maxRetries: String(data.maxRetries),
-        degradedThresholdMs: String(data.degradedThresholdMs),
-      });
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setIsLoading(false);
-    }
-  }
+  const { config: parsedConfig, invalid } = config
+    ? parseStreamCheckDraft(config)
+    : { config: null, invalid: [] as StreamCheckField[] };
 
   async function handleSave() {
-    // 解析数字，空值使用默认值，0 是有效值
-    const parseNum = (val: string, defaultVal: number) => {
-      const n = parseInt(val);
-      return isNaN(n) ? defaultVal : n;
-    };
+    if (!parsedConfig) {
+      setShowErrors(true);
+      return;
+    }
     try {
-      setIsSaving(true);
-      const parsed: StreamCheckConfig = {
-        timeoutSecs: parseNum(config.timeoutSecs, 8),
-        maxRetries: parseNum(config.maxRetries, 1),
-        degradedThresholdMs: parseNum(config.degradedThresholdMs, 6000),
-      };
-      await saveStreamCheckConfig(parsed);
+      await saveAsync(parsedConfig);
+      setShowErrors(false);
       toast.success(t("streamCheck.configSaved"), {
         closeButton: true,
       });
     } catch (e) {
       toast.error(t("streamCheck.configSaveFailed") + ": " + String(e));
-    } finally {
-      setIsSaving(false);
     }
   }
 
@@ -77,14 +72,22 @@ export function ConnectivityCheckConfigPanel() {
     );
   }
 
+  if (!saved || !config) {
+    return <ConfigLoadErrorAlert error={error} onRetry={() => refetch()} />;
+  }
+
+  const fieldError = (key: StreamCheckField) =>
+    showErrors && invalid.includes(key) ? (
+      <p className="text-xs text-destructive" role="alert">
+        {t("streamCheck.rangeError", {
+          defaultValue: "Enter a whole number between {{min}} and {{max}}.",
+          ...STREAM_CHECK_LIMITS[key],
+        })}
+      </p>
+    ) : null;
+
   return (
     <div className="space-y-6">
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
       {/* 连通检测语义说明：可达 ≠ 配置正确 */}
       <Alert>
         <Info className="h-4 w-4" />
@@ -113,7 +116,9 @@ export function ConnectivityCheckConfigPanel() {
               onChange={(e) =>
                 setConfig({ ...config, timeoutSecs: e.target.value })
               }
+              aria-invalid={showErrors && invalid.includes("timeoutSecs")}
             />
+            {fieldError("timeoutSecs")}
           </div>
 
           <div className="space-y-2">
@@ -127,7 +132,9 @@ export function ConnectivityCheckConfigPanel() {
               onChange={(e) =>
                 setConfig({ ...config, maxRetries: e.target.value })
               }
+              aria-invalid={showErrors && invalid.includes("maxRetries")}
             />
+            {fieldError("maxRetries")}
           </div>
 
           <div className="space-y-2">
@@ -144,7 +151,11 @@ export function ConnectivityCheckConfigPanel() {
               onChange={(e) =>
                 setConfig({ ...config, degradedThresholdMs: e.target.value })
               }
+              aria-invalid={
+                showErrors && invalid.includes("degradedThresholdMs")
+              }
             />
+            {fieldError("degradedThresholdMs")}
           </div>
         </div>
       </div>

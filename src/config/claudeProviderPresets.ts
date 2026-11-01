@@ -1,7 +1,8 @@
 /**
  * 预设供应商配置模板
  */
-import { ProviderCategory } from "../types";
+import type { ProviderCategory } from "../types";
+import { registerPresetCatalog } from "./presetCatalog";
 
 export interface TemplateValueConfig {
   label: string;
@@ -1394,3 +1395,6 @@ export const providerPresets: ProviderPreset[] = [
     iconColor: "#FF9900",
   },
 ];
+
+// Remote signed catalog overlay (PRODUCT-07); the list above stays the default.
+registerPresetCatalog("claude", providerPresets);

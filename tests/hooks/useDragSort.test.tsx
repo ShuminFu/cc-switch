@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach, afterAll } from "vitest";
 import type { Provider } from "@/types";
 import { useDragSort } from "@/hooks/useDragSort";
+import { makeProvider, providerMap } from "../factories";
 
 const updateSortOrderMock = vi.fn();
 const toastSuccessMock = vi.fn();
@@ -37,28 +38,11 @@ function createWrapper() {
   return { wrapper, queryClient };
 }
 
-const mockProviders: Record<string, Provider> = {
-  a: {
-    id: "a",
-    name: "AAA",
-    settingsConfig: {},
-    sortIndex: 1,
-    createdAt: 5,
-  },
-  b: {
-    id: "b",
-    name: "BBB",
-    settingsConfig: {},
-    sortIndex: 0,
-    createdAt: 10,
-  },
-  c: {
-    id: "c",
-    name: "CCC",
-    settingsConfig: {},
-    createdAt: 1,
-  },
-};
+const mockProviders: Record<string, Provider> = providerMap([
+  makeProvider({ id: "a", name: "AAA", sortIndex: 1, createdAt: 5 }),
+  makeProvider({ id: "b", name: "BBB", sortIndex: 0, createdAt: 10 }),
+  makeProvider({ id: "c", name: "CCC", sortIndex: undefined, createdAt: 1 }),
+]);
 
 describe("useDragSort", () => {
   beforeEach(() => {
@@ -114,8 +98,49 @@ describe("useDragSort", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["providers", "claude"],
     });
-    expect(toastSuccessMock).toHaveBeenCalledTimes(1);
+    // A drop is its own feedback; no success toast (FE-PROV-13).
+    expect(toastSuccessMock).not.toHaveBeenCalled();
     expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it("reorders the cached list before the backend answers and rolls back on error (FE-PROV-13)", async () => {
+    let reject: (error: Error) => void = () => {};
+    updateSortOrderMock.mockImplementation(
+      () =>
+        new Promise((_, r) => {
+          reject = r;
+        }),
+    );
+    const { wrapper, queryClient } = createWrapper();
+    const cached = { providers: mockProviders, currentProviderId: "a" };
+    queryClient.setQueryData(["providers", "claude"], cached);
+
+    const { result } = renderHook(() => useDragSort(mockProviders, "claude"), {
+      wrapper,
+    });
+
+    let pending: Promise<void> = Promise.resolve();
+    await act(async () => {
+      pending = result.current.handleDragEnd({
+        active: { id: "b" },
+        over: { id: "a" },
+      } as any);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const optimistic = queryClient.getQueryData<typeof cached>([
+      "providers",
+      "claude",
+    ]);
+    expect(optimistic?.providers.a.sortIndex).toBe(0);
+    expect(optimistic?.providers.b.sortIndex).toBe(1);
+
+    await act(async () => {
+      reject(new Error("network"));
+      await pending;
+    });
+    expect(queryClient.getQueryData(["providers", "claude"])).toEqual(cached);
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
   });
 
   it("should show error toast when drag operation fails", async () => {

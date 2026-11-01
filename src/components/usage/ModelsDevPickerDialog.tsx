@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { useUpdateModelPricing } from "@/lib/query/usage";
 import { isTextEditableTarget } from "@/utils/domUtils";
+import { queryKeys } from "@/lib/query/keys";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 // 全量约 5000 条：默认只展示最新发布的一批，搜索时才做全量匹配
@@ -159,7 +160,7 @@ export function ModelsDevPickerDialog({
   }, [open]);
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["models-dev-pricing"],
+    queryKey: queryKeys.modelsDevPricing,
     queryFn: async (): Promise<ModelsDevResponse> => {
       const res = await fetch(MODELS_DEV_API_URL);
       if (!res.ok) {
@@ -345,14 +346,38 @@ export function ModelsDevPickerDialog({
                     {t("usage.modelsDevNoResults", "没有匹配的模型")}
                   </div>
                 ) : (
-                  <div className="divide-y divide-border/30">
+                  <div
+                    className="divide-y divide-border/30"
+                    onKeyDown={(event) => {
+                      // Arrow keys move between rows; Enter/Space select (FE-UI-44).
+                      if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
+                        return;
+                      const rows = Array.from(
+                        event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                          "button[data-models-dev-row]",
+                        ),
+                      );
+                      const index = rows.indexOf(
+                        document.activeElement as HTMLButtonElement,
+                      );
+                      const next =
+                        event.key === "ArrowDown"
+                          ? Math.min(rows.length - 1, index + 1)
+                          : Math.max(0, index - 1);
+                      if (rows[next]) {
+                        event.preventDefault();
+                        rows[next].focus();
+                      }
+                    }}
+                  >
                     {visible.map((entry) => (
-                      <div
+                      <button
+                        type="button"
                         key={entry.key}
-                        role="button"
+                        data-models-dev-row=""
                         aria-pressed={selected?.key === entry.key}
                         onClick={() => toggleEntry(entry)}
-                        className={`flex cursor-pointer items-center gap-3 px-3 py-2 ${
+                        className={`flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                           selected?.key === entry.key
                             ? "bg-accent/50"
                             : "hover:bg-muted/40"
@@ -398,7 +423,7 @@ export function ModelsDevPickerDialog({
                             </div>
                           ))}
                         </div>
-                      </div>
+                      </button>
                     ))}
                     {filtered.length > visible.length && (
                       <div className="px-3 py-2 text-center text-xs text-muted-foreground">

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { backupsApi } from "@/lib/api";
+import { queryKeys } from "@/lib/query/keys";
 
 export function useBackupManager() {
   const queryClient = useQueryClient();
@@ -9,7 +10,7 @@ export function useBackupManager() {
     isLoading,
     refetch,
   } = useQuery({
-    queryKey: ["db-backups"],
+    queryKey: queryKeys.backups.db,
     queryFn: () => backupsApi.listDbBackups(),
   });
 
@@ -19,7 +20,15 @@ export function useBackupManager() {
   });
 
   const restoreMutation = useMutation({
-    mutationFn: (filename: string) => backupsApi.restoreDbBackup(filename),
+    mutationFn: (
+      args: string | { filename: string; keepUsageHistory: boolean },
+    ) =>
+      typeof args === "string"
+        ? backupsApi.restoreDbBackup(args)
+        : backupsApi.restoreDbBackupWithOptions(
+            args.filename,
+            args.keepUsageHistory,
+          ),
     onSuccess: async () => {
       // Invalidate all queries to refresh data from restored database
       await queryClient.invalidateQueries();

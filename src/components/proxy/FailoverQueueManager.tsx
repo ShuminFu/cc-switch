@@ -3,13 +3,25 @@
  *
  * 允许用户管理代理模式下的故障转移队列，支持：
  * - 添加/移除供应商
- * - 队列顺序基于首页供应商列表的 sort_index
+ * - 队列顺序基于首页供应商列表的 sort_index（上移/下移会交换两者的 sort_index）
+ * - 每项显示健康状态与最近一次失败原因，可连通性检查与重置熔断（FE-UI-24）
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2, Info, AlertTriangle } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Loader2,
+  Info,
+  AlertTriangle,
+  ArrowUp,
+  ArrowDown,
+  Activity,
+  RotateCcw,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -21,8 +33,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { FailoverQueueItem } from "@/types/proxy";
-import type { AppId } from "@/lib/api";
+import type { FailoverQueueItem, ProviderHealth } from "@/types/proxy";
+import { providersApi, type AppId } from "@/lib/api";
+import { queryKeys } from "@/lib/query/keys";
+import { useStreamCheck } from "@/hooks/useStreamCheck";
+import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
+import { swapQueueSortIndex } from "./failoverQueueOrder";
 import {
   useFailoverQueue,
   useAvailableProvidersForFailover,
@@ -30,7 +46,10 @@ import {
   useRemoveFromFailoverQueue,
   useAutoFailoverEnabled,
   useSetAutoFailoverEnabled,
+  useProvidersHealthMap,
+  useResetCircuitBreaker,
 } from "@/lib/query/failover";
+import { showError } from "@/lib/errors/showError";
 
 interface FailoverQueueManagerProps {
   appType: AppId;
@@ -54,12 +73,62 @@ export function FailoverQueueManager({
     isLoading: isQueueLoading,
     error: queueError,
   } = useFailoverQueue(appType);
+  const queueProviderIds = useMemo(
+    () => (queue ?? []).map((item) => item.providerId),
+    [queue],
+  );
+  const { data: healthMap } = useProvidersHealthMap(appType, queueProviderIds);
   const { data: availableProviders, isLoading: isProvidersLoading } =
     useAvailableProvidersForFailover(appType);
 
   // Mutations
   const addToQueue = useAddToFailoverQueue();
   const removeFromQueue = useRemoveFromFailoverQueue();
+  const resetCircuit = useResetCircuitBreaker();
+  const { checkProvider, isChecking } = useStreamCheck(appType);
+  const queryClient = useQueryClient();
+  const [isReordering, setIsReordering] = useState(false);
+
+  const handleMove = async (from: number, to: number) => {
+    if (!queue) return;
+    const updates = swapQueueSortIndex(queue, from, to);
+    if (!updates) return;
+    setIsReordering(true);
+    try {
+      await providersApi.updateSortOrder(updates, appType);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.failover.queue(appType),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.providers.byApp(appType),
+        }),
+      ]);
+    } catch (error) {
+      toast.error(
+        t("proxy.failoverQueue.reorderFailed", {
+          defaultValue: "Could not reorder the queue",
+        }),
+        { description: String(error) },
+      );
+    } finally {
+      setIsReordering(false);
+    }
+  };
+
+  const handleResetCircuit = async (providerId: string) => {
+    try {
+      await resetCircuit.mutateAsync({ providerId, appType });
+      toast.success(
+        t("proxy.failoverQueue.circuitReset", {
+          defaultValue: "Circuit breaker reset",
+        }),
+        { closeButton: true },
+      );
+    } catch (error) {
+      toast.error(String(error));
+    }
+  };
 
   // 切换故障转移开关
   const handleToggleFailover = (enabled: boolean) => {
@@ -81,9 +150,10 @@ export function FailoverQueueManager({
         { closeButton: true },
       );
     } catch (error) {
-      toast.error(
-        t("proxy.failoverQueue.addFailed", "添加失败") + ": " + String(error),
-      );
+      showError({
+        title: t("proxy.failoverQueue.addFailed", "添加失败"),
+        error,
+      });
     }
   };
 
@@ -96,11 +166,10 @@ export function FailoverQueueManager({
         { closeButton: true },
       );
     } catch (error) {
-      toast.error(
-        t("proxy.failoverQueue.removeFailed", "移除失败") +
-          ": " +
-          String(error),
-      );
+      showError({
+        title: t("proxy.failoverQueue.removeFailed", "移除失败"),
+        error,
+      });
     }
   };
 
@@ -229,10 +298,25 @@ export function FailoverQueueManager({
             <QueueItem
               key={item.providerId}
               item={item}
+              health={healthMap?.[item.providerId]}
               index={index}
               disabled={disabled}
               onRemove={handleRemoveProvider}
               isRemoving={removeFromQueue.isPending}
+              canMoveUp={
+                !isReordering && !!swapQueueSortIndex(queue, index, index - 1)
+              }
+              canMoveDown={
+                !isReordering && !!swapQueueSortIndex(queue, index, index + 1)
+              }
+              onMoveUp={() => void handleMove(index, index - 1)}
+              onMoveDown={() => void handleMove(index, index + 1)}
+              onTest={() =>
+                void checkProvider(item.providerId, item.providerName)
+              }
+              isTesting={isChecking(item.providerId)}
+              onResetCircuit={() => void handleResetCircuit(item.providerId)}
+              isResetting={resetCircuit.isPending}
             />
           ))}
         </div>
@@ -253,20 +337,47 @@ export function FailoverQueueManager({
 
 interface QueueItemProps {
   item: FailoverQueueItem;
+  health?: ProviderHealth;
   index: number;
   disabled: boolean;
   onRemove: (providerId: string) => void;
   isRemoving: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onTest: () => void;
+  isTesting: boolean;
+  onResetCircuit: () => void;
+  isResetting: boolean;
 }
 
 function QueueItem({
   item,
+  health,
   index,
   disabled,
   onRemove,
   isRemoving,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
+  onTest,
+  isTesting,
+  onResetCircuit,
+  isResetting,
 }: QueueItemProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lastFailure =
+    health?.last_error && health.last_failure_at
+      ? {
+          error: health.last_error,
+          at: new Date(health.last_failure_at).toLocaleString(
+            i18n?.language || undefined,
+          ),
+        }
+      : null;
 
   return (
     <div
@@ -279,16 +390,94 @@ function QueueItem({
         {index + 1}
       </div>
 
-      {/* 供应商名称 */}
+      {/* 供应商名称 + 健康状态 */}
       <div className="flex-1 min-w-0">
-        <span className="text-sm font-medium truncate block">
-          {item.providerName}
-          {item.providerNotes && (
-            <span className="ml-1 text-xs text-muted-foreground">
-              ({item.providerNotes})
-            </span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium truncate">
+            {item.providerName}
+            {item.providerNotes && (
+              <span className="ml-1 text-xs text-muted-foreground">
+                ({item.providerNotes})
+              </span>
+            )}
+          </span>
+          {health && (
+            <ProviderHealthBadge
+              consecutiveFailures={health.consecutive_failures}
+              isHealthy={health.is_healthy}
+            />
           )}
-        </span>
+        </div>
+        {lastFailure && (
+          <p
+            className="mt-0.5 truncate text-xs text-muted-foreground"
+            title={lastFailure.error}
+            data-testid={`queue-last-error-${item.providerId}`}
+          >
+            {t("proxy.failoverQueue.lastFailure", {
+              defaultValue: "Last failure {{time}}: {{error}}",
+              time: lastFailure.at,
+              error: lastFailure.error,
+            })}
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={onMoveUp}
+          disabled={disabled || !canMoveUp}
+          aria-label={t("proxy.failoverQueue.moveUp", {
+            defaultValue: "Move up",
+          })}
+        >
+          <ArrowUp className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={onMoveDown}
+          disabled={disabled || !canMoveDown}
+          aria-label={t("proxy.failoverQueue.moveDown", {
+            defaultValue: "Move down",
+          })}
+        >
+          <ArrowDown className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={onTest}
+          disabled={isTesting}
+          aria-label={t("proxy.failoverQueue.test", {
+            defaultValue: "Test connectivity",
+          })}
+        >
+          {isTesting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Activity className="h-4 w-4" />
+          )}
+        </Button>
+        {health && health.consecutive_failures > 0 && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={onResetCircuit}
+            disabled={disabled || isResetting}
+            aria-label={t("proxy.failoverQueue.resetCircuit", {
+              defaultValue: "Reset circuit breaker",
+            })}
+          >
+            <RotateCcw className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
       {/* 删除按钮 */}

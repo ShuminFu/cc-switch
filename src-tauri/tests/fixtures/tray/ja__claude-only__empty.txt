@@ -1,0 +1,22 @@
+TrayModel {
+    texts: TrayTexts {
+        show_main: "メインウィンドウを開く",
+        open_website: "公式サイトを開く",
+        no_providers_label: "(プロバイダーなし)",
+        lightweight_mode: "軽量モード",
+        quit: "終了",
+        _auto_label: "自動 (フェイルオーバー)",
+        projects_label: "プロジェクト",
+        no_project_label: "プロジェクトを使用しない",
+    },
+    sections: [
+        TraySectionModel {
+            section: 0,
+            body: Empty {
+                label: "Claude (プロバイダーなし)",
+            },
+        },
+    ],
+    profile_scopes: [],
+    lightweight: false,
+}

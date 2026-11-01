@@ -1,0 +1,42 @@
+{
+  "id": "resp_msg_01A",
+  "object": "response",
+  "created_at": 0,
+  "status": "completed",
+  "model": "claude-sonnet-4-5",
+  "output": [
+    {
+      "id": "resp_msg_01A_msg_0",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Listing.",
+          "annotations": []
+        }
+      ]
+    },
+    {
+      "id": "fc_toolu_01ls",
+      "type": "function_call",
+      "status": "completed",
+      "call_id": "toolu_01ls",
+      "name": "shell",
+      "arguments": "{\"command\":[\"ls\"]}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 35,
+    "output_tokens": 6,
+    "total_tokens": 41,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "input_tokens_details": {
+      "cached_tokens": 10,
+      "cache_write_tokens": 0
+    }
+  }
+}

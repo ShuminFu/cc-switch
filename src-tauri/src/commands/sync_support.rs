@@ -1,17 +1,33 @@
 use serde_json::{json, Value};
-use std::sync::Arc;
+use tauri::Manager;
 
-use crate::database::Database;
 use crate::error::AppError;
 use crate::services::provider::ProviderService;
 use crate::settings;
 use crate::store::AppState;
 
-pub(crate) fn run_post_import_sync(db: Arc<Database>) -> Result<(), AppError> {
-    let app_state = AppState::new(db);
-    ProviderService::sync_current_to_live(&app_state)?;
+/// Rewrite live files from the (just replaced) database and reload settings.
+///
+/// Takes the managed [`AppState`] rather than building a throwaway one: the
+/// live sync consults `state.proxy_service` for takeover detection, and a fresh
+/// `ProxyService` always reports "not running / not taken over" (CMD-19).
+pub(crate) fn run_post_import_sync(state: &AppState) -> Result<(), AppError> {
+    ProviderService::sync_current_to_live(state)?;
     settings::reload_settings()?;
     Ok(())
+}
+
+/// [`run_post_import_sync`] on the blocking pool, using the app's managed state.
+/// The outer `Err` is a task failure (panic / missing state).
+pub(crate) async fn run_post_import_sync_blocking(
+    app: tauri::AppHandle,
+) -> Result<Result<(), AppError>, String> {
+    tauri::async_runtime::spawn_blocking(move || match app.try_state::<AppState>() {
+        Some(state) => Ok(run_post_import_sync(state.inner())),
+        None => Err("应用状态尚未初始化".to_string()),
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn post_sync_warning<E: std::fmt::Display>(err: E) -> String {
@@ -57,6 +73,29 @@ pub(crate) fn success_payload_with_warning(backup_id: String, warning: Option<St
 mod tests {
     use super::{attach_warning, post_sync_warning_from_result};
     use serde_json::json;
+
+    /// CMD-19: commands must reuse the managed AppState. A second
+    /// `AppState::new` builds a second ProxyService that never sees the running
+    /// proxy, so a post-import live sync could overwrite takeover-owned files.
+    #[test]
+    fn commands_never_construct_a_second_app_state() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
+        let needle = ["AppState", "::new("].concat();
+        for entry in std::fs::read_dir(&dir).expect("read commands dir") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("read source");
+            // Unit tests may build an isolated AppState over an in-memory DB.
+            let source = source.split("#[cfg(test)]").next().unwrap_or_default();
+            assert!(
+                !source.contains(&needle),
+                "{} constructs a throwaway AppState",
+                path.display()
+            );
+        }
+    }
 
     #[test]
     fn post_sync_warning_from_result_returns_none_on_success() {

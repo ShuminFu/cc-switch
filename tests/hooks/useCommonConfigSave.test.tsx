@@ -35,7 +35,7 @@ describe("common config snippet saving", () => {
     const onConfigChange = vi.fn();
     const { result } = renderHook(() =>
       useCodexCommonConfig({
-        codexConfig: "model = \"gpt-5\"",
+        codexConfig: 'model = "gpt-5"',
         onConfigChange,
       }),
     );
@@ -172,7 +172,7 @@ describe("common config snippet saving", () => {
     expect(setCommonConfigSnippetMock).not.toHaveBeenCalled();
     expect(onEnvChange).not.toHaveBeenCalled();
     expect(result.current.commonConfigError).toBe(
-      "geminiConfig.commonConfigInvalidValues",
+      "Common config snippet values must be strings",
     );
   });
 });

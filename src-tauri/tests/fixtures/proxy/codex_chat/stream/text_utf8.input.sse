@@ -1,0 +1,12 @@
+data: {"id": "chatcmpl-s1", "object": "chat.completion.chunk", "created": 1700000000, "model": "gpt-4o-2024-08-06", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-s1", "object": "chat.completion.chunk", "created": 1700000000, "model": "gpt-4o-2024-08-06", "choices": [{"index": 0, "delta": {"content": "Au revoir, "}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-s1", "object": "chat.completion.chunk", "created": 1700000000, "model": "gpt-4o-2024-08-06", "choices": [{"index": 0, "delta": {"content": "héllo 你好 🙂"}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-s1", "object": "chat.completion.chunk", "created": 1700000000, "model": "gpt-4o-2024-08-06", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+
+data: {"id": "chatcmpl-s1", "object": "chat.completion.chunk", "created": 1700000000, "model": "gpt-4o-2024-08-06", "choices": [], "usage": {"prompt_tokens": 25, "completion_tokens": 6, "total_tokens": 31}}
+
+data: [DONE]
+

@@ -11,19 +11,19 @@ import {
   getGlobalProxyUrl,
   setGlobalProxyUrl,
   testProxyUrl,
-  getUpstreamProxyStatus,
   scanLocalProxies,
   type ProxyTestResult,
-  type UpstreamProxyStatus,
   type DetectedProxy,
 } from "@/lib/api/globalProxy";
+import { queryKeys } from "@/lib/query/keys";
+import { extractErrorMessage } from "@/utils/errorUtils";
 
 /**
  * 获取全局代理 URL
  */
 export function useGlobalProxyUrl() {
   return useQuery({
-    queryKey: ["globalProxyUrl"],
+    queryKey: queryKeys.proxy.globalUrl,
     queryFn: getGlobalProxyUrl,
     staleTime: 30 * 1000, // 30秒内不重新获取，避免展开时闪烁
   });
@@ -40,16 +40,13 @@ export function useSetGlobalProxyUrl() {
     mutationFn: setGlobalProxyUrl,
     onSuccess: () => {
       toast.success(t("settings.globalProxy.saved"));
-      queryClient.invalidateQueries({ queryKey: ["globalProxyUrl"] });
-      queryClient.invalidateQueries({ queryKey: ["upstreamProxyStatus"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.globalUrl });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.proxy.upstreamStatus,
+      });
     },
     onError: (error: unknown) => {
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === "string"
-            ? error
-            : "Unknown error";
+      const message = extractErrorMessage(error) || t("common.unknown");
       toast.error(t("settings.globalProxy.saveFailed", { error: message }));
     },
   });
@@ -74,19 +71,13 @@ export function useTestProxy() {
         );
       }
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
+    onError: (error: unknown) => {
+      toast.error(
+        t("settings.globalProxy.testFailed", {
+          error: extractErrorMessage(error) || t("common.unknown"),
+        }),
+      );
     },
-  });
-}
-
-/**
- * 获取当前出站代理状态
- */
-export function useUpstreamProxyStatus() {
-  return useQuery<UpstreamProxyStatus>({
-    queryKey: ["upstreamProxyStatus"],
-    queryFn: getUpstreamProxyStatus,
   });
 }
 
@@ -98,9 +89,11 @@ export function useScanProxies() {
 
   return useMutation({
     mutationFn: scanLocalProxies,
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       toast.error(
-        t("settings.globalProxy.scanFailed", { error: error.message }),
+        t("settings.globalProxy.scanFailed", {
+          error: extractErrorMessage(error) || t("common.unknown"),
+        }),
       );
     },
   });

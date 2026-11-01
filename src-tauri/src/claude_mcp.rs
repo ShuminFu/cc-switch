@@ -4,12 +4,12 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::{atomic_write, get_claude_mcp_path};
+use crate::config::{atomic_write_secret, get_claude_mcp_path};
 use crate::error::AppError;
 
 /// 需要在 Windows 上用 cmd /c 包装的命令
 /// 这些命令在 Windows 上实际是 .cmd 批处理文件，需要通过 cmd /c 来执行
-#[cfg(windows)]
+#[cfg_attr(not(windows), allow(dead_code))]
 const WINDOWS_WRAP_COMMANDS: &[&str] = &["npx", "npm", "yarn", "pnpm", "node", "bun", "deno"];
 
 /// Windows 平台：将 `npx args...` 转换为 `cmd /c npx args...`
@@ -52,11 +52,81 @@ fn wrap_command_for_windows(obj: &mut Map<String, Value>) {
         .cloned()
         .unwrap_or_default();
 
+    // cmd.exe 会重新解释 & | < > ^：逐个转义，无法安全转义时不包装（CFG-05）
+    let Some(escaped) = cmd_c_escape_args(&original_args) else {
+        log::warn!(
+            "MCP command '{cmd}' has arguments cmd.exe cannot pass through safely; written without the cmd /c wrapper"
+        );
+        return;
+    };
+
     let mut new_args = vec![Value::String("/c".into()), Value::String(cmd.into())];
-    new_args.extend(original_args);
+    new_args.extend(escaped);
 
     obj.insert("command".into(), Value::String("cmd".into()));
     obj.insert("args".into(), Value::Array(new_args));
+}
+
+/// Characters `cmd.exe /c` interprets outside double quotes.
+const CMD_METACHARS: &[char] = &['&', '|', '<', '>', '^'];
+
+/// Escape arguments for `cmd /c <cmd> args…` (CFG-05).
+///
+/// Claude Code spawns `cmd` with an argv that Node/libuv joins into one
+/// command line, quoting an argument only when it is empty or contains a
+/// space, tab or `"`. cmd.exe then re-parses that line, so a bare `&`, `|`,
+/// `<`, `>` or `^` would split or redirect the command. Unquoted arguments
+/// get each metacharacter caret-escaped; quoted ones are already literal for
+/// cmd unless they also contain `"` (libuv's `\"` toggles cmd's quote state),
+/// which cannot be escaped reliably, so `None` is returned and the caller
+/// must not wrap. `%VAR%` expansion is kept on purpose: Windows configs rely
+/// on it.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn cmd_c_escape_args(args: &[Value]) -> Option<Vec<Value>> {
+    args.iter()
+        .map(|arg| {
+            let Some(s) = arg.as_str() else {
+                return Some(arg.clone());
+            };
+            if !s.contains(CMD_METACHARS) {
+                return Some(arg.clone());
+            }
+            let quoted = s.is_empty() || s.contains([' ', '\t', '"']);
+            if quoted {
+                return (!s.contains('"')).then(|| arg.clone());
+            }
+            let mut out = String::with_capacity(s.len() + 4);
+            for c in s.chars() {
+                if CMD_METACHARS.contains(&c) {
+                    out.push('^');
+                }
+                out.push(c);
+            }
+            Some(Value::String(out))
+        })
+        .collect()
+}
+
+/// Inverse of [`cmd_c_escape_args`] for one unquoted argument.
+fn cmd_c_unescape_arg(arg: &str) -> String {
+    if arg.contains([' ', '\t', '"']) || !arg.contains('^') {
+        return arg.to_string();
+    }
+    let mut out = String::with_capacity(arg.len());
+    let mut chars = arg.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '^' {
+            if let Some(&next) = chars.peek() {
+                if CMD_METACHARS.contains(&next) {
+                    out.push(next);
+                    chars.next();
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// 非 Windows 平台无需处理
@@ -89,7 +159,136 @@ fn is_wsl_path(_path: &Path) -> bool {
     false
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Undo the `cmd /c <npx|npm|…> args…` wrapping cc-switch applies when writing
+/// `~/.claude.json` on Windows, so the DB keeps the portable spec (CFG-30).
+/// Only the exact form produced by `wrap_command_for_windows` is unwrapped.
+pub fn unwrap_windows_command(spec: &Value) -> Value {
+    let mut out = spec.clone();
+    let Some(obj) = out.as_object_mut() else {
+        return out;
+    };
+    let is_cmd = obj
+        .get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|c| c.eq_ignore_ascii_case("cmd") || c.eq_ignore_ascii_case("cmd.exe"));
+    if !is_cmd {
+        return out;
+    }
+    let Some(args) = obj.get("args").and_then(Value::as_array).cloned() else {
+        return out;
+    };
+    let (Some(flag), Some(inner)) = (
+        args.first().and_then(Value::as_str),
+        args.get(1).and_then(Value::as_str),
+    ) else {
+        return out;
+    };
+    let inner_name = Path::new(inner)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(inner);
+    if !flag.eq_ignore_ascii_case("/c")
+        || !WINDOWS_WRAP_COMMANDS
+            .iter()
+            .any(|c| inner_name.eq_ignore_ascii_case(c))
+    {
+        return out;
+    }
+    obj.insert("command".into(), Value::String(inner.to_string()));
+    let rest: Vec<Value> = args[2..]
+        .iter()
+        .map(|arg| match arg.as_str() {
+            Some(s) => Value::String(cmd_c_unescape_arg(s)),
+            None => arg.clone(),
+        })
+        .collect();
+    if rest.is_empty() {
+        obj.remove("args");
+    } else {
+        obj.insert("args".into(), Value::Array(rest));
+    }
+    out
+}
+
+/// Convert a unified MCP spec into the entry written to `~/.claude.json`.
+fn to_claude_native(id: &str, spec: &Value, is_wsl_target: bool) -> Result<Value, AppError> {
+    let mut obj = if let Some(map) = spec.as_object() {
+        map.clone()
+    } else {
+        return Err(AppError::McpValidation(format!(
+            "MCP 服务器 '{id}' 不是对象"
+        )));
+    };
+
+    if let Some(server_val) = obj.remove("server") {
+        let server_obj = server_val.as_object().cloned().ok_or_else(|| {
+            AppError::McpValidation(format!("MCP 服务器 '{id}' server 字段不是对象"))
+        })?;
+        obj = server_obj;
+    }
+
+    obj.remove("enabled");
+    obj.remove("source");
+    obj.remove("id");
+    obj.remove("name");
+    obj.remove("description");
+    obj.remove("tags");
+    obj.remove("homepage");
+    obj.remove("docs");
+
+    // Windows 平台自动包装 npx/npm 等命令为 cmd /c 格式（WSL 路径除外）
+    if !is_wsl_target {
+        wrap_command_for_windows(&mut obj);
+    }
+
+    Ok(Value::Object(obj))
+}
+
+/// Apply a batch of MCP changes to `~/.claude.json` with a single
+/// read-modify-write (CFG-41).
+///
+/// `~/.claude.json` is owned by Claude Code, which rewrites it constantly:
+/// the update re-reads the file right before writing and re-applies the
+/// change when it moved meanwhile, so Claude Code's own edits are never
+/// overwritten (CFG-39). Existing entries keep their position, other servers
+/// are not touched, and nothing is written when the result is unchanged.
+pub fn project_mcp_servers(enabled: &[(&str, &Value)], disabled: &[&str]) -> Result<(), AppError> {
+    let path = user_config_path();
+    let is_wsl_target = is_wsl_path(&path);
+    let natives = enabled
+        .iter()
+        .map(|(id, spec)| Ok((id.to_string(), to_claude_native(id, spec, is_wsl_target)?)))
+        .collect::<Result<Vec<_>, AppError>>()?;
+
+    crate::adapters::live_file::update_json_file(
+        &path,
+        crate::adapters::live_file::WriteOptions::default().secret(),
+        |root| {
+            let obj = root
+                .as_object_mut()
+                .ok_or_else(|| AppError::Config("~/.claude.json 根必须是对象".into()))?;
+            if natives.is_empty() && !obj.contains_key("mcpServers") {
+                return Ok(());
+            }
+            let servers = obj
+                .entry("mcpServers")
+                .or_insert_with(|| Value::Object(Map::new()));
+            let map = servers.as_object_mut().ok_or_else(|| {
+                AppError::Config("~/.claude.json 的 mcpServers 必须是对象".into())
+            })?;
+            for (id, native) in &natives {
+                map.insert(id.clone(), native.clone());
+            }
+            for id in disabled {
+                map.shift_remove(*id);
+            }
+            Ok(())
+        },
+    )?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct McpStatus {
     pub user_config_path: String,
@@ -116,7 +315,7 @@ fn write_json_value(path: &Path, value: &Value) -> Result<(), AppError> {
     }
     let json =
         serde_json::to_string_pretty(value).map_err(|e| AppError::JsonSerialize { source: e })?;
-    atomic_write(path, json.as_bytes())
+    atomic_write_secret(path, json.as_bytes())
 }
 
 pub fn get_mcp_status() -> Result<McpStatus, AppError> {
@@ -196,12 +395,18 @@ pub fn clear_has_completed_onboarding() -> Result<bool, AppError> {
 
 pub fn upsert_mcp_server(id: &str, spec: Value) -> Result<bool, AppError> {
     if id.trim().is_empty() {
-        return Err(AppError::InvalidInput("MCP 服务器 ID 不能为空".into()));
+        return Err(AppError::localized(
+            "mcp.error.idRequired",
+            "MCP 服务器 ID 不能为空",
+            "The MCP server ID is required",
+        ));
     }
     // 基础字段校验（尽量宽松）
     if !spec.is_object() {
-        return Err(AppError::McpValidation(
-            "MCP 服务器定义必须为 JSON 对象".into(),
+        return Err(AppError::localized(
+            "mcp.error.jsonInvalid",
+            "MCP 服务器定义必须为 JSON 对象",
+            "The MCP server definition must be a JSON object",
         ));
     }
     let t_opt = spec.get("type").and_then(|x| x.as_str());
@@ -209,8 +414,10 @@ pub fn upsert_mcp_server(id: &str, spec: Value) -> Result<bool, AppError> {
     let is_http = t_opt.map(|t| t == "http").unwrap_or(false);
     let is_sse = t_opt.map(|t| t == "sse").unwrap_or(false);
     if !(is_stdio || is_http || is_sse) {
-        return Err(AppError::McpValidation(
-            "MCP 服务器 type 必须是 'stdio'、'http' 或 'sse'（或省略表示 stdio）".into(),
+        return Err(AppError::localized(
+            "mcp.error.jsonInvalid",
+            "MCP 服务器 type 必须是 'stdio'、'http' 或 'sse'（或省略表示 stdio）",
+            "The MCP server type must be 'stdio', 'http' or 'sse' (omit it for stdio)",
         ));
     }
 
@@ -218,8 +425,10 @@ pub fn upsert_mcp_server(id: &str, spec: Value) -> Result<bool, AppError> {
     if is_stdio {
         let cmd = spec.get("command").and_then(|x| x.as_str()).unwrap_or("");
         if cmd.is_empty() {
-            return Err(AppError::McpValidation(
-                "stdio 类型的 MCP 服务器缺少 command 字段".into(),
+            return Err(AppError::localized(
+                "mcp.error.commandRequired",
+                "stdio 类型的 MCP 服务器缺少 command 字段",
+                "A stdio MCP server needs a command",
             ));
         }
     }
@@ -228,11 +437,19 @@ pub fn upsert_mcp_server(id: &str, spec: Value) -> Result<bool, AppError> {
     if is_http || is_sse {
         let url = spec.get("url").and_then(|x| x.as_str()).unwrap_or("");
         if url.is_empty() {
-            return Err(AppError::McpValidation(if is_http {
-                "http 类型的 MCP 服务器缺少 url 字段".into()
-            } else {
-                "sse 类型的 MCP 服务器缺少 url 字段".into()
-            }));
+            return Err(AppError::localized(
+                "mcp.wizard.urlRequired",
+                if is_http {
+                    "http 类型的 MCP 服务器缺少 url 字段"
+                } else {
+                    "sse 类型的 MCP 服务器缺少 url 字段"
+                },
+                if is_http {
+                    "An http MCP server needs a URL"
+                } else {
+                    "An sse MCP server needs a URL"
+                },
+            ));
         }
     }
 
@@ -268,7 +485,11 @@ pub fn upsert_mcp_server(id: &str, spec: Value) -> Result<bool, AppError> {
 
 pub fn delete_mcp_server(id: &str) -> Result<bool, AppError> {
     if id.trim().is_empty() {
-        return Err(AppError::InvalidInput("MCP 服务器 ID 不能为空".into()));
+        return Err(AppError::localized(
+            "mcp.error.idRequired",
+            "MCP 服务器 ID 不能为空",
+            "The MCP server ID is required",
+        ));
     }
     let path = user_config_path();
     if !path.exists() {
@@ -323,23 +544,6 @@ pub fn validate_command_in_path(cmd: &str) -> Result<bool, AppError> {
     Ok(false)
 }
 
-/// 读取 ~/.claude.json 中的 mcpServers 映射
-pub fn read_mcp_servers_map() -> Result<std::collections::HashMap<String, Value>, AppError> {
-    let path = user_config_path();
-    if !path.exists() {
-        return Ok(std::collections::HashMap::new());
-    }
-
-    let root = read_json_value(&path)?;
-    let servers = root
-        .get("mcpServers")
-        .and_then(|v| v.as_object())
-        .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-        .unwrap_or_default();
-
-    Ok(servers)
-}
-
 /// 将给定的启用 MCP 服务器映射写入到用户级 ~/.claude.json 的 mcpServers 字段
 /// 仅覆盖 mcpServers，其他字段保持不变
 pub fn set_mcp_servers_map(
@@ -360,36 +564,7 @@ pub fn set_mcp_servers_map(
     }
     let mut out: Map<String, Value> = Map::new();
     for (id, spec) in servers.iter() {
-        let mut obj = if let Some(map) = spec.as_object() {
-            map.clone()
-        } else {
-            return Err(AppError::McpValidation(format!(
-                "MCP 服务器 '{id}' 不是对象"
-            )));
-        };
-
-        if let Some(server_val) = obj.remove("server") {
-            let server_obj = server_val.as_object().cloned().ok_or_else(|| {
-                AppError::McpValidation(format!("MCP 服务器 '{id}' server 字段不是对象"))
-            })?;
-            obj = server_obj;
-        }
-
-        obj.remove("enabled");
-        obj.remove("source");
-        obj.remove("id");
-        obj.remove("name");
-        obj.remove("description");
-        obj.remove("tags");
-        obj.remove("homepage");
-        obj.remove("docs");
-
-        // Windows 平台自动包装 npx/npm 等命令为 cmd /c 格式（WSL 路径除外）
-        if !is_wsl_target {
-            wrap_command_for_windows(&mut obj);
-        }
-
-        out.insert(id.clone(), Value::Object(obj));
+        out.insert(id.clone(), to_claude_native(id, spec, is_wsl_target)?);
     }
 
     {
@@ -407,6 +582,63 @@ pub fn set_mcp_servers_map(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn cmd_c_escape_neutralises_shell_metacharacters() {
+        let args = vec![
+            json!("-y"),
+            json!("a&calc"),
+            json!("x|y"),
+            json!("%APPDATA%"),
+        ];
+        assert_eq!(
+            cmd_c_escape_args(&args).unwrap(),
+            vec![
+                json!("-y"),
+                json!("a^&calc"),
+                json!("x^|y"),
+                json!("%APPDATA%")
+            ]
+        );
+        // quoted by libuv (contains a space): already literal for cmd
+        assert_eq!(
+            cmd_c_escape_args(&[json!("a & b")]).unwrap(),
+            vec![json!("a & b")]
+        );
+        // an embedded quote plus a metacharacter cannot be passed safely
+        assert!(cmd_c_escape_args(&[json!("a\"&calc")]).is_none());
+    }
+
+    #[test]
+    fn unwrap_reverses_cmd_c_escaping() {
+        let wrapped = json!({
+            "command": "cmd",
+            "args": ["/c", "npx", "-y", "a^&calc", "a & b"]
+        });
+        let spec = unwrap_windows_command(&wrapped);
+        assert_eq!(spec["command"], json!("npx"));
+        assert_eq!(spec["args"], json!(["-y", "a&calc", "a & b"]));
+    }
+
+    #[test]
+    fn unwrap_windows_command_restores_portable_spec() {
+        let wrapped =
+            json!({"type": "stdio", "command": "cmd", "args": ["/c", "npx", "-y", "pkg"]});
+        assert_eq!(
+            unwrap_windows_command(&wrapped),
+            json!({"type": "stdio", "command": "npx", "args": ["-y", "pkg"]})
+        );
+        let only_cmd = json!({"command": "CMD.EXE", "args": ["/C", "node"]});
+        assert_eq!(
+            unwrap_windows_command(&only_cmd),
+            json!({"command": "node"})
+        );
+        // user-written cmd wrappers around other programs are left alone
+        let bat = json!({"command": "cmd", "args": ["/c", "run.bat"]});
+        assert_eq!(unwrap_windows_command(&bat), bat);
+        let plain = json!({"command": "npx", "args": ["-y"]});
+        assert_eq!(unwrap_windows_command(&plain), plain);
+    }
 
     /// 测试 Windows 命令包装功能
     /// 由于使用条件编译，在非 Windows 平台上测试的是空函数

@@ -1,0 +1,6 @@
+event: response.created
+data: {"type": "response.created", "response": {"id": "resp_f", "model": "gpt-5-codex"}}
+
+event: response.failed
+data: {"type": "response.failed", "response": {"id": "resp_f", "status": "failed", "error": {"code": "server_error", "message": "boom"}}}
+

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Save, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
@@ -21,8 +21,45 @@ import {
 import type { OpenClawAgentsDefaults } from "@/types";
 import { useOpenClawModelOptions } from "./hooks/useOpenClawModelOptions";
 import { getOpenClawTimeoutInputValue } from "./utils";
+import { useEditableBuffer } from "./hooks/useEditableBuffer";
+import { ExternalChangeAlert } from "./ExternalChangeAlert";
 
 const UNSET_SENTINEL = "__unset__";
+
+interface AgentsForm {
+  /** Original section, so unknown fields survive a save. */
+  defaults: OpenClawAgentsDefaults | null;
+  primaryModel: string;
+  fallbacks: string[];
+  workspace: string;
+  timeout: string;
+  contextTokens: string;
+  maxConcurrent: string;
+}
+
+const EMPTY_AGENTS_FORM: AgentsForm = {
+  defaults: null,
+  primaryModel: "",
+  fallbacks: [],
+  workspace: "",
+  timeout: "",
+  contextTokens: "",
+  maxConcurrent: "",
+};
+
+// agentsData is undefined while loading, null when the section is absent.
+const agentsToForm = (data: OpenClawAgentsDefaults | null): AgentsForm =>
+  data
+    ? {
+        defaults: data,
+        primaryModel: data.model?.primary ?? "",
+        fallbacks: data.model?.fallbacks ?? [],
+        workspace: String(data.workspace ?? ""),
+        timeout: getOpenClawTimeoutInputValue(data),
+        contextTokens: String(data.contextTokens ?? ""),
+        maxConcurrent: String(data.maxConcurrent ?? ""),
+      }
+    : EMPTY_AGENTS_FORM;
 
 const AgentsDefaultsPanel: React.FC = () => {
   const { t } = useTranslation();
@@ -31,39 +68,31 @@ const AgentsDefaultsPanel: React.FC = () => {
   const { options: modelOptions, isLoading: modelsLoading } =
     useOpenClawModelOptions();
 
-  const [defaults, setDefaults] = useState<OpenClawAgentsDefaults | null>(null);
-  const [primaryModel, setPrimaryModel] = useState("");
-  const [fallbacks, setFallbacks] = useState<string[]>([]);
-
-  // Extra known fields from agents.defaults
-  const [workspace, setWorkspace] = useState("");
-  const [timeout, setTimeout_] = useState("");
-  const [contextTokens, setContextTokens] = useState("");
-  const [maxConcurrent, setMaxConcurrent] = useState("");
-
-  useEffect(() => {
-    // agentsData is undefined while loading, null when config section is absent
-    if (agentsData === undefined) return;
-    setDefaults(agentsData);
-
-    if (agentsData) {
-      setPrimaryModel(agentsData.model?.primary ?? "");
-      setFallbacks(agentsData.model?.fallbacks ?? []);
-
-      // Extract known extra fields
-      setWorkspace(String(agentsData.workspace ?? ""));
-      setTimeout_(getOpenClawTimeoutInputValue(agentsData));
-      setContextTokens(String(agentsData.contextTokens ?? ""));
-      setMaxConcurrent(String(agentsData.maxConcurrent ?? ""));
-    } else {
-      setPrimaryModel("");
-      setFallbacks([]);
-      setWorkspace("");
-      setTimeout_("");
-      setContextTokens("");
-      setMaxConcurrent("");
-    }
-  }, [agentsData]);
+  const { form, setForm, externalChange, reload, markSaved } =
+    useEditableBuffer(agentsData, agentsToForm, EMPTY_AGENTS_FORM);
+  const {
+    defaults,
+    primaryModel,
+    fallbacks,
+    workspace,
+    timeout,
+    contextTokens,
+    maxConcurrent,
+  } = form;
+  const setField =
+    <K extends keyof AgentsForm>(key: K) =>
+    (value: AgentsForm[K]) =>
+      setForm((prev) => ({ ...prev, [key]: value }));
+  const setPrimaryModel = setField("primaryModel");
+  const setWorkspace = setField("workspace");
+  const setTimeout_ = setField("timeout");
+  const setContextTokens = setField("contextTokens");
+  const setMaxConcurrent = setField("maxConcurrent");
+  const setFallbacks = (update: (prev: string[]) => string[]) =>
+    setForm((prev) => ({ ...prev, fallbacks: update(prev.fallbacks) }));
+  const [errors, setErrors] = useState<
+    Partial<Record<keyof AgentsForm, string>>
+  >({});
 
   // Build primary options, including a "not in list" entry if current value is missing
   const primaryOptions = useMemo(() => {
@@ -127,7 +156,39 @@ const AgentsDefaultsPanel: React.FC = () => {
     });
   };
 
+  const validate = (): boolean => {
+    const next: Partial<Record<keyof AgentsForm, string>> = {};
+    const fallbackList = fallbacks.filter(Boolean);
+    if (!primaryModel && fallbackList.length > 0) {
+      next.primaryModel = t("openclaw.agents.primaryRequired", {
+        defaultValue: "Choose a primary model before adding fallbacks.",
+      });
+    }
+    const checkInt = (
+      key: "timeout" | "contextTokens" | "maxConcurrent",
+      min: number,
+    ) => {
+      const raw = form[key].trim();
+      if (!raw) return;
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < min) {
+        next[key] = t("openclaw.agents.positiveInteger", {
+          min,
+          defaultValue: "Enter a whole number of at least {{min}}.",
+        });
+      }
+    };
+    checkInt("timeout", 0);
+    checkInt("contextTokens", 1);
+    checkInt("maxConcurrent", 1);
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+
   const handleSave = async () => {
+    // Never persist an empty primary model or silently drop a mistyped
+    // number (FE-UI-36).
+    if (!validate()) return;
     try {
       // Preserve all unknown fields from original data
       const updated: OpenClawAgentsDefaults = { ...defaults };
@@ -140,8 +201,6 @@ const AgentsDefaultsPanel: React.FC = () => {
           primary: primaryModel,
           ...(fallbackList.length > 0 ? { fallbacks: fallbackList } : {}),
         };
-      } else if (fallbackList.length > 0) {
-        updated.model = { primary: "", fallbacks: fallbackList };
       }
 
       // Optional fields
@@ -170,6 +229,7 @@ const AgentsDefaultsPanel: React.FC = () => {
       else delete updated.maxConcurrent;
 
       await saveAgentsMutation.mutateAsync(updated);
+      markSaved();
       toast.success(t("openclaw.agents.saveSuccess"));
     } catch (error) {
       const detail = extractErrorMessage(error);
@@ -201,6 +261,8 @@ const AgentsDefaultsPanel: React.FC = () => {
       <p className="text-sm text-muted-foreground mb-6">
         {t("openclaw.agents.description")}
       </p>
+
+      {externalChange && <ExternalChangeAlert onReload={reload} />}
 
       {hasLegacyTimeout && (
         <Alert className="mb-4 border-amber-500/30 bg-amber-500/5">
@@ -260,9 +322,15 @@ const AgentsDefaultsPanel: React.FC = () => {
                 </SelectContent>
               </Select>
             )}
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("openclaw.agents.primaryModelHint")}
-            </p>
+            {errors.primaryModel ? (
+              <p className="text-xs text-destructive mt-1" role="alert">
+                {errors.primaryModel}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground mt-1">
+                {t("openclaw.agents.primaryModelHint")}
+              </p>
+            )}
           </div>
 
           {/* Fallback Models */}
@@ -310,6 +378,7 @@ const AgentsDefaultsPanel: React.FC = () => {
                       size="icon"
                       className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
                       onClick={() => handleRemoveFallback(index)}
+                      aria-label={t("common.delete")}
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>
@@ -360,11 +429,20 @@ const AgentsDefaultsPanel: React.FC = () => {
             </Label>
             <Input
               type="number"
+              min={0}
+              step={1}
               value={timeout}
               onChange={(e) => setTimeout_(e.target.value)}
               placeholder="300"
               className="font-mono text-xs"
+              aria-label={t("openclaw.agents.timeout")}
+              aria-invalid={!!errors.timeout}
             />
+            {errors.timeout && (
+              <p className="text-xs text-destructive mt-1" role="alert">
+                {errors.timeout}
+              </p>
+            )}
           </div>
 
           <div>
@@ -373,11 +451,20 @@ const AgentsDefaultsPanel: React.FC = () => {
             </Label>
             <Input
               type="number"
+              min={1}
+              step={1}
               value={contextTokens}
               onChange={(e) => setContextTokens(e.target.value)}
               placeholder="200000"
               className="font-mono text-xs"
+              aria-label={t("openclaw.agents.contextTokens")}
+              aria-invalid={!!errors.contextTokens}
             />
+            {errors.contextTokens && (
+              <p className="text-xs text-destructive mt-1" role="alert">
+                {errors.contextTokens}
+              </p>
+            )}
           </div>
 
           <div>
@@ -386,11 +473,20 @@ const AgentsDefaultsPanel: React.FC = () => {
             </Label>
             <Input
               type="number"
+              min={1}
+              step={1}
               value={maxConcurrent}
               onChange={(e) => setMaxConcurrent(e.target.value)}
               placeholder="4"
               className="font-mono text-xs"
+              aria-label={t("openclaw.agents.maxConcurrent")}
+              aria-invalid={!!errors.maxConcurrent}
             />
+            {errors.maxConcurrent && (
+              <p className="text-xs text-destructive mt-1" role="alert">
+                {errors.maxConcurrent}
+              </p>
+            )}
           </div>
         </div>
       </div>

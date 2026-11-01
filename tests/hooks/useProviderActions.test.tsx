@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useProviderActions } from "@/hooks/useProviderActions";
 import type { Provider, UsageScript } from "@/types";
+import { makeProvider } from "../factories";
+import { queryKeys } from "@/lib/query/keys";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -60,6 +62,7 @@ const settingsApiApplyMock = vi.fn();
 const openclawApiGetModelCatalogMock = vi.fn();
 const openclawApiGetDefaultModelMock = vi.fn();
 const openclawApiSetDefaultModelMock = vi.fn();
+const openclawApiSetModelCatalogMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   providersApi: {
@@ -79,6 +82,8 @@ vi.mock("@/lib/api", () => ({
       openclawApiGetDefaultModelMock(...args),
     setDefaultModel: (...args: unknown[]) =>
       openclawApiSetDefaultModelMock(...args),
+    setModelCatalog: (...args: unknown[]) =>
+      openclawApiSetModelCatalogMock(...args),
   },
 }));
 
@@ -97,13 +102,15 @@ function createWrapper() {
 }
 
 function createProvider(overrides: Partial<Provider> = {}): Provider {
-  return {
-    id: "provider-1",
-    name: "Test Provider",
-    settingsConfig: {},
-    category: "official",
-    ...overrides,
-  };
+  return makeProvider(
+    {
+      id: "provider-1",
+      name: "Test Provider",
+      category: "official",
+      ...overrides,
+    },
+    { emptyConfig: true },
+  );
 }
 
 beforeEach(() => {
@@ -118,6 +125,7 @@ beforeEach(() => {
   openclawApiGetModelCatalogMock.mockReset();
   openclawApiGetDefaultModelMock.mockReset();
   openclawApiSetDefaultModelMock.mockReset();
+  openclawApiSetModelCatalogMock.mockReset();
   toastSuccessMock.mockReset();
   toastErrorMock.mockReset();
   toastInfoMock.mockReset();
@@ -193,9 +201,36 @@ describe("useProviderActions", () => {
     expect(settingsApiGetMock).not.toHaveBeenCalled();
     expect(settingsApiApplyMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalledWith(
-      "切换成功，请重启客户端以生效",
+      "Switched successfully. Restart the client to apply changes.",
       { closeButton: true },
     );
+  });
+
+  it("offers Undo after a switch that switches back to the previous provider (FE-ARCH-17)", async () => {
+    switchProviderMutateAsync.mockResolvedValue(undefined);
+    const { wrapper, queryClient } = createWrapper();
+    queryClient.setQueryData(queryKeys.providers.byApp("claude"), {
+      providers: {},
+      currentProviderId: "old-one",
+    });
+    const provider = createProvider({ id: "new-one", category: "custom" });
+
+    const { result } = renderHook(() => useProviderActions("claude"), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.switchProvider(provider);
+    });
+
+    const options = toastSuccessMock.mock.calls[0]?.[1] as {
+      action?: { label: string; onClick: () => void };
+    };
+    expect(options.action?.label).toBe("Undo");
+    await act(async () => {
+      options.action?.onClick();
+      await Promise.resolve();
+    });
+    expect(switchProviderMutateAsync).toHaveBeenLastCalledWith("old-one");
   });
 
   it("warns but still switches providers that require proxy when proxy is not running", async () => {
@@ -457,7 +492,7 @@ describe("useProviderActions", () => {
     });
 
     expect(toastErrorMock).toHaveBeenCalledTimes(1);
-    expect(toastErrorMock.mock.calls[0]?.[0]).toBe("同步 Claude 插件失败");
+    expect(toastErrorMock.mock.calls[0]?.[0]).toBe("Sync Claude plugin failed");
   });
 
   it("handles mutation errors when plugin sync is skipped", async () => {
@@ -578,7 +613,9 @@ describe("useProviderActions", () => {
     });
 
     expect(toastErrorMock).toHaveBeenCalledTimes(1);
-    expect(toastErrorMock.mock.calls[0]?.[0]).toBe("用量查询配置保存失败");
+    expect(toastErrorMock.mock.calls[0]?.[0]).toBe(
+      "Failed to save usage query configuration",
+    );
   });
 
   it("propagates addProvider errors to caller", async () => {
@@ -681,4 +718,43 @@ it("clears loading flag when all mutations idle", () => {
   });
 
   expect(result.current.isLoading).toBe(false);
+});
+
+it("warns with a retry when OpenClaw model registration fails (FE-PROV-50)", async () => {
+  addProviderMutateAsync.mockResolvedValue(undefined);
+  openclawApiGetModelCatalogMock.mockResolvedValue({});
+  openclawApiSetModelCatalogMock
+    .mockRejectedValueOnce(new Error("catalog locked"))
+    .mockResolvedValueOnce(undefined);
+  openclawApiGetDefaultModelMock.mockResolvedValue({ primary: "x/y" });
+  const { wrapper } = createWrapper();
+  const { result } = renderHook(() => useProviderActions("openclaw"), {
+    wrapper,
+  });
+
+  await act(async () => {
+    await result.current.addProvider({
+      name: "Relay",
+      settingsConfig: {},
+      suggestedDefaults: {
+        model: { primary: "relay/m1" },
+        modelCatalog: { "relay/m1": { alias: "m1" } },
+      },
+    } as never);
+  });
+
+  expect(addProviderMutateAsync).toHaveBeenCalledTimes(1);
+  expect(toastWarningMock).toHaveBeenCalledTimes(1);
+  const [message, options] = toastWarningMock.mock.calls[0] as [
+    string,
+    { action: { onClick: () => void } },
+  ];
+  expect(message).toContain("catalog locked");
+
+  await act(async () => {
+    options.action.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(openclawApiSetModelCatalogMock).toHaveBeenCalledTimes(2);
+  expect(toastSuccessMock).toHaveBeenCalled();
 });

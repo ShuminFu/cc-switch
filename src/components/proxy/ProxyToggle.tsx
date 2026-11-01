@@ -11,6 +11,7 @@ import { useProxyStatus } from "@/hooks/useProxyStatus";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import type { AppId } from "@/lib/api";
+import { isLoopbackListenAddress } from "./listenAddress";
 
 interface ProxyToggleProps {
   className?: string;
@@ -60,13 +61,22 @@ export function ProxyToggle({ className, activeApp }: ProxyToggleProps) {
         defaultValue: `接管 ${appLabel} 的 Live 配置，让该应用请求走本地代理`,
       });
 
+  const exposedToNetwork =
+    isRunning && !!status?.address && !isLoopbackListenAddress(status.address);
+  const fullTooltip = exposedToNetwork
+    ? `${tooltipText}\n${t("proxy.takeover.tooltip.lanExposed", {
+        defaultValue:
+          "Listening on a network address: other devices need the access token",
+      })}`
+    : tooltipText;
+
   return (
     <div
       className={cn(
         "flex items-center gap-1 px-1.5 h-8 rounded-lg bg-muted/50 transition-all",
         className,
       )}
-      title={tooltipText}
+      title={fullTooltip}
     >
       {isPending ? (
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />

@@ -1,3 +1,4 @@
+import { loadCommonConfigSnippet } from "./commonConfigSource";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -7,7 +8,6 @@ import {
 } from "@/utils/providerConfigUtils";
 import { configApi } from "@/lib/api";
 
-const LEGACY_STORAGE_KEY = "cc-switch:common-config-snippet";
 const DEFAULT_COMMON_CONFIG_SNIPPET = `{
   "includeCoAuthoredBy": false
 }`;
@@ -69,35 +69,9 @@ export function useCommonConfigSnippet({
 
     const loadSnippet = async () => {
       try {
-        // 使用统一 API 加载
-        const snippet = await configApi.getCommonConfigSnippet("claude");
-
-        if (snippet && snippet.trim()) {
-          if (mounted) {
-            setCommonConfigSnippetState(snippet);
-          }
-        } else {
-          // 如果 config.json 中没有，尝试从 localStorage 迁移
-          if (typeof window !== "undefined") {
-            try {
-              const legacySnippet =
-                window.localStorage.getItem(LEGACY_STORAGE_KEY);
-              if (legacySnippet && legacySnippet.trim()) {
-                // 迁移到 config.json
-                await configApi.setCommonConfigSnippet("claude", legacySnippet);
-                if (mounted) {
-                  setCommonConfigSnippetState(legacySnippet);
-                }
-                // 清理 localStorage
-                window.localStorage.removeItem(LEGACY_STORAGE_KEY);
-                console.log(
-                  "[迁移] Claude 通用配置已从 localStorage 迁移到 config.json",
-                );
-              }
-            } catch (e) {
-              console.warn("[迁移] 从 localStorage 迁移失败:", e);
-            }
-          }
+        const snippet = await loadCommonConfigSnippet("claude");
+        if (snippet && mounted) {
+          setCommonConfigSnippetState(snippet);
         }
       } catch (error) {
         console.error("加载通用配置失败:", error);
@@ -258,7 +232,10 @@ export function useCommonConfigSnippet({
       }
 
       // 验证JSON格式
-      const validationError = validateJsonConfig(value, "通用配置片段");
+      const validationError = validateJsonConfig(
+        value,
+        t("providerForm.validation.fieldCommonConfigSnippet"),
+      );
       if (validationError) {
         setCommonConfigError(validationError);
       } else {
@@ -305,7 +282,7 @@ export function useCommonConfigSnippet({
         }, 0);
       }
     },
-    [commonConfigSnippet, settingsConfig, useCommonConfig, onConfigChange],
+    [commonConfigSnippet, settingsConfig, useCommonConfig, onConfigChange, t],
   );
 
   // 当配置变化时检查是否包含通用配置（但避免在通过通用配置更新时检查）
@@ -337,7 +314,10 @@ export function useCommonConfigSnippet({
       }
 
       // 验证 JSON 格式
-      const validationError = validateJsonConfig(extracted, "提取的配置");
+      const validationError = validateJsonConfig(
+        extracted,
+        t("providerForm.validation.fieldExtractedConfig"),
+      );
       if (validationError) {
         setCommonConfigError(validationError);
         return;

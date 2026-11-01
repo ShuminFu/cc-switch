@@ -12,13 +12,13 @@ use cc_switch_lib::{
 #[path = "support.rs"]
 mod support;
 use support::{
-    create_test_state, create_test_state_with_config, ensure_test_home, reset_test_fs, test_mutex,
+    create_disk_test_state_with_config, create_test_state, create_test_state_with_config,
+    ensure_test_home, TestEnv,
 };
 
 #[test]
 fn import_default_config_claude_persists_provider() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let settings_path = get_claude_settings_path();
@@ -39,7 +39,7 @@ fn import_default_config_claude_persists_provider() {
 
     let mut config = MultiAppConfig::default();
     config.ensure_app(&AppType::Claude);
-    let state = create_test_state_with_config(&config).expect("create test state");
+    let state = create_disk_test_state_with_config(&config).expect("create test state");
 
     import_default_config_test_hook(&state, AppType::Claude)
         .expect("import default config succeeds");
@@ -72,8 +72,7 @@ fn import_default_config_claude_persists_provider() {
 fn import_default_config_without_live_file_returns_error() {
     use support::create_test_state;
 
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");
@@ -106,8 +105,7 @@ fn import_default_config_without_live_file_returns_error() {
 
 #[test]
 fn import_mcp_from_claude_creates_config_and_enables_servers() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let mcp_path = get_claude_mcp_path();
@@ -126,7 +124,7 @@ fn import_mcp_from_claude_creates_config_and_enables_servers() {
     .expect("seed ~/.claude.json");
 
     let config = MultiAppConfig::default();
-    let state = create_test_state_with_config(&config).expect("create test state");
+    let state = create_disk_test_state_with_config(&config).expect("create test state");
 
     let changed = McpService::import_from_claude(&state).expect("import mcp from claude succeeds");
     assert!(
@@ -153,8 +151,7 @@ fn import_mcp_from_claude_creates_config_and_enables_servers() {
 
 #[test]
 fn import_mcp_from_codex_does_not_rewrite_codex_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let codex_dir = home.join(".codex");
@@ -186,8 +183,7 @@ command = "echo"
 
 #[test]
 fn import_mcp_from_claude_does_not_sync_existing_codex_enabled_server() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let codex_dir = home.join(".codex");
@@ -260,8 +256,7 @@ command = "echo"
 fn import_mcp_from_claude_invalid_json_preserves_state() {
     use support::create_test_state;
 
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let mcp_path = get_claude_mcp_path();
@@ -295,8 +290,7 @@ fn import_mcp_from_claude_invalid_json_preserves_state() {
 fn import_from_all_apps_reports_broken_app_but_imports_the_rest() {
     use support::create_test_state;
 
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     // 好的 ~/.claude.json：应正常导入
@@ -340,8 +334,7 @@ fn import_from_all_apps_reports_broken_app_but_imports_the_rest() {
 
 #[test]
 fn set_mcp_enabled_for_codex_writes_live_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     // 创建 Codex 配置目录和文件
@@ -412,8 +405,7 @@ fn set_mcp_enabled_for_codex_writes_live_config() {
 fn enabling_codex_mcp_skips_when_codex_dir_missing() {
     use support::create_test_state;
 
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     // 确认 Codex 配置目录不存在（模拟“未安装/未运行过 Codex CLI”）
@@ -460,10 +452,115 @@ fn enabling_codex_mcp_skips_when_codex_dir_missing() {
     );
 }
 
+/// CFG-05: invalid specs are rejected by `upsert_server` before the DB or any
+/// live config file changes.
+#[test]
+fn upsert_mcp_server_rejects_invalid_spec_before_any_write() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+    fs::create_dir_all(home.join(".claude")).expect("create ~/.claude dir");
+
+    let state = support::create_test_state().expect("create test state");
+    for spec in [
+        json!({"command": "echo", "args": ["ok", [1]]}),
+        json!({"command": "echo", "env": {"A": {"nested": 1}}}),
+        json!({"type": "http", "url": "file:///etc/passwd"}),
+        json!({"type": "websocket", "url": "https://example.com"}),
+    ] {
+        let result = McpService::upsert_server(
+            &state,
+            McpServer {
+                id: "bad".to_string(),
+                name: "bad".to_string(),
+                server: spec.clone(),
+                apps: McpApps {
+                    claude: true,
+                    ..McpApps::default()
+                },
+                description: None,
+                homepage: None,
+                docs: None,
+                tags: Vec::new(),
+            },
+        );
+        assert!(result.is_err(), "{spec} should be rejected");
+    }
+
+    assert!(
+        !state
+            .db
+            .get_all_mcp_servers()
+            .expect("list servers")
+            .contains_key("bad"),
+        "invalid server must not be stored"
+    );
+    assert!(
+        !get_claude_mcp_path().exists(),
+        "~/.claude.json must not be written for an invalid server"
+    );
+}
+
+#[test]
+fn upsert_mcp_server_failing_codex_write_leaves_claude_and_db_unchanged() {
+    let _env = TestEnv::new();
+    let home = ensure_test_home();
+    fs::create_dir_all(home.join(".claude")).expect("create ~/.claude dir");
+    let claude_json = get_claude_mcp_path();
+    fs::write(&claude_json, "{\n  \"mcpServers\": {}\n}\n").expect("seed ~/.claude.json");
+    let claude_before = fs::read_to_string(&claude_json).expect("read ~/.claude.json");
+
+    // A broken Codex config.toml makes the Codex projection fail.
+    let codex_config = cc_switch_lib::get_codex_config_path();
+    fs::create_dir_all(codex_config.parent().unwrap()).expect("create ~/.codex");
+    fs::write(&codex_config, "model = [unterminated").expect("seed broken config.toml");
+
+    let state = support::create_test_state().expect("create test state");
+    let result = McpService::upsert_server(
+        &state,
+        McpServer {
+            id: "echo".to_string(),
+            name: "echo".to_string(),
+            server: json!({ "type": "stdio", "command": "echo" }),
+            apps: McpApps {
+                claude: true,
+                codex: true,
+                ..McpApps::default()
+            },
+            description: None,
+            homepage: None,
+            docs: None,
+            tags: Vec::new(),
+        },
+    );
+    assert!(result.is_err(), "broken Codex config must fail the upsert");
+
+    assert!(
+        !state
+            .db
+            .get_all_mcp_servers()
+            .expect("list servers")
+            .contains_key("echo"),
+        "DB must not keep a half-applied server"
+    );
+    let claude_after: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&claude_json).expect("read ~/.claude.json"))
+            .expect("parse ~/.claude.json");
+    let claude_before: serde_json::Value =
+        serde_json::from_str(&claude_before).expect("parse seed");
+    assert_eq!(
+        claude_after, claude_before,
+        "Claude live config must be reverted when a later app fails"
+    );
+    assert_eq!(
+        fs::read_to_string(&codex_config).expect("read config.toml"),
+        "model = [unterminated",
+        "the broken Codex file is left untouched"
+    );
+}
+
 #[test]
 fn upsert_mcp_server_disabling_app_removes_from_claude_live_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     // 模拟 Claude 已安装/已初始化：存在 ~/.claude 目录
@@ -541,8 +638,7 @@ fn upsert_mcp_server_disabling_app_removes_from_claude_live_config() {
 
 #[test]
 fn import_mcp_from_multiple_apps_merges_enabled_flags() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     // 1) Claude: ~/.claude.json
@@ -586,8 +682,7 @@ command = "echo"
 
 #[test]
 fn import_mcp_from_gemini_sse_url_only_is_valid() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     // Gemini MCP 位于 ~/.gemini/settings.json
@@ -627,8 +722,7 @@ fn import_mcp_from_gemini_sse_url_only_is_valid() {
 fn enabling_gemini_mcp_skips_when_gemini_dir_missing() {
     use support::create_test_state;
 
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     // 确认 Gemini 配置目录不存在（模拟“未安装/未运行过 Gemini CLI”）
@@ -679,8 +773,7 @@ fn enabling_gemini_mcp_skips_when_gemini_dir_missing() {
 fn enabling_claude_mcp_skips_when_claude_config_absent() {
     use support::create_test_state;
 
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     // 确认 Claude 相关目录/文件都不存在（模拟“未安装/未运行过 Claude”）
@@ -733,8 +826,7 @@ fn enabling_claude_mcp_skips_when_claude_config_absent() {
 
 #[test]
 fn explicit_default_claude_dir_keeps_default_split_mcp_path() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
     let claude_dir = home.join(".claude");
     fs::create_dir_all(&claude_dir).expect("create explicit default claude dir");
@@ -789,8 +881,7 @@ fn explicit_default_claude_dir_keeps_default_split_mcp_path() {
 
 #[test]
 fn custom_claude_dir_writes_mcp_inside_config_dir() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
     let custom_dir = home.join("profiles").join(".claude");
     fs::create_dir_all(&custom_dir).expect("create custom claude dir");
@@ -846,8 +937,7 @@ fn custom_claude_dir_writes_mcp_inside_config_dir() {
 
 #[test]
 fn custom_claude_dir_sync_does_not_copy_default_profile() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
     let home_mcp_path = home.join(".claude.json");
     let default_profile = json!({
@@ -949,8 +1039,7 @@ fn custom_claude_dir_sync_does_not_copy_default_profile() {
 
 #[test]
 fn custom_claude_dir_read_only_mcp_queries_do_not_create_profile() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
     let home_mcp_path = home.join(".claude.json");
     fs::write(
@@ -1004,8 +1093,7 @@ fn custom_claude_dir_read_only_mcp_queries_do_not_create_profile() {
 
 #[test]
 fn sync_all_enabled_removes_known_disabled_but_preserves_unknown_live_entries() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let mcp_path = get_claude_mcp_path();

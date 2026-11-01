@@ -1,0 +1,28 @@
+[
+  {
+    "event": "message_start",
+    "data": {
+      "type": "message_start",
+      "message": {
+        "id": "resp_s4",
+        "type": "message",
+        "role": "assistant",
+        "model": "gpt-5",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0
+        }
+      }
+    }
+  },
+  {
+    "event": "error",
+    "data": {
+      "type": "error",
+      "error": {
+        "type": "server_error",
+        "message": "The model produced invalid content."
+      }
+    }
+  }
+]

@@ -17,7 +17,7 @@ impl Database {
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, AppError> {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn
-            .prepare("SELECT value FROM settings WHERE key = ?1")
+            .prepare_cached("SELECT value FROM settings WHERE key = ?1")
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let mut rows = stmt
@@ -47,12 +47,14 @@ impl Database {
 
     /// 设置值
     pub fn set_setting(&self, key: &str, value: &str) -> Result<(), AppError> {
+        // DB-28: every key belongs in the registry (scope decides sync).
+        if crate::database::setting_keys::lookup(key).is_none() {
+            log::warn!("settings key '{key}' is not registered in setting_keys.rs");
+        }
         let conn = lock_conn!(self.conn);
-        conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
-            params![key, value],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.prepare_cached("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)")
+            .and_then(|mut stmt| stmt.execute(params![key, value]))
+            .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 

@@ -97,15 +97,25 @@ pub fn should_rectify_thinking_signature(
         return true;
     }
 
-    // 场景7: 非法请求（与 CCH 对齐，按 invalid request 统一兜底）
-    if lower.contains("非法请求")
+    // 场景7: 非法请求 (PROXY-12)。只在同时提到 thinking / signature 时触发：
+    // "Invalid request: max_tokens exceeds..." 之类与 thinking 无关的 400 若触发，
+    // 会多一次计费请求并丢弃历史推理内容。
+    if (lower.contains("非法请求")
         || lower.contains("illegal request")
-        || lower.contains("invalid request")
+        || lower.contains("invalid request"))
+        && mentions_thinking_context(&lower)
     {
         return true;
     }
 
     false
+}
+
+/// Whether a lowercased error message refers to thinking blocks or signatures.
+fn mentions_thinking_context(lower: &str) -> bool {
+    ["thinking", "signature", "thought", "签名"]
+        .iter()
+        .any(|keyword| lower.contains(keyword))
 }
 
 /// 对 Anthropic 请求体做最小侵入整流
@@ -234,11 +244,6 @@ fn should_remove_top_level_thinking(body: &Value, messages: &[Value]) -> bool {
     last_assistant_content
         .iter()
         .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
-}
-
-/// 与 CCH 对齐：请求前不做 thinking type 主动改写。
-pub fn normalize_thinking_type(body: Value) -> Value {
-    body
 }
 
 #[cfg(test)]
@@ -522,13 +527,30 @@ mod tests {
             &enabled_config()
         ));
         assert!(should_rectify_thinking_signature(
-            Some("illegal request: tool_use block mismatch"),
+            Some("illegal request: thinking block was modified"),
             &enabled_config()
         ));
         assert!(should_rectify_thinking_signature(
-            Some("invalid request: malformed JSON"),
+            Some("invalid request: thinking block signature mismatch"),
             &enabled_config()
         ));
+    }
+
+    #[test]
+    fn test_unrelated_invalid_request_does_not_trigger() {
+        // PROXY-12: generic 400s must not strip the conversation's thinking context.
+        for message in [
+            "invalid request: malformed JSON",
+            "Invalid request: max_tokens too large",
+            "illegal request: tool_use block mismatch",
+            "非法请求：参数错误",
+            "invalid request body",
+        ] {
+            assert!(
+                !should_rectify_thinking_signature(Some(message), &enabled_config()),
+                "{message}"
+            );
+        }
     }
 
     #[test]
@@ -641,82 +663,5 @@ mod tests {
         assert_eq!(content[0]["type"], "text");
         assert!(content[0].get("signature").is_none());
         assert_eq!(body["thinking"]["type"], "adaptive");
-    }
-
-    // ==================== normalize_thinking_type 测试 ====================
-
-    #[test]
-    fn test_normalize_thinking_type_adaptive_unchanged() {
-        let body = json!({
-            "model": "claude-test",
-            "thinking": { "type": "adaptive" }
-        });
-
-        let result = normalize_thinking_type(body);
-
-        assert_eq!(result["thinking"]["type"], "adaptive");
-        assert!(result["thinking"].get("budget_tokens").is_none());
-    }
-
-    #[test]
-    fn test_normalize_thinking_type_enabled_unchanged() {
-        let body = json!({
-            "model": "claude-test",
-            "thinking": { "type": "enabled", "budget_tokens": 2048 }
-        });
-
-        let result = normalize_thinking_type(body);
-
-        assert_eq!(result["thinking"]["type"], "enabled");
-        assert_eq!(result["thinking"]["budget_tokens"], 2048);
-    }
-
-    #[test]
-    fn test_normalize_thinking_type_disabled_unchanged() {
-        let body = json!({
-            "model": "claude-test",
-            "thinking": { "type": "disabled" }
-        });
-
-        let result = normalize_thinking_type(body);
-
-        assert_eq!(result["thinking"]["type"], "disabled");
-    }
-
-    #[test]
-    fn test_normalize_thinking_type_preserves_budget() {
-        let body = json!({
-            "model": "claude-test",
-            "thinking": { "type": "adaptive", "budget_tokens": 5000 }
-        });
-
-        let result = normalize_thinking_type(body);
-
-        assert_eq!(result["thinking"]["type"], "adaptive");
-        assert_eq!(result["thinking"]["budget_tokens"], 5000);
-    }
-
-    #[test]
-    fn test_normalize_thinking_type_no_thinking() {
-        let body = json!({
-            "model": "claude-test"
-        });
-
-        let result = normalize_thinking_type(body);
-
-        assert!(result.get("thinking").is_none());
-    }
-
-    #[test]
-    fn test_normalize_thinking_type_unknown_unchanged() {
-        let body = json!({
-            "model": "claude-test",
-            "thinking": { "type": "unexpected", "budget_tokens": 100 }
-        });
-
-        let result = normalize_thinking_type(body);
-
-        assert_eq!(result["thinking"]["type"], "unexpected");
-        assert_eq!(result["thinking"]["budget_tokens"], 100);
     }
 }

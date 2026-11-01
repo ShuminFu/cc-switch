@@ -1,0 +1,18 @@
+{
+  "id": "chatcmpl-004",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "The answer is"
+    }
+  ],
+  "model": "gpt-4o-mini",
+  "stop_reason": "max_tokens",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 5,
+    "output_tokens": 3
+  }
+}

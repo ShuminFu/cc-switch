@@ -1,17 +1,21 @@
 //! 项目 Profile 管理命令
 
 use serde::Serialize;
-use tauri::{Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
+
+use super::{run_blocking_with_state, timed_blocking_with_state};
 
 use crate::database::Profile;
 use crate::services::profile::{ProfilePayload, ProfileScope, ProfileService};
 use crate::store::AppState;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileDto {
     pub id: String,
     pub name: String,
+    // ProfilePayload lives in services/profile.rs; typed as JSON in the bindings.
+    #[specta(type = serde_json::Value)]
     pub payload: ProfilePayload,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
@@ -40,15 +44,35 @@ impl From<Profile> for ProfileDto {
 }
 
 /// 每个分组当前激活的项目 id（未使用项目时为 null）
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CurrentProfileIds {
     pub claude: Option<String>,
     pub claude_desktop: Option<String>,
     pub codex: Option<String>,
+    pub gemini: Option<String>,
+    pub grokbuild: Option<String>,
+    pub opencode: Option<String>,
+    pub openclaw: Option<String>,
+    pub hermes: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+impl CurrentProfileIds {
+    fn slot_mut(&mut self, scope: ProfileScope) -> &mut Option<String> {
+        match scope {
+            ProfileScope::Claude => &mut self.claude,
+            ProfileScope::ClaudeDesktop => &mut self.claude_desktop,
+            ProfileScope::Codex => &mut self.codex,
+            ProfileScope::Gemini => &mut self.gemini,
+            ProfileScope::GrokBuild => &mut self.grokbuild,
+            ProfileScope::OpenCode => &mut self.opencode,
+            ProfileScope::OpenClaw => &mut self.openclaw,
+            ProfileScope::Hermes => &mut self.hermes,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfilesResponse {
     pub profiles: Vec<ProfileDto>,
@@ -66,6 +90,17 @@ pub fn emit_profile_apply_events(
     profile_id: &str,
     scope: ProfileScope,
 ) {
+    emit_profile_events(app, state, Some(profile_id), scope);
+}
+
+/// 与 [`emit_profile_apply_events`] 相同；`profile_id = None` 表示该分组已切到
+/// "不使用项目"（前端据 profileId=null 刷新）。
+pub fn emit_profile_events(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    profile_id: Option<&str>,
+    scope: ProfileScope,
+) {
     for app_type in scope.apps().iter() {
         let app_str = app_type.as_str();
         let (proxy_enabled, auto_failover_enabled) = state.db.get_proxy_flags_sync(app_str);
@@ -79,12 +114,12 @@ pub fn emit_profile_apply_events(
             "autoFailoverEnabled": auto_failover_enabled,
             "providerId": provider_id,
         });
-        if let Err(e) = app.emit("provider-switched", event_data) {
+        if let Err(e) = app.emit(crate::events::PROVIDER_SWITCHED, event_data) {
             log::error!("发射 provider-switched 事件失败: {e}");
         }
     }
     if let Err(e) = app.emit(
-        "profile-applied",
+        crate::events::PROFILE_APPLIED,
         serde_json::json!({ "profileId": profile_id, "scope": scope.as_str() }),
     ) {
         log::error!("发射 profile-applied 事件失败: {e}");
@@ -92,23 +127,15 @@ pub fn emit_profile_apply_events(
     crate::tray::refresh_tray_menu(app);
 }
 
-#[tauri::command]
-pub fn list_profiles(state: State<'_, AppState>) -> Result<ProfilesResponse, String> {
-    let profiles = ProfileService::list(&state).map_err(|e| e.to_string())?;
-    let current_ids = CurrentProfileIds {
-        claude: state
+fn list_profiles_inner(state: &AppState) -> Result<ProfilesResponse, String> {
+    let profiles = ProfileService::list(state).map_err(|e| e.to_string())?;
+    let mut current_ids = CurrentProfileIds::default();
+    for scope in ProfileScope::ALL {
+        *current_ids.slot_mut(scope) = state
             .db
-            .get_current_profile_id(ProfileScope::Claude.as_str())
-            .map_err(|e| e.to_string())?,
-        claude_desktop: state
-            .db
-            .get_current_profile_id(ProfileScope::ClaudeDesktop.as_str())
-            .map_err(|e| e.to_string())?,
-        codex: state
-            .db
-            .get_current_profile_id(ProfileScope::Codex.as_str())
-            .map_err(|e| e.to_string())?,
-    };
+            .get_current_profile_id(scope.as_str())
+            .map_err(|e| e.to_string())?;
+    }
     Ok(ProfilesResponse {
         profiles: profiles.into_iter().map(ProfileDto::from).collect(),
         current_ids,
@@ -116,20 +143,31 @@ pub fn list_profiles(state: State<'_, AppState>) -> Result<ProfilesResponse, Str
 }
 
 #[tauri::command]
-pub fn create_profile(
-    state: State<'_, AppState>,
+#[specta::specta]
+pub async fn list_profiles(handle: AppHandle) -> Result<ProfilesResponse, String> {
+    timed_blocking_with_state("list_profiles", handle, list_profiles_inner).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn create_profile(
+    handle: AppHandle,
     name: String,
     scope: String,
 ) -> Result<ProfileDto, String> {
     let scope = ProfileScope::parse(&scope).map_err(|e| e.to_string())?;
-    ProfileService::create(&state, &name, scope)
-        .map(ProfileDto::from)
-        .map_err(|e| e.to_string())
+    timed_blocking_with_state("create_profile", handle, move |state| {
+        ProfileService::create(state, &name, scope)
+            .map(ProfileDto::from)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn update_profile(
-    state: State<'_, AppState>,
+#[specta::specta]
+pub async fn update_profile(
+    handle: AppHandle,
     id: String,
     name: Option<String>,
     resnapshot: Option<bool>,
@@ -139,57 +177,101 @@ pub fn update_profile(
         .map(|s| ProfileScope::parse(&s))
         .transpose()
         .map_err(|e| e.to_string())?;
-    ProfileService::update(&state, &id, name, resnapshot.unwrap_or(false), scope)
-        .map(ProfileDto::from)
-        .map_err(|e| e.to_string())
+    timed_blocking_with_state("update_profile", handle, move |state| {
+        ProfileService::update(state, &id, name, resnapshot.unwrap_or(false), scope)
+            .map(ProfileDto::from)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn delete_profile(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    ProfileService::delete(&state, &id).map_err(|e| e.to_string())
+#[specta::specta]
+pub async fn delete_profile(handle: AppHandle, id: String) -> Result<(), String> {
+    timed_blocking_with_state("delete_profile", handle, move |state| {
+        ProfileService::delete(state, &id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
+/// "不使用项目"：清除分组的当前项目；若首次应用项目前拍过基线，则恢复该基线
+/// （PRODUCT-68），返回 warnings。
 #[tauri::command]
-pub fn clear_current_profile(state: State<'_, AppState>, scope: String) -> Result<(), String> {
-    let scope = ProfileScope::parse(&scope).map_err(|e| e.to_string())?;
-    state
-        .db
-        .set_current_profile_id(scope.as_str(), None)
-        .map_err(|e| e.to_string())
-}
-
-/// 应用项目快照（只作用于发起页所属分组内的应用）。
-///
-/// 注意：必须保持同步命令（跑在 Tauri 线程池）——`ProviderService::switch`
-/// 内部使用 block_on 获取切换锁，放进 async 命令会在运行时线程上 panic。
-#[tauri::command]
-pub fn apply_profile(
+#[specta::specta]
+pub async fn clear_current_profile(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    id: String,
     scope: String,
 ) -> Result<Vec<String>, String> {
     let scope = ProfileScope::parse(&scope).map_err(|e| e.to_string())?;
     let (warnings, should_stop_proxy) =
-        ProfileService::apply(&state, &id, scope).map_err(|e| e.to_string())?;
+        timed_blocking_with_state("clear_current_profile", app.clone(), move |state| {
+            ProfileService::clear_current(state, scope).map_err(|e| e.to_string())
+        })
+        .await?;
+    finish_profile_change(app, None, vec![scope], should_stop_proxy).await;
+    Ok(warnings)
+}
+
+/// 应用项目快照（只作用于发起页所属分组内的应用）。
+///
+/// 应用过程会写多份 live 文件并可能等待代理的按应用切换锁，整体在阻塞
+/// 线程池执行（`ProviderService` 内部通过 `block_on_async` 安全地等待代理
+/// future），不会占用 UI 线程或 tokio worker。
+#[tauri::command]
+#[specta::specta]
+pub async fn apply_profile(
+    app: tauri::AppHandle,
+    id: String,
+    scope: String,
+) -> Result<Vec<String>, String> {
+    let scope = ProfileScope::parse(&scope).map_err(|e| e.to_string())?;
+    let profile_id = id.clone();
+    let (warnings, should_stop_proxy) =
+        timed_blocking_with_state("apply_profile", app.clone(), move |state| {
+            ProfileService::apply(state, &profile_id, scope).map_err(|e| e.to_string())
+        })
+        .await?;
+
+    finish_profile_change(app, Some(id), vec![scope], should_stop_proxy).await;
+    Ok(warnings)
+}
+
+/// 项目应用 / 清除后的统一收尾：必要时停止代理，然后为每个分组发事件并刷新托盘。
+///
+/// 停止代理可能等待服务端退出，放到后台执行，停止后再补发事件刷新 UI
+/// （与托盘入口的行为一致）；否则直接在阻塞线程池发事件（事件发射与托盘
+/// 重建本身也会读 DB / settings）。
+pub(crate) async fn finish_profile_change(
+    app: tauri::AppHandle,
+    profile_id: Option<String>,
+    scopes: Vec<ProfileScope>,
+    should_stop_proxy: bool,
+) {
+    if scopes.is_empty() {
+        return;
+    }
+    let emit = move |app_handle: tauri::AppHandle| async move {
+        let handle_for_events = app_handle.clone();
+        let _ = run_blocking_with_state(app_handle, move |state| -> Result<(), String> {
+            for scope in scopes {
+                emit_profile_events(&handle_for_events, state, profile_id.as_deref(), scope);
+            }
+            Ok(())
+        })
+        .await;
+    };
 
     if should_stop_proxy {
-        // sync 命令线程没有 Tokio runtime，无法直接 await stop()；
-        // 把停止服务放到 Tauri async runtime，停止后再补发事件刷新 UI。
         let app_handle = app.clone();
-        let profile_id = id.clone();
-        let proxy_service = state.proxy_service.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(e) = proxy_service.stop().await {
-                log::warn!("切换项目后停止代理服务失败: {e}");
-            }
             if let Some(app_state) = app_handle.try_state::<AppState>() {
-                emit_profile_apply_events(&app_handle, app_state.inner(), &profile_id, scope);
+                if let Err(e) = app_state.proxy_service.stop().await {
+                    log::warn!("切换项目后停止代理服务失败: {e}");
+                }
             }
+            emit(app_handle).await;
         });
     } else {
-        emit_profile_apply_events(&app, &state, &id, scope);
+        emit(app).await;
     }
-
-    Ok(warnings)
 }

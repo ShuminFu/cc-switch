@@ -41,13 +41,12 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useReadOmoLocalFile, useReadOmoSlimLocalFile } from "@/lib/query/omo";
+import { type OmoAgentDef, type OmoCategoryDef } from "@/types/omo";
 import {
   OMO_BUILTIN_AGENTS,
   OMO_BUILTIN_CATEGORIES,
   OMO_SLIM_BUILTIN_AGENTS,
-  type OmoAgentDef,
-  type OmoCategoryDef,
-} from "@/types/omo";
+} from "@/config/omo";
 
 const ADVANCED_PLACEHOLDER = `{
   "temperature": 0.5,
@@ -251,6 +250,49 @@ function collectCustomModels(
   return customs;
 }
 
+/**
+ * Reconcile the locally displayed custom rows with the (store-derived) rows.
+ *
+ * Rows whose key exists in the store are refreshed from it; draft rows that
+ * are not persisted yet (no key or no model, which `mergeCustomModelsIntoStore`
+ * intentionally does not write) are kept so that an unrelated store change
+ * (e.g. picking a builtin agent's model) does not wipe a half-filled row.
+ * Complete rows missing from the store were removed externally and are
+ * dropped. Store rows not shown yet are appended (FE-PROV-06).
+ */
+export function reconcileCustomModels(
+  prev: CustomModelItem[],
+  store: Record<string, Record<string, unknown>>,
+  builtinKeys: Set<string>,
+): CustomModelItem[] {
+  const fromStore = collectCustomModels(store, builtinKeys);
+  const storeByKey = new Map(fromStore.map((item) => [item.key, item]));
+  const used = new Set<string>();
+  const next: CustomModelItem[] = [];
+
+  for (const row of prev) {
+    const key = row.key.trim();
+    const storeRow = key ? storeByKey.get(key) : undefined;
+    if (storeRow && !used.has(key)) {
+      used.add(key);
+      next.push(storeRow);
+      continue;
+    }
+    const isDraft = !key || !row.model.trim();
+    if (isDraft && !(key && used.has(key))) {
+      next.push(row);
+    }
+  }
+
+  for (const item of fromStore) {
+    if (!used.has(item.key)) {
+      next.push(item);
+    }
+  }
+
+  return next;
+}
+
 export function mergeCustomModelsIntoStore(
   store: Record<string, Record<string, unknown>>,
   builtinKeys: Set<string>,
@@ -301,6 +343,51 @@ export function mergeCustomModelsIntoStore(
   return updated;
 }
 
+/**
+ * Collapsible section header. Declared at module scope so React keeps the
+ * same component type across renders instead of remounting the headers on
+ * every keystroke (FE-PROV-25).
+ */
+function SectionHeader({
+  title,
+  isOpen,
+  onToggle,
+  badge,
+  action,
+}: {
+  title: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  badge?: React.ReactNode | string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="flex items-center justify-between w-full py-2 px-3 text-left"
+      onClick={onToggle}
+      aria-expanded={isOpen}
+    >
+      <div className="flex items-center gap-2">
+        {isOpen ? (
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        )}
+        <Label className="text-sm font-semibold cursor-pointer">{title}</Label>
+        {typeof badge === "string" ? (
+          <Badge variant="outline" className="text-[10px] h-5">
+            {badge}
+          </Badge>
+        ) : (
+          badge
+        )}
+      </div>
+      {action && <div onClick={(e) => e.stopPropagation()}>{action}</div>}
+    </button>
+  );
+}
+
 export function OmoFormFields({
   modelOptions,
   modelVariantsMap = {},
@@ -349,11 +436,15 @@ export function OmoFormFields({
   );
 
   useEffect(() => {
-    setCustomAgents(collectCustomModels(agents, builtinAgentKeys));
-  }, [agents]);
+    setCustomAgents((prev) =>
+      reconcileCustomModels(prev, agents, builtinAgentKeys),
+    );
+  }, [agents, builtinAgentKeys]);
 
   useEffect(() => {
-    setCustomCategories(collectCustomModels(categories, BUILTIN_CATEGORY_KEYS));
+    setCustomCategories((prev) =>
+      reconcileCustomModels(prev, categories, BUILTIN_CATEGORY_KEYS),
+    );
   }, [categories]);
 
   const syncCustomAgents = useCallback(
@@ -880,7 +971,10 @@ export function OmoFormFields({
       );
     }
   }, [
+    isSlim,
     readLocalFile,
+    readSlimLocalFile,
+    builtinAgentKeys,
     onAgentsChange,
     onCategoriesChange,
     onOtherFieldsStrChange,
@@ -1029,6 +1123,7 @@ export function OmoFormFields({
             type="button"
             variant="ghost"
             size="icon"
+            aria-label={t("common.delete", { defaultValue: "Delete" })}
             className="h-7 w-7 shrink-0 text-destructive"
             onClick={() => {
               const next = customs.filter((_, idx) => idx !== index);
@@ -1053,43 +1148,6 @@ export function OmoFormFields({
       </div>
     );
   };
-
-  const SectionHeader = ({
-    title,
-    isOpen,
-    onToggle,
-    badge,
-    action,
-  }: {
-    title: string;
-    isOpen: boolean;
-    onToggle: () => void;
-    badge?: React.ReactNode | string;
-    action?: React.ReactNode;
-  }) => (
-    <button
-      type="button"
-      className="flex items-center justify-between w-full py-2 px-3 text-left"
-      onClick={onToggle}
-    >
-      <div className="flex items-center gap-2">
-        {isOpen ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        )}
-        <Label className="text-sm font-semibold cursor-pointer">{title}</Label>
-        {typeof badge === "string" ? (
-          <Badge variant="outline" className="text-[10px] h-5">
-            {badge}
-          </Badge>
-        ) : (
-          badge
-        )}
-      </div>
-      {action && <div onClick={(e) => e.stopPropagation()}>{action}</div>}
-    </button>
-  );
 
   const renderModelSection = ({
     title,

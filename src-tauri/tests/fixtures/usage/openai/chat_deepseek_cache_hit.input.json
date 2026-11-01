@@ -1,0 +1,12 @@
+{
+  "id": "chatcmpl_d",
+  "object": "chat.completion",
+  "model": "deepseek-reasoner",
+  "usage": {
+    "prompt_tokens": 500,
+    "completion_tokens": 80,
+    "total_tokens": 580,
+    "prompt_cache_hit_tokens": 300,
+    "prompt_cache_miss_tokens": 200
+  }
+}

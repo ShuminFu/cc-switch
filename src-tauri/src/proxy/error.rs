@@ -8,72 +8,100 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
-    #[error("服务器已在运行")]
+    #[error("proxy server is already running")]
     AlreadyRunning,
 
-    #[error("服务器未运行")]
+    #[error("proxy server is not running")]
     NotRunning,
 
-    #[error("地址绑定失败: {0}")]
+    #[error("failed to bind the listen address: {0}")]
     BindFailed(String),
 
-    #[error("停止超时")]
-    StopTimeout,
-
-    #[error("停止失败: {0}")]
+    #[error("failed to stop the proxy server: {0}")]
     StopFailed(String),
 
-    #[error("请求转发失败: {0}")]
+    #[error("failed to forward the request upstream: {0}")]
     ForwardFailed(String),
 
-    #[error("无可用的Provider")]
+    #[error("no provider is available for this request")]
     NoAvailableProvider,
 
-    #[error("所有供应商已熔断，无可用渠道")]
+    #[error("all providers are temporarily unavailable (circuit breakers open)")]
     AllProvidersCircuitOpen,
 
-    #[error("未配置供应商")]
+    #[error("no provider is configured for this app")]
     NoProvidersConfigured,
 
     #[allow(dead_code)]
-    #[error("Provider不健康: {0}")]
+    #[error("provider is unhealthy: {0}")]
     ProviderUnhealthy(String),
 
-    #[error("上游错误 (状态码 {status}): {body:?}")]
+    #[error("upstream returned HTTP {status}: {body:?}")]
     UpstreamError { status: u16, body: Option<String> },
 
-    #[error("超过最大重试次数")]
+    #[error("maximum number of attempts exceeded")]
     MaxRetriesExceeded,
 
-    #[error("数据库错误: {0}")]
+    #[error("database error: {0}")]
     DatabaseError(String),
 
-    #[error("配置错误: {0}")]
+    #[error("provider configuration error: {0}")]
     ConfigError(String),
 
-    #[allow(dead_code)]
-    #[error("格式转换错误: {0}")]
+    #[error("protocol conversion error: {0}")]
     TransformError(String),
 
-    #[allow(dead_code)]
-    #[error("无效的请求: {0}")]
+    #[error("invalid request: {0}")]
     InvalidRequest(String),
 
-    #[error("超时: {0}")]
+    #[error("timeout: {0}")]
     Timeout(String),
 
     /// 流式响应空闲超时
     #[allow(dead_code)]
-    #[error("流式响应空闲超时: {0}秒无数据")]
+    #[error("stream idle timeout: no data for {0}s")]
     StreamIdleTimeout(u64),
 
     /// 认证错误
-    #[error("认证失败: {0}")]
+    #[error("authentication failed: {0}")]
     AuthError(String),
 
-    #[allow(dead_code)]
-    #[error("内部错误: {0}")]
+    #[error("internal proxy error: {0}")]
     Internal(String),
+}
+
+impl ProxyError {
+    /// Stable machine-readable error code used in proxy error bodies.
+    pub fn code(&self) -> &'static str {
+        match self {
+            ProxyError::ForwardFailed(_) => "cc_switch_forward_failed",
+            ProxyError::Timeout(_) | ProxyError::StreamIdleTimeout(_) => "cc_switch_timeout",
+            ProxyError::NoAvailableProvider => "cc_switch_no_available_provider",
+            ProxyError::AllProvidersCircuitOpen => "cc_switch_all_providers_circuit_open",
+            ProxyError::NoProvidersConfigured => "cc_switch_no_providers_configured",
+            ProxyError::MaxRetriesExceeded => "cc_switch_max_retries_exceeded",
+            ProxyError::ProviderUnhealthy(_) => "cc_switch_provider_unhealthy",
+            ProxyError::ConfigError(_) => "cc_switch_config_error",
+            ProxyError::TransformError(_) => "cc_switch_transform_error",
+            ProxyError::InvalidRequest(_) => "cc_switch_invalid_request",
+            ProxyError::AuthError(_) => "cc_switch_auth_error",
+            ProxyError::UpstreamError { .. } => "cc_switch_upstream_error",
+            ProxyError::DatabaseError(_) => "cc_switch_database_error",
+            ProxyError::Internal(_) => "cc_switch_internal_error",
+            ProxyError::AlreadyRunning
+            | ProxyError::NotRunning
+            | ProxyError::BindFailed(_)
+            | ProxyError::StopFailed(_) => "cc_switch_proxy_error",
+        }
+    }
+
+    /// Map a client request-body JSON parse failure to a 400 client error.
+    ///
+    /// The serde error carries line/column, which is enough for the client to
+    /// locate the problem. Body *read* failures stay `Internal`.
+    pub fn invalid_request_json(err: &serde_json::Error) -> Self {
+        ProxyError::InvalidRequest(format!("Request body is not valid JSON: {err}"))
+    }
 }
 
 impl IntoResponse for ProxyError {
@@ -112,57 +140,22 @@ impl IntoResponse for ProxyError {
                 (http_status, error_body)
             }
             _ => {
-                let (http_status, message) = match &self {
-                    ProxyError::AlreadyRunning => (StatusCode::CONFLICT, self.to_string()),
-                    ProxyError::NotRunning => (StatusCode::SERVICE_UNAVAILABLE, self.to_string()),
-                    ProxyError::BindFailed(_) => {
-                        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
-                    }
-                    ProxyError::StopTimeout => {
-                        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
-                    }
-                    ProxyError::StopFailed(_) => {
-                        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
-                    }
-                    ProxyError::ForwardFailed(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
-                    ProxyError::NoAvailableProvider => {
-                        (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
-                    }
-                    ProxyError::AllProvidersCircuitOpen => {
-                        (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
-                    }
-                    ProxyError::NoProvidersConfigured => {
-                        (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
-                    }
-                    ProxyError::ProviderUnhealthy(_) => {
-                        (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
-                    }
-                    ProxyError::MaxRetriesExceeded => {
-                        (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
-                    }
-                    ProxyError::DatabaseError(_) => {
-                        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
-                    }
-                    ProxyError::ConfigError(_) => (StatusCode::BAD_REQUEST, self.to_string()),
-                    ProxyError::TransformError(_) => {
-                        (StatusCode::UNPROCESSABLE_ENTITY, self.to_string())
-                    }
-                    ProxyError::InvalidRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
-                    ProxyError::Timeout(_) => (StatusCode::GATEWAY_TIMEOUT, self.to_string()),
-                    ProxyError::StreamIdleTimeout(_) => {
-                        (StatusCode::GATEWAY_TIMEOUT, self.to_string())
-                    }
-                    ProxyError::AuthError(_) => (StatusCode::UNAUTHORIZED, self.to_string()),
-                    ProxyError::Internal(_) => {
-                        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
-                    }
-                    ProxyError::UpstreamError { .. } => unreachable!(),
-                };
+                // One status table for responses and logs (PROXY-28).
+                let http_status = StatusCode::from_u16(
+                    crate::proxy::error_mapper::map_proxy_error_to_status(&self),
+                )
+                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+                let message = self.to_string();
 
+                // Anthropic-style envelope (`type: "error"`) with a stable
+                // machine-readable `code` so clients and the error-rate statistics
+                // can tell proxy-side failures from client mistakes.
                 let error_body = json!({
+                    "type": "error",
                     "error": {
                         "message": message,
                         "type": "proxy_error",
+                        "code": self.code(),
                     }
                 });
 
@@ -185,22 +178,72 @@ pub enum ErrorCategory {
     ClientAbort, // 客户端主动中断
 }
 
-/// 判断错误是否可重试
-#[allow(dead_code)]
-pub fn categorize_error(error: &reqwest::Error) -> ErrorCategory {
-    if error.is_timeout() || error.is_connect() {
-        return ErrorCategory::Retryable;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http_body_util::BodyExt;
+
+    #[tokio::test]
+    async fn proxy_error_body_is_anthropic_style_with_code() {
+        let response = ProxyError::InvalidRequest("bad".to_string()).into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["type"], "error");
+        assert_eq!(body["error"]["type"], "proxy_error");
+        assert_eq!(body["error"]["code"], "cc_switch_invalid_request");
     }
 
-    if let Some(status) = error.status() {
-        if status.is_server_error() {
-            ErrorCategory::Retryable
-        } else if status.is_client_error() {
-            ErrorCategory::NonRetryable
-        } else {
-            ErrorCategory::Retryable
+    #[test]
+    fn invalid_request_json_keeps_serde_position() {
+        let err = serde_json::from_slice::<serde_json::Value>(b"{").unwrap_err();
+        let proxy_error = ProxyError::invalid_request_json(&err);
+        assert!(matches!(proxy_error, ProxyError::InvalidRequest(_)));
+        assert!(proxy_error.to_string().contains("column"));
+    }
+
+    #[test]
+    fn display_strings_are_ascii_for_api_clients() {
+        // PROXY-31: these messages reach API clients verbatim.
+        let errors = [
+            ProxyError::AlreadyRunning,
+            ProxyError::NotRunning,
+            ProxyError::BindFailed("x".into()),
+            ProxyError::StopFailed("x".into()),
+            ProxyError::ForwardFailed("x".into()),
+            ProxyError::NoAvailableProvider,
+            ProxyError::AllProvidersCircuitOpen,
+            ProxyError::NoProvidersConfigured,
+            ProxyError::ProviderUnhealthy("x".into()),
+            ProxyError::UpstreamError {
+                status: 500,
+                body: None,
+            },
+            ProxyError::MaxRetriesExceeded,
+            ProxyError::DatabaseError("x".into()),
+            ProxyError::ConfigError("x".into()),
+            ProxyError::TransformError("x".into()),
+            ProxyError::InvalidRequest("x".into()),
+            ProxyError::Timeout("x".into()),
+            ProxyError::StreamIdleTimeout(5),
+            ProxyError::AuthError("x".into()),
+            ProxyError::Internal("x".into()),
+        ];
+        for error in errors {
+            assert!(error.to_string().is_ascii(), "{error}");
+            assert!(error.code().starts_with("cc_switch_"));
         }
-    } else {
-        ErrorCategory::Retryable
+    }
+
+    #[tokio::test]
+    async fn messages_route_error_body_carries_status_and_code() {
+        let response = ProxyError::AllProvidersCircuitOpen.into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body["error"]["code"],
+            "cc_switch_all_providers_circuit_open"
+        );
     }
 }

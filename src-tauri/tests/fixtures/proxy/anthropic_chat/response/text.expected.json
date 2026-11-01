@@ -1,0 +1,19 @@
+{
+  "id": "chatcmpl-001",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Au revoir !"
+    }
+  ],
+  "model": "gpt-4o-2024-08-06",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 15,
+    "output_tokens": 4,
+    "cache_read_input_tokens": 10
+  }
+}

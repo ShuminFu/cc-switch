@@ -1,0 +1,8 @@
+{
+  "id": "chatcmpl_e",
+  "object": "chat.completion",
+  "model": "m",
+  "usage": {
+    "prompt_tokens": 5
+  }
+}

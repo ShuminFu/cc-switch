@@ -60,12 +60,15 @@ const collectTemplatePaths = (
 /**
  * 根据路径获取值
  */
-const getValueAtPath = (source: any, path: TemplatePath) => {
-  return path.reduce<any>((acc, key) => {
-    if (acc === undefined || acc === null) {
+/** A JSON container indexed by object key or array index. */
+type JsonContainer = Record<string | number, unknown>;
+
+const getValueAtPath = (source: unknown, path: TemplatePath): unknown => {
+  return path.reduce<unknown>((acc, key) => {
+    if (acc === undefined || acc === null || typeof acc !== "object") {
       return undefined;
     }
-    return acc[key as keyof typeof acc];
+    return (acc as JsonContainer)[key];
   }, source);
 };
 
@@ -73,40 +76,40 @@ const getValueAtPath = (source: any, path: TemplatePath) => {
  * 根据路径设置值
  */
 const setValueAtPath = (
-  target: any,
+  target: unknown,
   path: TemplatePath,
   value: unknown,
-): any => {
+): unknown => {
   if (path.length === 0) {
     return value;
   }
 
-  let current = target;
+  let current = target as JsonContainer;
 
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i];
     const nextKey = path[i + 1];
     const isNextIndex = typeof nextKey === "number";
 
-    if (current[key as keyof typeof current] === undefined) {
-      current[key as keyof typeof current] = isNextIndex ? [] : {};
+    if (current[key] === undefined) {
+      current[key] = isNextIndex ? [] : {};
     } else {
-      const currentValue = current[key as keyof typeof current];
+      const currentValue = current[key];
       if (isNextIndex && !Array.isArray(currentValue)) {
-        current[key as keyof typeof current] = [];
+        current[key] = [];
       } else if (
         !isNextIndex &&
         (typeof currentValue !== "object" || currentValue === null)
       ) {
-        current[key as keyof typeof current] = {};
+        current[key] = {};
       }
     }
 
-    current = current[key as keyof typeof current];
+    current = current[key] as JsonContainer;
   }
 
   const finalKey = path[path.length - 1];
-  current[finalKey as keyof typeof current] = value;
+  current[finalKey] = value;
   return target;
 };
 
@@ -114,7 +117,7 @@ const setValueAtPath = (
  * 应用模板值到配置字符串（只更新模板占位符所在的字段）
  */
 const applyTemplateValuesToConfigString = (
-  presetConfig: any,
+  presetConfig: unknown,
   currentConfigString: string,
   values: TemplateValueMap,
 ) => {
@@ -130,7 +133,7 @@ const applyTemplateValuesToConfigString = (
     const parsedConfig = currentConfigString.trim()
       ? JSON.parse(currentConfigString)
       : {};
-    let targetConfig: any;
+    let targetConfig: unknown;
     if (Array.isArray(parsedConfig)) {
       targetConfig = [...parsedConfig];
     } else if (parsedConfig && typeof parsedConfig === "object") {

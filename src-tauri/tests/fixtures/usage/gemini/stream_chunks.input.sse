@@ -1,0 +1,4 @@
+data: {"modelVersion": "gemini-2.5-pro", "candidates": [{"content": {"parts": [{"text": "a"}]}}], "usageMetadata": {"promptTokenCount": 80, "totalTokenCount": 81}}
+
+data: {"modelVersion": "gemini-2.5-pro", "candidates": [{"content": {"parts": [{"text": "b"}]}}], "usageMetadata": {"promptTokenCount": 80, "candidatesTokenCount": 9, "thoughtsTokenCount": 4, "cachedContentTokenCount": 16, "totalTokenCount": 93}}
+

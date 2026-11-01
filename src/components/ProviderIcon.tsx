@@ -17,6 +17,34 @@ interface ProviderIconProps {
   showFallback?: boolean; // 是否显示 fallback
 }
 
+const svgDataUrl = (svg: string) =>
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+
+/** Neutral colour for `currentColor` parts of multi-colour icons. */
+const MIXED_ICON_FALLBACK_COLOR = "#8a8a8a";
+
+/**
+ * How to draw a bundled SVG icon without inline markup: as a mask when it is
+ * drawn only in `currentColor` (so it follows the CSS text colour), otherwise
+ * as an image, with any `currentColor` parts resolved to `color`.
+ */
+export function svgIconRendering(
+  svg: string,
+  color?: string,
+): { kind: "mask" | "image"; src: string } {
+  const usesCurrentColor = svg.includes("currentColor");
+  const hasOwnColors = /(?:fill|stroke|stop-color)\s*[=:]\s*"?#|url\(#/.test(
+    svg,
+  );
+  if (usesCurrentColor && !hasOwnColors) {
+    return { kind: "mask", src: svgDataUrl(svg) };
+  }
+  const resolved = usesCurrentColor
+    ? svg.split("currentColor").join(color ?? MIXED_ICON_FALLBACK_COLOR)
+    : svg;
+  return { kind: "image", src: svgDataUrl(resolved) };
+}
+
 export const ProviderIcon: React.FC<ProviderIconProps> = ({
   icon,
   name,
@@ -66,17 +94,47 @@ export const ProviderIcon: React.FC<ProviderIconProps> = ({
     return undefined;
   }, [color, icon]);
 
-  // 内联 SVG 渲染（支持 CSS currentColor 着色）
+  // Bundled SVG icons are rendered from a data: URL, never injected as
+  // markup (FE-ARCH-21), so an icon string can never run script. Monochrome
+  // `currentColor` icons become a CSS mask filled with the text colour, which
+  // keeps theme/hover colouring; other icons are plain images.
   if (iconSvg) {
+    const rendering = svgIconRendering(iconSvg, effectiveColor);
+    const boxClass = cn(
+      "inline-flex items-center justify-center flex-shrink-0",
+      className,
+    );
+    if (rendering.kind === "mask") {
+      return (
+        <span
+          role="img"
+          aria-label={name}
+          title={name}
+          className={boxClass}
+          style={{
+            ...sizeStyle,
+            color: effectiveColor,
+            backgroundColor: "currentColor",
+            WebkitMaskImage: `url("${rendering.src}")`,
+            maskImage: `url("${rendering.src}")`,
+            WebkitMaskRepeat: "no-repeat",
+            maskRepeat: "no-repeat",
+            WebkitMaskPosition: "center",
+            maskPosition: "center",
+            WebkitMaskSize: "contain",
+            maskSize: "contain",
+          }}
+        />
+      );
+    }
     return (
-      <span
-        className={cn(
-          "inline-flex items-center justify-center flex-shrink-0",
-          className,
-        )}
+      <img
+        src={rendering.src}
+        alt={name}
         title={name}
-        style={{ ...sizeStyle, color: effectiveColor }}
-        dangerouslySetInnerHTML={{ __html: iconSvg }}
+        className={cn(boxClass, "object-contain")}
+        style={{ width: sizeStyle.width, height: sizeStyle.height }}
+        draggable={false}
       />
     );
   }

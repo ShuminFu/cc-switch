@@ -1,14 +1,10 @@
 import { useCallback } from "react";
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  type QueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { hermesApi } from "@/lib/api/hermes";
 import { providersApi } from "@/lib/api/providers";
+import { queryKeys } from "@/lib/query/keys";
 import type { HermesMemoryKind } from "@/types";
 import { extractErrorMessage } from "@/utils/errorUtils";
 
@@ -23,25 +19,14 @@ export const HERMES_WEB_OFFLINE_ERROR = "hermes_web_offline";
  * Centralized query keys for all Hermes-related queries.
  * Import this from any file that needs to invalidate Hermes caches.
  */
-export const hermesKeys = {
-  all: ["hermes"] as const,
-  liveProviderIds: ["hermes", "liveProviderIds"] as const,
-  modelConfig: ["hermes", "modelConfig"] as const,
-  memory: (kind: HermesMemoryKind) => ["hermes", "memory", kind] as const,
-  memoryLimits: ["hermes", "memoryLimits"] as const,
-};
+export const hermesKeys = queryKeys.hermes;
 
 /**
  * Invalidate all Hermes caches that may change when a provider is
  * added/updated/deleted/switched. Runs invalidations in parallel so the
  * caller doesn't await three sequential refetches.
  */
-export function invalidateHermesProviderCaches(queryClient: QueryClient) {
-  return Promise.all([
-    queryClient.invalidateQueries({ queryKey: hermesKeys.liveProviderIds }),
-    queryClient.invalidateQueries({ queryKey: hermesKeys.modelConfig }),
-  ]);
-}
+export { invalidateHermesProviderCaches } from "@/lib/query/hermes";
 
 // ============================================================
 // Query hooks

@@ -1,0 +1,9 @@
+{
+  "modelVersion": "gemini-2.5-pro",
+  "usageMetadata": {
+    "promptTokenCount": 1000,
+    "candidatesTokenCount": 10,
+    "cachedContentTokenCount": 600,
+    "totalTokenCount": 1010
+  }
+}

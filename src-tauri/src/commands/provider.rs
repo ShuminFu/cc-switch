@@ -1,5 +1,7 @@
 use indexmap::IndexMap;
-use tauri::{Emitter, State};
+use tauri::{AppHandle, Emitter, State};
+
+use super::{timed_blocking, timed_blocking_with_state};
 
 use crate::app_config::AppType;
 use crate::commands::copilot::CopilotAuthState;
@@ -11,75 +13,109 @@ use crate::services::{
 use crate::store::AppState;
 use std::str::FromStr;
 
-// 常量定义
-const TEMPLATE_TYPE_GITHUB_COPILOT: &str = "github_copilot";
-const TEMPLATE_TYPE_TOKEN_PLAN: &str = "token_plan";
-const TEMPLATE_TYPE_BALANCE: &str = "balance";
-const TEMPLATE_TYPE_OFFICIAL_SUBSCRIPTION: &str = "official_subscription";
-const COPILOT_UNIT_PREMIUM: &str = "requests";
-
 /// 获取所有供应商
 #[tauri::command]
-pub fn get_providers(
-    state: State<'_, AppState>,
+pub async fn get_providers(
+    handle: AppHandle,
     app: String,
 ) -> Result<IndexMap<String, Provider>, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::list(state.inner(), app_type).map_err(|e| e.to_string())
+    timed_blocking_with_state("get_providers", handle, move |state| {
+        ProviderService::list(state, app_type).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn get_current_provider(state: State<'_, AppState>, app: String) -> Result<String, String> {
+#[specta::specta]
+pub async fn get_current_provider(handle: AppHandle, app: String) -> Result<String, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::current(state.inner(), app_type).map_err(|e| e.to_string())
+    timed_blocking_with_state("get_current_provider", handle, move |state| {
+        ProviderService::current(state, app_type).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn add_provider(
-    state: State<'_, AppState>,
+pub async fn add_provider(
+    handle: AppHandle,
     app: String,
     provider: Provider,
     #[allow(non_snake_case)] addToLive: Option<bool>,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::add(state.inner(), app_type, provider, addToLive.unwrap_or(true))
+    timed_blocking_with_state("add_provider", handle, move |state| {
+        let id = provider.id.clone();
+        crate::features::config_history::track_provider_change(
+            state,
+            &app_type.clone(),
+            &id,
+            &id,
+            "ui",
+            || ProviderService::add(state, app_type, provider, addToLive.unwrap_or(true)),
+        )
         .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn update_provider(
-    state: State<'_, AppState>,
+pub async fn update_provider(
+    handle: AppHandle,
     app: String,
     provider: Provider,
     #[allow(non_snake_case)] originalId: Option<String>,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::update(state.inner(), app_type, originalId.as_deref(), provider)
+    timed_blocking_with_state("update_provider", handle, move |state| {
+        let after_id = provider.id.clone();
+        let before_id = originalId.clone().unwrap_or_else(|| after_id.clone());
+        crate::features::config_history::track_provider_change(
+            state,
+            &app_type.clone(),
+            &before_id,
+            &after_id,
+            "ui",
+            || ProviderService::update(state, app_type, originalId.as_deref(), provider),
+        )
         .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn delete_provider(
-    state: State<'_, AppState>,
+#[specta::specta]
+pub async fn delete_provider(handle: AppHandle, app: String, id: String) -> Result<bool, String> {
+    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
+    timed_blocking_with_state("delete_provider", handle, move |state| {
+        crate::features::config_history::track_provider_change(
+            state,
+            &app_type.clone(),
+            &id,
+            &id,
+            "ui",
+            || ProviderService::delete(state, app_type, &id),
+        )
+        .map(|_| true)
+        .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_provider_from_live_config(
+    handle: AppHandle,
     app: String,
     id: String,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::delete(state.inner(), app_type, &id)
-        .map(|_| true)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn remove_provider_from_live_config(
-    state: tauri::State<'_, AppState>,
-    app: String,
-    id: String,
-) -> Result<bool, String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::remove_from_live_config(state.inner(), app_type, &id)
-        .map(|_| true)
-        .map_err(|e| e.to_string())
+    timed_blocking_with_state("remove_provider_from_live_config", handle, move |state| {
+        ProviderService::remove_from_live_config(state, app_type, &id)
+            .map(|_| true)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 fn switch_provider_internal(
@@ -87,10 +123,12 @@ fn switch_provider_internal(
     app_type: AppType,
     id: &str,
 ) -> Result<SwitchResult, AppError> {
-    ProviderService::switch(state, app_type, id)
+    crate::features::config_history::track_switch(state, &app_type.clone(), id, "ui", || {
+        ProviderService::switch(state, app_type, id)
+    })
 }
 
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub fn switch_provider_test_hook(
     state: &AppState,
     app_type: AppType,
@@ -99,14 +137,19 @@ pub fn switch_provider_test_hook(
     switch_provider_internal(state, app_type, id)
 }
 
+/// 切换供应商。切换会写 live 文件、改 DB，并可能等待代理的按应用切换锁，
+/// 因此整体放到阻塞线程池执行，避免卡住 UI 线程或 tokio worker。
 #[tauri::command]
-pub fn switch_provider(
-    state: State<'_, AppState>,
+pub async fn switch_provider(
+    handle: AppHandle,
     app: String,
     id: String,
 ) -> Result<SwitchResult, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    switch_provider_internal(&state, app_type, &id).map_err(|e| e.to_string())
+    timed_blocking_with_state("switch_provider", handle, move |state| {
+        switch_provider_internal(state, app_type, &id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 fn import_default_config_internal(state: &AppState, app_type: AppType) -> Result<bool, AppError> {
@@ -137,7 +180,7 @@ fn import_default_config_internal(state: &AppState, app_type: AppType) -> Result
     Ok(imported)
 }
 
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub fn import_default_config_test_hook(
     state: &AppState,
     app_type: AppType,
@@ -146,12 +189,17 @@ pub fn import_default_config_test_hook(
 }
 
 #[tauri::command]
-pub fn import_default_config(state: State<'_, AppState>, app: String) -> Result<bool, String> {
+#[specta::specta]
+pub async fn import_default_config(handle: AppHandle, app: String) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    import_default_config_internal(&state, app_type).map_err(Into::into)
+    timed_blocking_with_state("import_default_config", handle, move |state| {
+        import_default_config_internal(state, app_type).map_err(Into::into)
+    })
+    .await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_claude_desktop_status(
     state: State<'_, AppState>,
 ) -> Result<crate::claude_desktop_config::ClaudeDesktopStatus, String> {
@@ -167,9 +215,19 @@ pub fn get_claude_desktop_default_routes(
 }
 
 #[tauri::command]
-pub fn import_claude_desktop_providers_from_claude(
-    state: State<'_, AppState>,
+#[specta::specta]
+pub async fn import_claude_desktop_providers_from_claude(
+    handle: AppHandle,
 ) -> Result<usize, String> {
+    timed_blocking_with_state(
+        "import_claude_desktop_providers_from_claude",
+        handle,
+        import_claude_desktop_providers_inner,
+    )
+    .await
+}
+
+fn import_claude_desktop_providers_inner(state: &AppState) -> Result<usize, String> {
     let claude_providers = state
         .db
         .get_all_providers(AppType::Claude.as_str())
@@ -221,22 +279,30 @@ pub fn import_claude_desktop_providers_from_claude(
 }
 
 #[tauri::command]
-pub fn ensure_claude_desktop_official_provider(state: State<'_, AppState>) -> Result<bool, String> {
-    state
-        .db
-        .ensure_official_seed_by_id(
-            crate::database::CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID,
-            AppType::ClaudeDesktop,
-        )
-        .map_err(|e| e.to_string())
+#[specta::specta]
+pub async fn ensure_claude_desktop_official_provider(handle: AppHandle) -> Result<bool, String> {
+    timed_blocking_with_state("ensure_claude_desktop_official_provider", handle, |state| {
+        state
+            .db
+            .ensure_official_seed_by_id(
+                crate::database::CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID,
+                AppType::ClaudeDesktop,
+            )
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn ensure_codex_official_provider(state: State<'_, AppState>) -> Result<bool, String> {
-    state
-        .db
-        .ensure_official_seed_by_id(crate::database::CODEX_OFFICIAL_PROVIDER_ID, AppType::Codex)
-        .map_err(|e| e.to_string())
+#[specta::specta]
+pub async fn ensure_codex_official_provider(handle: AppHandle) -> Result<bool, String> {
+    timed_blocking_with_state("ensure_codex_official_provider", handle, |state| {
+        state
+            .db
+            .ensure_official_seed_by_id(crate::database::CODEX_OFFICIAL_PROVIDER_ID, AppType::Codex)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 fn claude_provider_models_are_claude_safe(provider: &Provider) -> bool {
@@ -396,8 +462,13 @@ pub async fn queryProviderUsage(
     //      不写失败快照、不 emit：保留上一份托盘快照，与前端 react-query reject
     //      保留上次 data 的语义一致；否则失败快照会经 useUsageCacheBridge 盲写
     //      回 query 缓存，抹掉 reject 本该保留的旧值。
-    let inner =
-        query_provider_usage_inner(&state, &copilot_state, app_type.clone(), &providerId).await;
+    let inner = crate::services::usage_query::query_provider_usage(
+        state.inner(),
+        &copilot_state.0,
+        app_type.clone(),
+        &providerId,
+    )
+    .await;
     if let Ok(snapshot) = &inner {
         let payload = serde_json::json!({
             "kind": "script",
@@ -405,7 +476,7 @@ pub async fn queryProviderUsage(
             "providerId": &providerId,
             "data": snapshot,
         });
-        if let Err(e) = app_handle.emit("usage-cache-updated", payload) {
+        if let Err(e) = app_handle.emit(crate::events::USAGE_CACHE_UPDATED, payload) {
             log::error!("emit usage-cache-updated (script) 失败: {e}");
         }
         state
@@ -414,261 +485,6 @@ pub async fn queryProviderUsage(
         crate::tray::schedule_tray_refresh(&app_handle);
     }
     inner
-}
-
-/// Resolve `(base_url, api_key)` for native usage queries, delegating to the
-/// per-app resolver on `Provider`. Missing provider → empty credentials.
-fn resolve_native_credentials(app_type: &AppType, provider: Option<&Provider>) -> (String, String) {
-    provider
-        .map(|p| p.resolve_usage_credentials(app_type))
-        .unwrap_or_default()
-}
-
-fn resolve_coding_plan_credentials(
-    app_type: &AppType,
-    provider: Option<&Provider>,
-    usage_script: Option<&crate::provider::UsageScript>,
-) -> (String, String) {
-    let is_zenmux = usage_script
-        .and_then(|s| s.coding_plan_provider.as_deref())
-        .map(|provider| provider.eq_ignore_ascii_case("zenmux"))
-        .unwrap_or(false);
-
-    if !is_zenmux {
-        return resolve_native_credentials(app_type, provider);
-    }
-
-    let script_base_url = usage_script
-        .and_then(|s| s.base_url.as_deref())
-        .unwrap_or("")
-        .trim_end_matches('/')
-        .to_string();
-    let script_api_key = usage_script
-        .and_then(|s| s.api_key.as_deref())
-        .unwrap_or("")
-        .to_string();
-
-    if !script_base_url.is_empty() && !script_api_key.is_empty() {
-        return (script_base_url, script_api_key);
-    }
-
-    let native = resolve_native_credentials(app_type, provider);
-    if !native.0.is_empty() && !native.1.is_empty() {
-        native
-    } else {
-        (script_base_url, script_api_key)
-    }
-}
-
-async fn query_provider_usage_inner(
-    state: &AppState,
-    copilot_state: &CopilotAuthState,
-    app_type: AppType,
-    provider_id: &str,
-) -> Result<crate::provider::UsageResult, String> {
-    // 从数据库读取供应商信息，检查特殊模板类型
-    let providers = state
-        .db
-        .get_all_providers(app_type.as_str())
-        .map_err(|e| format!("Failed to get providers: {e}"))?;
-    let provider = providers.get(provider_id);
-    let usage_script = provider
-        .and_then(|p| p.meta.as_ref())
-        .and_then(|m| m.usage_script.as_ref());
-    let template_type = usage_script
-        .and_then(|s| s.template_type.as_deref())
-        .unwrap_or("");
-
-    // ── GitHub Copilot 专用路径 ──
-    if template_type == TEMPLATE_TYPE_GITHUB_COPILOT {
-        let copilot_account_id = provider
-            .and_then(|p| p.meta.as_ref())
-            .and_then(|m| m.managed_account_id_for(TEMPLATE_TYPE_GITHUB_COPILOT));
-
-        let auth_manager = copilot_state.0.read().await;
-        let usage = match copilot_account_id.as_deref() {
-            Some(account_id) => auth_manager
-                .fetch_usage_for_account(account_id)
-                .await
-                .map_err(|e| format!("Failed to fetch Copilot usage: {e}"))?,
-            None => auth_manager
-                .fetch_usage()
-                .await
-                .map_err(|e| format!("Failed to fetch Copilot usage: {e}"))?,
-        };
-        let premium = &usage.quota_snapshots.premium_interactions;
-        let used = premium.entitlement - premium.remaining;
-
-        return Ok(crate::provider::UsageResult {
-            success: true,
-            data: Some(vec![crate::provider::UsageData {
-                plan_name: Some(usage.copilot_plan),
-                remaining: Some(premium.remaining as f64),
-                total: Some(premium.entitlement as f64),
-                used: Some(used as f64),
-                unit: Some(COPILOT_UNIT_PREMIUM.to_string()),
-                is_valid: Some(true),
-                invalid_message: None,
-                extra: Some(format!("Reset: {}", usage.quota_reset_date)),
-            }]),
-            error: None,
-        });
-    }
-
-    // ── Coding Plan 专用路径 ──
-    if template_type == TEMPLATE_TYPE_TOKEN_PLAN {
-        let (base_url, api_key) =
-            resolve_coding_plan_credentials(&app_type, provider, usage_script);
-
-        // 火山方舟用账号 AK/SK 签名查询用量（存于 usage_script，与推理 api_key 分离）；
-        // 其他供应商为 None，service 层沿用 api_key。
-        let access_key_id = usage_script.and_then(|s| s.access_key_id.clone());
-        let secret_access_key = usage_script.and_then(|s| s.secret_access_key.clone());
-        // 智谱团队版：显式 provider 标识 + 组织/项目 ID（与个人版智谱 base_url 相同，
-        // 靠 coding_plan_provider == "zhipu_team" 在 service 层路由）。
-        let coding_plan_provider = usage_script.and_then(|s| s.coding_plan_provider.clone());
-        let team_organization_id = usage_script.and_then(|s| s.team_organization_id.clone());
-        let team_project_id = usage_script.and_then(|s| s.team_project_id.clone());
-
-        let quota = crate::services::coding_plan::get_coding_plan_quota(
-            &base_url,
-            &api_key,
-            access_key_id.as_deref(),
-            secret_access_key.as_deref(),
-            coding_plan_provider.as_deref(),
-            team_organization_id.as_deref(),
-            team_project_id.as_deref(),
-        )
-        .await
-        .map_err(|e| format!("Failed to query coding plan: {e}"))?;
-
-        // 将 SubscriptionQuota 转换为 UsageResult
-        if !quota.success {
-            return Ok(crate::provider::UsageResult {
-                success: false,
-                data: None,
-                error: quota.error,
-            });
-        }
-
-        // ZenMux 的 tier 携带 USD 额度信息，需要编码为 JSON extra
-        let has_usd = quota
-            .tiers
-            .first()
-            .map(|t| t.used_value_usd.is_some())
-            .unwrap_or(false);
-        let plan_label = quota
-            .credential_message
-            .as_deref()
-            .and_then(|msg| msg.split(' ').next())
-            .map(|tier| format!("ZenMux·{}", tier.to_uppercase()));
-        let mut first_tier = true;
-
-        let data: Vec<crate::provider::UsageData> = quota
-            .tiers
-            .iter()
-            .map(|tier| {
-                let total = 100.0;
-                let used = tier.utilization;
-                let remaining = total - used;
-                let extra = if has_usd {
-                    let mut extra_json = serde_json::json!({
-                        "resetsAt": tier.resets_at,
-                    });
-                    if let Some(v) = tier.used_value_usd {
-                        extra_json["usedValueUsd"] = serde_json::json!(v);
-                    }
-                    if let Some(v) = tier.max_value_usd {
-                        extra_json["maxValueUsd"] = serde_json::json!(v);
-                    }
-                    if first_tier {
-                        if let Some(ref label) = plan_label {
-                            extra_json["planLabel"] = serde_json::json!(label);
-                        }
-                        first_tier = false;
-                    }
-                    Some(extra_json.to_string())
-                } else {
-                    tier.resets_at.clone()
-                };
-                crate::provider::UsageData {
-                    plan_name: Some(tier.name.clone()),
-                    remaining: Some(remaining),
-                    total: Some(total),
-                    used: Some(used),
-                    unit: Some("%".to_string()),
-                    is_valid: Some(true),
-                    invalid_message: None,
-                    extra,
-                }
-            })
-            .collect();
-
-        return Ok(crate::provider::UsageResult {
-            success: true,
-            data: if data.is_empty() { None } else { Some(data) },
-            error: None,
-        });
-    }
-
-    // ── 官方余额查询路径 ──
-    if template_type == TEMPLATE_TYPE_BALANCE {
-        // 按 app 区分的凭据存储格式提取 Base URL 与 API Key
-        let (base_url, api_key) = resolve_native_credentials(&app_type, provider);
-
-        return crate::services::balance::get_balance(&base_url, &api_key)
-            .await
-            .map_err(|e| format!("Failed to query balance: {e}"));
-    }
-
-    // ── 官方订阅额度查询路径 ──
-    if template_type == TEMPLATE_TYPE_OFFICIAL_SUBSCRIPTION {
-        if !usage_script.map(|s| s.enabled).unwrap_or(false) {
-            return Ok(crate::provider::UsageResult {
-                success: false,
-                data: None,
-                error: Some("Usage query is disabled".to_string()),
-            });
-        }
-
-        let quota = crate::services::subscription::get_subscription_quota(app_type.as_str())
-            .await
-            .map_err(|e| format!("Failed to query subscription quota: {e}"))?;
-
-        if !quota.success {
-            return Ok(crate::provider::UsageResult {
-                success: false,
-                data: None,
-                error: quota.error.or(quota.credential_message),
-            });
-        }
-
-        let data: Vec<crate::provider::UsageData> = quota
-            .tiers
-            .iter()
-            .map(|tier| crate::provider::UsageData {
-                plan_name: Some(tier.name.clone()),
-                remaining: Some(100.0 - tier.utilization),
-                total: Some(100.0),
-                used: Some(tier.utilization),
-                unit: Some("%".to_string()),
-                is_valid: Some(true),
-                invalid_message: None,
-                extra: tier.resets_at.clone(),
-            })
-            .collect();
-
-        return Ok(crate::provider::UsageResult {
-            success: true,
-            data: if data.is_empty() { None } else { Some(data) },
-            error: None,
-        });
-    }
-
-    // ── 通用 JS 脚本路径 ──
-    ProviderService::query_usage(state, app_type, provider_id)
-        .await
-        .map_err(|e| e.to_string())
 }
 
 #[allow(non_snake_case)]
@@ -704,9 +520,13 @@ pub async fn testUsageScript(
 }
 
 #[tauri::command]
-pub fn read_live_provider_settings(app: String) -> Result<serde_json::Value, String> {
+#[specta::specta]
+pub async fn read_live_provider_settings(app: String) -> Result<serde_json::Value, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::read_live_settings(app_type).map_err(|e| e.to_string())
+    timed_blocking("read_live_provider_settings", move || {
+        ProviderService::read_live_settings(app_type).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -720,65 +540,82 @@ pub async fn test_api_endpoints(
 }
 
 #[tauri::command]
-pub fn get_custom_endpoints(
-    state: State<'_, AppState>,
+pub async fn get_custom_endpoints(
+    handle: AppHandle,
     app: String,
     #[allow(non_snake_case)] providerId: String,
 ) -> Result<Vec<crate::settings::CustomEndpoint>, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::get_custom_endpoints(state.inner(), app_type, &providerId)
-        .map_err(|e| e.to_string())
+    timed_blocking_with_state("get_custom_endpoints", handle, move |state| {
+        ProviderService::get_custom_endpoints(state, app_type, &providerId)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn add_custom_endpoint(
-    state: State<'_, AppState>,
+#[specta::specta]
+pub async fn add_custom_endpoint(
+    handle: AppHandle,
     app: String,
     #[allow(non_snake_case)] providerId: String,
     url: String,
 ) -> Result<(), String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::add_custom_endpoint(state.inner(), app_type, &providerId, url)
-        .map_err(|e| e.to_string())
+    timed_blocking_with_state("add_custom_endpoint", handle, move |state| {
+        ProviderService::add_custom_endpoint(state, app_type, &providerId, url)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn remove_custom_endpoint(
-    state: State<'_, AppState>,
+#[specta::specta]
+pub async fn remove_custom_endpoint(
+    handle: AppHandle,
     app: String,
     #[allow(non_snake_case)] providerId: String,
     url: String,
 ) -> Result<(), String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::remove_custom_endpoint(state.inner(), app_type, &providerId, url)
-        .map_err(|e| e.to_string())
+    timed_blocking_with_state("remove_custom_endpoint", handle, move |state| {
+        ProviderService::remove_custom_endpoint(state, app_type, &providerId, url)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn update_endpoint_last_used(
-    state: State<'_, AppState>,
+#[specta::specta]
+pub async fn update_endpoint_last_used(
+    handle: AppHandle,
     app: String,
     #[allow(non_snake_case)] providerId: String,
     url: String,
 ) -> Result<(), String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::update_endpoint_last_used(state.inner(), app_type, &providerId, url)
-        .map_err(|e| e.to_string())
+    timed_blocking_with_state("update_endpoint_last_used", handle, move |state| {
+        ProviderService::update_endpoint_last_used(state, app_type, &providerId, url)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn update_providers_sort_order(
-    state: State<'_, AppState>,
+pub async fn update_providers_sort_order(
+    handle: AppHandle,
     app: String,
     updates: Vec<ProviderSortUpdate>,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::update_sort_order(state.inner(), app_type, updates).map_err(|e| e.to_string())
+    timed_blocking_with_state("update_providers_sort_order", handle, move |state| {
+        ProviderService::update_sort_order(state, app_type, updates).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 use crate::provider::UniversalProvider;
 use std::collections::HashMap;
-use tauri::AppHandle;
 
 #[derive(Clone, serde::Serialize)]
 pub struct UniversalProviderSyncedEvent {
@@ -788,7 +625,7 @@ pub struct UniversalProviderSyncedEvent {
 
 fn emit_universal_provider_synced(app: &AppHandle, action: &str, id: &str) {
     let _ = app.emit(
-        "universal-provider-synced",
+        crate::events::UNIVERSAL_PROVIDER_SYNCED,
         UniversalProviderSyncedEvent {
             action: action.to_string(),
             id: id.to_string(),
@@ -797,29 +634,37 @@ fn emit_universal_provider_synced(app: &AppHandle, action: &str, id: &str) {
 }
 
 #[tauri::command]
-pub fn get_universal_providers(
-    state: State<'_, AppState>,
+pub async fn get_universal_providers(
+    handle: AppHandle,
 ) -> Result<HashMap<String, UniversalProvider>, String> {
-    ProviderService::list_universal(state.inner()).map_err(|e| e.to_string())
+    timed_blocking_with_state("get_universal_providers", handle, |state| {
+        ProviderService::list_universal(state).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn get_universal_provider(
-    state: State<'_, AppState>,
+pub async fn get_universal_provider(
+    handle: AppHandle,
     id: String,
 ) -> Result<Option<UniversalProvider>, String> {
-    ProviderService::get_universal(state.inner(), &id).map_err(|e| e.to_string())
+    timed_blocking_with_state("get_universal_provider", handle, move |state| {
+        ProviderService::get_universal(state, &id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn upsert_universal_provider(
+pub async fn upsert_universal_provider(
     app: AppHandle,
-    state: State<'_, AppState>,
     provider: UniversalProvider,
 ) -> Result<bool, String> {
     let id = provider.id.clone();
     let result =
-        ProviderService::upsert_universal(state.inner(), provider).map_err(|e| e.to_string())?;
+        timed_blocking_with_state("upsert_universal_provider", app.clone(), move |state| {
+            ProviderService::upsert_universal(state, provider).map_err(|e| e.to_string())
+        })
+        .await?;
 
     emit_universal_provider_synced(&app, "upsert", &id);
 
@@ -827,13 +672,14 @@ pub fn upsert_universal_provider(
 }
 
 #[tauri::command]
-pub fn delete_universal_provider(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<bool, String> {
+#[specta::specta]
+pub async fn delete_universal_provider(app: AppHandle, id: String) -> Result<bool, String> {
+    let id_for_task = id.clone();
     let result =
-        ProviderService::delete_universal(state.inner(), &id).map_err(|e| e.to_string())?;
+        timed_blocking_with_state("delete_universal_provider", app.clone(), move |state| {
+            ProviderService::delete_universal(state, &id_for_task).map_err(|e| e.to_string())
+        })
+        .await?;
 
     emit_universal_provider_synced(&app, "delete", &id);
 
@@ -841,13 +687,13 @@ pub fn delete_universal_provider(
 }
 
 #[tauri::command]
-pub fn sync_universal_provider(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<bool, String> {
-    let result =
-        ProviderService::sync_universal_to_apps(state.inner(), &id).map_err(|e| e.to_string())?;
+#[specta::specta]
+pub async fn sync_universal_provider(app: AppHandle, id: String) -> Result<bool, String> {
+    let id_for_task = id.clone();
+    let result = timed_blocking_with_state("sync_universal_provider", app.clone(), move |state| {
+        ProviderService::sync_universal_to_apps(state, &id_for_task).map_err(|e| e.to_string())
+    })
+    .await?;
 
     emit_universal_provider_synced(&app, "sync", &id);
 
@@ -855,16 +701,24 @@ pub fn sync_universal_provider(
 }
 
 #[tauri::command]
-pub fn import_opencode_providers_from_live(state: State<'_, AppState>) -> Result<usize, String> {
-    crate::services::provider::import_opencode_providers_from_live(state.inner())
-        .map_err(|e| e.to_string())
+#[specta::specta]
+pub async fn import_opencode_providers_from_live(handle: AppHandle) -> Result<usize, String> {
+    timed_blocking_with_state("import_opencode_providers_from_live", handle, |state| {
+        crate::services::provider::import_opencode_providers_from_live(state)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn get_opencode_live_provider_ids() -> Result<Vec<String>, String> {
-    crate::opencode_config::get_providers()
-        .map(|providers| providers.keys().cloned().collect())
-        .map_err(|e| e.to_string())
+#[specta::specta]
+pub async fn get_opencode_live_provider_ids() -> Result<Vec<String>, String> {
+    timed_blocking("get_opencode_live_provider_ids", || {
+        crate::opencode_config::get_providers()
+            .map(|providers| providers.keys().cloned().collect())
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // ============================================================================
@@ -1066,110 +920,5 @@ mod import_claude_desktop_tests {
             routes.get("claude-sonnet-5").expect("route").label_override,
             None
         );
-    }
-}
-
-#[cfg(test)]
-mod native_query_credentials_tests {
-    use super::{resolve_coding_plan_credentials, resolve_native_credentials};
-    use crate::app_config::AppType;
-    use crate::provider::{Provider, UsageScript};
-    use serde_json::json;
-
-    fn usage_script(
-        coding_plan_provider: Option<&str>,
-        base_url: Option<&str>,
-        api_key: Option<&str>,
-    ) -> UsageScript {
-        UsageScript {
-            enabled: true,
-            language: "javascript".to_string(),
-            code: String::new(),
-            timeout: Some(10),
-            api_key: api_key.map(str::to_string),
-            base_url: base_url.map(str::to_string),
-            access_token: None,
-            user_id: None,
-            template_type: Some("token_plan".to_string()),
-            auto_query_interval: None,
-            coding_plan_provider: coding_plan_provider.map(str::to_string),
-            access_key_id: None,
-            secret_access_key: None,
-            team_organization_id: None,
-            team_project_id: None,
-        }
-    }
-
-    #[test]
-    fn delegates_to_provider_for_codex() {
-        let provider = Provider::with_id(
-            "test".to_string(),
-            "Test".to_string(),
-            json!({
-                "auth": { "OPENAI_API_KEY": "sk-codex" },
-                "config": "model_provider = \"deepseek\"\n\
-                           [model_providers.deepseek]\n\
-                           base_url = \"https://api.deepseek.com\"\n",
-            }),
-            None,
-        );
-        let (base_url, api_key) = resolve_native_credentials(&AppType::Codex, Some(&provider));
-        assert_eq!(base_url, "https://api.deepseek.com");
-        assert_eq!(api_key, "sk-codex");
-    }
-
-    #[test]
-    fn missing_provider_yields_empty() {
-        let (base_url, api_key) = resolve_native_credentials(&AppType::Codex, None);
-        assert!(base_url.is_empty());
-        assert!(api_key.is_empty());
-    }
-
-    #[test]
-    fn zenmux_coding_plan_uses_script_credentials_first() {
-        let provider = Provider::with_id(
-            "test".to_string(),
-            "Test".to_string(),
-            json!({
-                "env": {
-                    "ANTHROPIC_BASE_URL": "https://provider.zenmux.example/v1",
-                    "ANTHROPIC_AUTH_TOKEN": "sk-provider"
-                }
-            }),
-            None,
-        );
-        let script = usage_script(
-            Some("zenmux"),
-            Some("https://script.zenmux.example/api/usage/"),
-            Some("sk-script"),
-        );
-
-        let (base_url, api_key) =
-            resolve_coding_plan_credentials(&AppType::Claude, Some(&provider), Some(&script));
-
-        assert_eq!(base_url, "https://script.zenmux.example/api/usage");
-        assert_eq!(api_key, "sk-script");
-    }
-
-    #[test]
-    fn zenmux_coding_plan_falls_back_to_provider_credentials() {
-        let provider = Provider::with_id(
-            "test".to_string(),
-            "Test".to_string(),
-            json!({
-                "env": {
-                    "ANTHROPIC_BASE_URL": "https://provider.zenmux.example/v1",
-                    "ANTHROPIC_AUTH_TOKEN": "sk-provider"
-                }
-            }),
-            None,
-        );
-        let script = usage_script(Some("zenmux"), Some("https://script.zenmux.example"), None);
-
-        let (base_url, api_key) =
-            resolve_coding_plan_credentials(&AppType::Claude, Some(&provider), Some(&script));
-
-        assert_eq!(base_url, "https://provider.zenmux.example/v1");
-        assert_eq!(api_key, "sk-provider");
     }
 }

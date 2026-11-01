@@ -40,7 +40,14 @@
     "deleting": "削除中...",
     "auto": "自動",
     "enabled": "有効",
-    "notSet": "未設定"
+    "notSet": "未設定",
+    "retry": "再試行",
+    "unsavedChanges": "未保存の変更があります",
+    "copyFailed": "コピーに失敗しました",
+    "unsavedChangesTitle": "未保存の変更を破棄しますか？",
+    "unsavedChangesMessage": "編集内容は保存されておらず、失われます。",
+    "discard": "破棄",
+    "undo": "元に戻す"
   },
   "firstRunNotice": {
     "title": "CC Switch へようこそ",
@@ -166,6 +173,7 @@
     "usageSaveFailed": "利用状況設定の保存に失敗しました",
     "geminiConfig": "Gemini 設定",
     "geminiConfigHint": ".env 形式で Gemini を設定してください",
+    "duplicateLiveIdsLoadFailed": "設定からプロバイダーキーを読み込めませんでした。設定を修正してから再試行してください",
     "form": {
       "gemini": {
         "model": "モデル",
@@ -173,6 +181,52 @@
         "oauthHint": "Google 公式は OAuth 個人認証を使用するため API Key は不要です。初回利用時にブラウザが開きます。",
         "apiKeyPlaceholder": "Gemini API Key を入力"
       }
+    },
+    "loadFailed": "プロバイダーの読み込みに失敗しました",
+    "tabProviderFor": "{{app}} プロバイダー",
+    "configStatusLoading": "アプリの設定を確認中…",
+    "copyName": "{{name}} のコピー",
+    "copyShareLink": "共有リンクをコピー（API キーを含まない）",
+    "shareLinkCopied": "共有リンクをコピーしました（API キーは含まれていません）",
+    "shareLinkCopyFailed": "共有リンクのコピーに失敗しました: {{error}}",
+    "searchShortcut": "プロバイダーを検索",
+    "searchCloseShortcut": "プロバイダー検索を閉じる",
+    "duplicateName": "{{name}} のコピー",
+    "filter": {
+      "label": "プロバイダーを絞り込む",
+      "all": "すべて",
+      "inQueue": "フェイルオーバーキュー内"
+    },
+    "importPicker": {
+      "done": "{{count}} 件のプロバイダーをインポートしました",
+      "failed": "{{count}} 件のプロバイダーをインポートした後に失敗しました",
+      "title": "ライブ設定からインポート",
+      "description": "アプリの現在の設定ファイルで定義されているプロバイダーです。CC Switch に追加するものを選択してください。",
+      "readFailed": "ライブ設定を読み込めませんでした。",
+      "none": "ライブ設定にプロバイダーが見つかりません。",
+      "alreadyAdded": "すでにリストにあります",
+      "import": "選択項目をインポート（{{count}}）",
+      "open": "ライブ設定からプロバイダーを選択…"
+    },
+    "preview": {
+      "title": "変更をプレビュー",
+      "description": "{{name}} に切り替えたときにライブ設定ファイルへ書き込まれる内容です。切り替えるまで何も書き込まれません。",
+      "failed": "プレビューを計算できませんでした：{{error}}",
+      "unsupported": "このアプリではまだプレビューを利用できません。",
+      "noChanges": "切り替えてもライブファイルは変更されません。",
+      "newFile": "新規ファイル"
+    },
+    "health": {
+      "title": "プロバイダーの状態",
+      "description": "各プロバイダーのエンドポイントへの到達性と、ローカルルーティングで発生した失敗です。",
+      "notCheckable": "公式：プローブ対象外",
+      "checkFailed": "チェック失敗",
+      "notChecked": "未チェック",
+      "failures": "{{count}} 回連続で失敗",
+      "lastSuccess": "{{time}} に正常",
+      "noTraffic": "ルーティングされたリクエストなし",
+      "checkAll": "すべてチェック（{{count}}）",
+      "open": "プロバイダーの状態…"
     }
   },
   "claudeCode": {
@@ -222,7 +276,9 @@
       "tooltip": {
         "active": "Claude Desktop ローカルルーティングは起動中です - {{address}}:{{port}}",
         "inactive": "モデルマッピングや形式変換が必要なプロバイダー向けに Claude Desktop ローカルルーティングを起動します。設定アドレス: {{address}}:{{port}}"
-      }
+      },
+      "stopBlockedByTakeover": "他のアプリがプロキシ引き継ぎを使用中です。先に設定で該当アプリの引き継ぎをオフにしてから、ローカルルーティングを停止してください。",
+      "stopBlockedByDesktop": "Claude Desktop はまだローカルルーティング経由でリクエストを送信しています。先に Claude Desktop を直接接続のプロバイダーに切り替えてから、ローカルルーティングを停止してください。"
     }
   },
   "notifications": {
@@ -269,7 +325,12 @@
     "backfillWarning": "切り替え成功しましたが、前のプロバイダーへの設定保存に失敗しました",
     "windowControlFailed": "ウィンドウ操作に失敗しました: {{error}}",
     "officialBlockedByProxy": "ローカルルーティングモード中は公式プロバイダーに切り替えできません。ルーティング経由で公式 API にアクセスするとアカウントが停止される可能性があります。",
-    "proxyOfficialWarning": "現在のプロバイダー {{name}} は公式です。ローカルルーティングを使用する前にサードパーティプロバイダーに切り替えてください。"
+    "proxyOfficialWarning": "現在のプロバイダー {{name}} は公式です。ローカルルーティングを使用する前にサードパーティプロバイダーに切り替えてください。",
+    "proxyReasonClaudeDesktop": "Claude Desktop ローカルルーティングモードを使用しており",
+    "openclawModelsRegisterFailed": "プロバイダーを追加しましたが、モデルを OpenClaw に登録できませんでした: {{error}}",
+    "undoDeleteFailed": "プロバイダーを復元できませんでした: {{error}}",
+    "removeFromConfigFailed": "設定からの削除に失敗しました: {{error}}",
+    "switchUndone": "元に戻しました"
   },
   "confirm": {
     "deleteProvider": "プロバイダーを削除",
@@ -473,7 +534,18 @@
       "deleteSuccess": "バックアップを削除しました",
       "deleteFailed": "削除に失敗しました",
       "deleteConfirmTitle": "バックアップの削除を確認",
-      "deleteConfirmMessage": "このバックアップは完全に削除されます。この操作は取り消せません。"
+      "deleteConfirmMessage": "このバックアップは完全に削除されます。この操作は取り消せません。",
+      "openFolderFailed": "バックアップフォルダーを開けませんでした",
+      "showInFolder": "フォルダーで表示",
+      "keepUsageHistory": "バックアップ以降にこのデバイスで記録された利用履歴を保持する",
+      "kind": {
+        "manual": "手動",
+        "manualHint": "「今すぐバックアップ」で作成。自動ローテーションで削除されません",
+        "premigration": "移行前",
+        "premigrationHint": "データベースのアップグレードまたは再構築の前に自動作成",
+        "safety": "安全",
+        "safetyHint": "インポート、復元、または同期ダウンロードでデータベースが置き換えられる前に自動作成"
+      }
     },
     "webdavSync": {
       "title": "WebDAV クラウド同期",
@@ -707,7 +779,9 @@
       "confirmTitle": "スキル保存場所の移行",
       "confirmMessage": "{{count}} 個のスキルを新しい場所に移動します。続行しますか？",
       "migrationSuccess": "{{count}} 個のスキルを移行しました",
-      "migrationPartial": "{{migrated}} 個のスキルを移行、{{errors}} 個のエラー。詳細はログを確認してください。"
+      "migrationPartial": "{{migrated}} 個のスキルを移行、{{errors}} 個のエラー。詳細はログを確認してください。",
+      "migrationMoreErrors": "…ほか {{count}} 件",
+      "migrationErrorsTitle": "次のスキルは以前の場所に残っているため、手動で移動する必要があります:"
     },
     "skillSync": {
       "title": "スキル同期方式",
@@ -868,9 +942,109 @@
       "pricingSaveFailed": "課金設定の保存に失敗しました: {{error}}",
       "pricingLoadFailed": "課金設定の読み込みに失敗しました: {{error}}",
       "defaultCostMultiplierRequired": "デフォルト倍率は必須です",
-      "defaultCostMultiplierInvalid": "デフォルト倍率の形式が正しくありません"
+      "defaultCostMultiplierInvalid": "デフォルト倍率の形式が正しくありません",
+      "urlLabel": "プロキシ URL",
+      "hidePassword": "パスワードを隠す",
+      "showPassword": "パスワードを表示",
+      "appFieldError": "{{app}}: {{message}}",
+      "pricingSaveFailedBadge": "（未保存）"
     },
-    "saveFailedGeneric": "保存に失敗しました。もう一度お試しください"
+    "saveFailedGeneric": "保存に失敗しました。もう一度お試しください",
+    "installScriptSourcesHint": "一部のコマンドは次のインストールスクリプトをダウンロードして実行します。実行前に確認してください:",
+    "configLoadFailed": "現在の設定を読み込めなかったため、編集は無効になっています。{{detail}}",
+    "revertImport": "インポートを元に戻す",
+    "importConfirmTitle": "現在のデータをすべて置き換えますか？",
+    "importConfirmMessage": "{{file}} をインポートすると、すべてのプロバイダー、MCP サーバー、プロンプト、設定が置き換えられ、適用中の CLI 設定ファイルが書き換えられます。インポートを元に戻せるよう、事前に安全バックアップが作成されます。",
+    "revertImportConfirmTitle": "インポートを元に戻しますか？",
+    "revertImportConfirmMessage": "インポート直前に作成されたバックアップ {{backupId}} を復元しますか？インポート後の変更は失われます。",
+    "revertImportSuccess": "インポートを元に戻しました",
+    "revertImportFailed": "インポートを元に戻せませんでした: {{message}}",
+    "unsavedChanges": "未保存の変更があります",
+    "discardChanges": "破棄",
+    "preserveCodexOfficialAuthOnSwitchDefaultOnDescription": "デフォルトでオン。ローカルルーティングが無効な場合のサードパーティ切替を制御します。ルーティング接管中は常に Codex の公式ログインを保持します。",
+    "cloudSync": {
+      "conflict": {
+        "localChanged": "前回の同期以降、ローカルデータが変更されています。今ダウンロードすると、これらのローカルの変更はクラウドのデータで置き換えられます。残す場合は、キャンセルして先にアップロードしてください。",
+        "overwriteLocal": "ローカルデータを上書き",
+        "overwriteRemote": "クラウドデータを上書き",
+        "remoteChanged": "このデバイスの前回の同期以降、クラウドのデータが別のデバイスによって更新されています。今アップロードすると、そのデータはこのデバイスのデータで置き換えられます。残す場合は、キャンセルして先にダウンロードしてください。",
+        "title": "同期の競合"
+      },
+      "insecureTransport": "このエンドポイントは平文の HTTP を使用しています。認証情報と同期データは暗号化されずに送信されます。信頼できるローカルネットワークでない限り、HTTPS を使用してください。",
+      "remoteChangedNotice": "このデバイスの前回の同期以降、別のデバイスがアップロードしています。そのデータを上書きする前に確認します。"
+    },
+    "healthProbe": {
+      "description": "ルーティングサービスの実行中、サーキットが開いているフェイルオーバーキュー内のプロバイダーに定期的に軽量なリクエストを送信し、実際のリクエストを消費せずに復旧できるようにします",
+      "interval": "プローブ間隔",
+      "minutes": "{{count}} 分",
+      "seconds": "{{count}} 秒",
+      "title": "バックグラウンドのヘルスプローブ"
+    },
+    "notifications": {
+      "budgetExceeded": "予算上限に達しました",
+      "budgetExceededDescription": "プロバイダーが日次または月次の上限を超えたときに通知",
+      "circuitOpen": "サーキットブレーカーが開きました",
+      "circuitOpenDescription": "プロバイダーが連続失敗により一時停止されたときに通知",
+      "failover": "フェイルオーバーの切り替え",
+      "failoverDescription": "ルーティングサービスが別のプロバイダーにフェイルオーバーしたときに通知",
+      "hint": "ウィンドウを閉じていても表示されます。各プロバイダーにつき、カテゴリごとの通知は 5 分間に最大 1 回です。",
+      "quotaExhausted": "サブスクリプションのクォータを使い切りました",
+      "quotaExhaustedDescription": "サブスクリプションの利用枠が 100% に達したときに通知",
+      "syncError": "同期エラー",
+      "syncErrorDescription": "WebDAV または S3 の自動同期が失敗したときに通知",
+      "title": "システム通知"
+    },
+    "syncEncryption": {
+      "change": "パスフレーズを変更",
+      "confirm": "パスフレーズを再入力",
+      "description": "アップロード前に、同期するデータベース（API キーを含む）とスキルをパスフレーズで暗号化します。すべてのデバイスで同じパスフレーズが必要です。紛失するとリモートのコピーは復元できません。先にすべてのデバイスで CC Switch を更新してください。",
+      "disabled": "同期の暗号化はオフです。",
+      "mismatch": "パスフレーズが一致しません。",
+      "passphrase": "パスフレーズ",
+      "save": "パスフレーズを保存",
+      "saved": "同期の暗号化がオンになりました。次回のアップロードから暗号化されます。",
+      "storedInFile": "システムのキーチェーンが利用できないため、パスフレーズを settings.json に保存しました（所有者のみアクセス可）。",
+      "storedInKeychain": "パスフレーズをシステムのキーチェーンに保存しました。",
+      "title": "エンドツーエンド暗号化",
+      "tooShort": "{{count}} 文字以上で入力してください。",
+      "unavailable": "システムのキーチェーンからパスフレーズを読み取れません。再入力するまでアップロードは一時停止されます。"
+    },
+    "secretsVault": {
+      "enabled": "プロバイダーの API キーはシステムのキーチェーンに保存されるようになりました。",
+      "disabled": "プロバイダーの API キーは再びデータベースに保存されます。",
+      "title": "API キーをシステムのキーチェーンに保存",
+      "description": "プロバイダーの API キーとトークンを CC Switch のデータベースからシステムのキーチェーンへ移動します。以降、データベース、そのバックアップ、SQL エクスポート、クラウド同期にはプレースホルダーのみが残ります。Claude Code、Codex などのツールの設定ファイルには、有効なキーが引き続き含まれます。",
+      "unavailable": "このデバイスではシステムのキーチェーンが利用できないため、このオプションをオンにできません。Linux では、GNOME Keyring や KWallet などの Secret Service プロバイダーを実行してください。",
+      "exportWarning": "この設定がオンの間、SQL エクスポートとクラウド同期にはキーが含まれません。別のデバイスでは API キーを再入力してください。既にプロバイダーがあるデバイスは自身のキーを保持します。",
+      "unresolved": "{{count}} 件の API キーがこのデバイスのキーチェーンにありません。以下のプロバイダーを編集してキーを再入力してください:",
+      "pendingIn": "{{count}} 件のキーがまだデータベースに保存されています。",
+      "pendingOut": "一部のキーがまだキーチェーンにあります。",
+      "retry": "再試行"
+    },
+    "search": {
+      "shortcut": "設定を検索",
+      "placeholder": "設定を検索…",
+      "label": "設定を検索",
+      "noResults": "一致する設定はありません"
+    },
+    "codexHistoryBackups": {
+      "purged": "Codex 履歴バックアップ {{size}} を削除しました",
+      "purgeFailed": "Codex 履歴バックアップの削除に失敗しました",
+      "title": "履歴移行のバックアップ",
+      "empty": "ディスク上にバックアップはありません。",
+      "usage": "ディスク使用量 {{total}}：削除可能 {{purgeable}}、復元台帳 {{ledger}}。",
+      "purge": "バックアップを削除",
+      "confirmTitle": "Codex 履歴バックアップを削除しますか？",
+      "confirmMessage": "Codex 履歴移行で作成されたバックアップ（{{size}}）を削除します。セッションには影響しません。",
+      "includeLedger": "復元台帳（{{size}}）も削除します。削除後は、履歴の統合をオフにしても元の履歴を復元できなくなります。"
+    },
+    "configDirSource": {
+      "override": "cc-switch の設定",
+      "env": "{{var}} 環境変数",
+      "default": "デフォルト",
+      "inUse": "使用中：{{path}}（{{source}}）",
+      "missing": "ディレクトリはまだ存在しません"
+    }
   },
   "apps": {
     "claude": "Claude",
@@ -890,7 +1064,14 @@
     "contextWindowInvalid": "コンテキストウィンドウは正の整数で指定してください",
     "profile": "クライアントモデルプロファイル",
     "rawConfig": "config.toml",
-    "invalidToml": "config.toml の形式が不正です: {{error}}"
+    "invalidToml": "config.toml の形式が不正です: {{error}}",
+    "validation": {
+      "configEmpty": "config.toml は空にできません",
+      "missingDefaultModel": "[models] のデフォルトモデルテーブルがありません",
+      "missingField": "{{field}} がありません",
+      "missingKey": "api_key または env_key がありません",
+      "contextWindow": "context_window は正の整数で指定してください"
+    }
   },
   "sessionManager": {
     "title": "セッション管理",
@@ -972,7 +1153,35 @@
     "messageCopied": "メッセージがコピーされました",
     "conversationHistory": "会話履歴",
     "expandContent": "全文を表示",
-    "collapseContent": "折りたたむ"
+    "collapseContent": "折りたたむ",
+    "searchTranscripts": "メッセージ内容を検索",
+    "searchIndexing": "会話内容をインデックス中…結果は順次増えます",
+    "scanErrors": "一部のセッションを読み込めませんでした",
+    "messagesLoadFailed": "このセッションの読み込みに失敗しました",
+    "showMore": "さらに表示（残り {{count}} 件）",
+    "undoDelete": "元に戻す",
+    "restoreFailed": "セッションを復元できませんでした",
+    "annotations": {
+      "pinned": "ピン留め済み",
+      "archivedBadge": "アーカイブ済み",
+      "unpin": "セッションのピン留めを解除",
+      "pin": "セッションをピン留め",
+      "unarchive": "セッションのアーカイブを解除",
+      "archive": "セッションをアーカイブ",
+      "showArchived": "アーカイブ済みを表示（{{count}}）",
+      "saveFailed": "セッションラベルを保存できませんでした",
+      "editTags": "タグを編集",
+      "tagsInput": "タグ（カンマ区切り）",
+      "tagsPlaceholder": "bugfix, client-a"
+    },
+    "trash": {
+      "restored": "セッションを復元しました",
+      "open": "最近削除した項目",
+      "title": "最近削除したセッション",
+      "description": "削除したセッションは 30 日間保持されます。復元すると元の場所に戻ります。",
+      "empty": "最近削除したセッションはありません",
+      "restore": "復元"
+    }
   },
   "console": {
     "providerSwitchReceived": "プロバイダー切り替えイベントを受信:",
@@ -1163,7 +1372,34 @@
     "fetchModelsAuthFailed": "API Key が無効か、権限がありません",
     "fetchModelsNotSupported": "このプロバイダーはモデル一覧の取得に対応していません",
     "fetchModelsEndpointNotFound": "利用可能なモデル一覧エンドポイントが見つかりません。Base URL を確認するか、プロバイダーが該当 API を公開しているかご確認ください",
-    "fetchModelsTimeout": "リクエストがタイムアウトしました。ネットワーク接続を確認してください"
+    "fetchModelsTimeout": "リクエストがタイムアウトしました。ネットワーク接続を確認してください",
+    "providerKeyStatusLoading": "プロバイダーキーの状態を読み込み中です。しばらくしてから再試行してください",
+    "requiredFields": "プロバイダー名、API エンドポイント、API Key、モデルを入力してください",
+    "validation": {
+      "invalidUrl": "有効な URL を入力してください",
+      "configJsonInvalid": "設定 JSON の形式が不正です",
+      "jsonError": "JSON 形式エラー: {{detail}}",
+      "jsonErrorAtPosition": "JSON 形式エラー: {{detail}}（位置: {{position}}）",
+      "jsonErrorAtLineColumn": "JSON 形式エラー: {{line}} 行目、{{column}} 列目",
+      "fieldConfig": "設定",
+      "fieldCommonConfigSnippet": "共通設定スニペット",
+      "fieldExtractedConfig": "抽出した設定",
+      "fieldMustBeObject": "{{field}}は JSON オブジェクトである必要があります",
+      "fieldJsonSyntaxError": "{{field}}の JSON 形式が不正です。構文を確認してください",
+      "commonConfigParseFailed": "設定 JSON を解析できないため、共通設定を適用できませんでした",
+      "fieldUnsafeKey": "{{field}} に __proto__、constructor、prototype キーを含めることはできません"
+    },
+    "codexAuthInvalid": "auth.json が有効な JSON ではありません。修正してから保存してください。",
+    "codexAuthNotObject": "auth.json は JSON オブジェクトである必要があります。",
+    "codexConfigInvalid": "config.toml に構文エラーがあります。修正してから保存してください。",
+    "geminiConfigInvalid": "Gemini config.json が有効な JSON ではありません。修正してから保存してください。",
+    "geminiConfigNotObject": "Gemini config.json は JSON オブジェクトである必要があります。",
+    "settingsConfigInvalid": "プロバイダー設定が有効な JSON オブジェクトではありません。",
+    "removeModel": "モデルを削除",
+    "providerKeyStatusUnavailable": "このプロバイダーキーが使用中かどうかを確認できませんでした。再読み込みしてもう一度お試しください。",
+    "moveModelUp": "モデルを上へ移動",
+    "moveModelDown": "モデルを下へ移動",
+    "chooseModel": "モデルを選択"
   },
   "copilot": {
     "authSection": "GitHub Copilot 認証",
@@ -1246,7 +1482,9 @@
     "testUnavailable": "速度テストを実行できません",
     "noResult": "結果がありません",
     "testFailed": "速度テストに失敗しました: {{error}}",
-    "empty": "エンドポイントがありません"
+    "empty": "エンドポイントがありません",
+    "endpointCount": "{{count}} 件のエンドポイント",
+    "removeEndpoint": "エンドポイントを削除"
   },
   "providerAdvanced": {
     "pricingConfig": "課金設定",
@@ -1335,7 +1573,10 @@
     "reasoningEffortHint": "上流が low/high/max などの思考の深さの制御に対応している場合に有効化します。有効にすると思考モードも自動的にオンになり、Codex の reasoning.effort を上流の Chat パラメータに変換します。",
     "reasoningGroupTitle": "思考能力",
     "reasoningSectionHint": "プリセットの供給元は自動的に設定され、カスタム供給元は名前/URL から自動推論されます。自動識別が正しくない場合のみ手動で上書きしてください。",
-    "advancedSectionHint": "上流フォーマット、モデルマッピング、思考能力、カスタム User-Agent の設定を含みます。Chat Completions プロトコルを使用するプロバイダーはルーティング引き継ぎの有効化が必要です。"
+    "advancedSectionHint": "上流フォーマット、モデルマッピング、思考能力、カスタム User-Agent の設定を含みます。Chat Completions プロトコルを使用するプロバイダーはルーティング引き継ぎの有効化が必要です。",
+    "noCommonConfigToApply": "共通設定スニペットが空か、書き込める内容がありません",
+    "fixSmartQuotes": "文字列の区切りに使われているスマート引用符を置換",
+    "tomlInvalid": "TOML が無効です"
   },
   "geminiConfig": {
     "envFile": "環境変数 (.env)",
@@ -1405,7 +1646,8 @@
     "modelExtraFieldKeyPlaceholder": "variants",
     "sdkOptions": "SDK オプション",
     "modelOptionKeyPlaceholder": "provider",
-    "modelOptionValuePlaceholder": "{\"order\": [\"baseten\"]}"
+    "modelOptionValuePlaceholder": "{\"order\": [\"baseten\"]}",
+    "modelIdDuplicate": "ID {{id}} のモデルは既に存在します"
   },
   "providerPreset": {
     "label": "プロバイダータイプ",
@@ -1418,7 +1660,13 @@
     "sortAriaLabel": "プリセットの並び順を切り替え",
     "sortNameAscTooltip": "名前順 A-Z で並び替え",
     "sortOriginalTooltip": "元の順序に戻す",
-    "noSearchResults": "一致するプロバイダープリセットがありません。"
+    "noSearchResults": "一致するプロバイダープリセットがありません。",
+    "hideSponsoredAriaLabel": "スポンサープリセットを非表示",
+    "hideSponsoredTooltip": "スポンサープリセットを非表示",
+    "showSponsoredTooltip": "スポンサープリセットを表示",
+    "sponsorDisclosure": "星またはハートの付いたプリセットはスポンサー枠です。その登録リンク経由で登録すると、CC Switch が紹介報酬を受け取る場合があります。",
+    "sponsorPolicyLink": "スポンサーポリシー",
+    "sponsoredTooltip": "スポンサー枠：このパートナーは CC Switch を支援しており、その登録リンク経由で登録すると CC Switch が紹介報酬を受け取る場合があります。"
   },
   "usage": {
     "title": "利用統計",
@@ -1591,7 +1839,41 @@
     "modelsDevTruncated": "{{total}} 件中、先頭 {{shown}} 件のみ表示しています。検索条件を絞り込んでください",
     "modelsDevDefaultHint": "最新リリース順に {{shown}} 件を表示しています（全 {{total}} 件）。キーワード入力で全件検索できます",
     "cacheReadCostPerMillion": "キャッシュ読み取りコスト（100万トークンあたり、USD）",
-    "cacheCreationCostPerMillion": "キャッシュ書き込みコスト（100万トークンあたり、USD）"
+    "cacheCreationCostPerMillion": "キャッシュ書き込みコスト（100万トークンあたり、USD）",
+    "unpriced": "価格未設定",
+    "modelIdDuplicate": "{{id}} の料金設定は既に存在します。",
+    "modelIdNormalizedHint": "{{id}} として保存されます",
+    "statusErrors": "エラー（≥400）",
+    "rangeTooLong": "期間は最大 {{days}} 日までです。",
+    "customRangeMaxHint": "日付と時刻に対応、最大 {{days}} 日",
+    "exportSuccess": "{{count}} 件のリクエストを {{path}} にエクスポートしました",
+    "exportFailed": "エクスポートに失敗しました: {{message}}",
+    "export": "エクスポート",
+    "exportCsv": "リクエストログ（CSV）",
+    "exportJson": "リクエストログ（JSON）",
+    "budget": {
+      "daily": "日次上限（USD）",
+      "dailyTooltip": "日次: {{usage}} / {{limit}}",
+      "description": "プロバイダーごとに日次・月次の支出上限を設定し、上限に達したらリクエストをブロックすることもできます。",
+      "enforceDescription": "オフ：上限は進捗としてのみ表示されます。オン：プロバイダーが日次または月次の上限に達すると、ローカルルーティングサービスはそのプロバイダーへのリクエスト送信を停止し、明確なエラーを返します（またはキュー内の次のプロバイダーにフェイルオーバーします）。コストは料金表に基づく推定値です。",
+      "enforceTitle": "上限に達したらリクエストをブロック",
+      "exceededTooltip": "予算上限に達しました",
+      "invalid": "正の金額（USD）を入力するか、上限なしの場合は空欄にしてください。",
+      "monthLabel": "今月",
+      "monthly": "月次上限（USD）",
+      "monthlyTooltip": "月次: {{usage}} / {{limit}}",
+      "noProviders": "このアプリにはプロバイダーが設定されていません。",
+      "saveFailed": "予算上限の保存に失敗しました: {{error}}",
+      "saved": "予算上限を保存しました",
+      "thisMonth": "今月",
+      "title": "予算上限",
+      "today": "今日",
+      "todayLabel": "今日",
+      "exceededToast": "{{provider}} が{{period}}予算の上限に達しました",
+      "exceededBadge": "超過",
+      "periodDaily": "日次",
+      "periodMonthly": "月次"
+    }
   },
   "usageScript": {
     "title": "利用状況を設定",
@@ -1696,12 +1978,16 @@
     "retry": "更新を再試行",
     "openReleases": "リリースページを開く",
     "openConfigDir": "設定フォルダを開く",
-    "quit": "終了"
+    "quit": "終了",
+    "checkFailed": "更新を確認できませんでした（オフラインの可能性があります）。アップグレードを再試行するか、バックアップを復元できます。"
   },
   "errors": {
     "usage_query_failed": "利用状況の取得に失敗しました",
     "configLoadFailedTitle": "設定の読み込みに失敗しました",
-    "configLoadFailedMessage": "設定ファイルを読み込めません:\n{{path}}\n\nエラー詳細:\n{{detail}}\n\nJSON が正しいか確認するか、同じディレクトリのバックアップファイル（config.json.bak など）から復元してください。\n\nアプリを終了して修正してください。"
+    "configLoadFailedMessage": "設定ファイルを読み込めません:\n{{path}}\n\nエラー詳細:\n{{detail}}\n\nJSON が正しいか確認するか、同じディレクトリのバックアップファイル（config.json.bak など）から復元してください。\n\nアプリを終了して修正してください。",
+    "detailsCopied": "詳細をコピーしました",
+    "copyDetails": "詳細をコピー",
+    "configLoadFailedRestoreGuide": "バックアップを手動で復元する方法：\n{{url}}"
   },
   "presetSelector": {
     "title": "設定タイプを選択",
@@ -1802,7 +2088,10 @@
       "headers": "ヘッダー（任意）",
       "headersPlaceholder": "Authorization: Bearer your_token_here\nContent-Type: application/json",
       "preview": "設定プレビュー",
-      "apply": "設定を反映"
+      "apply": "設定を反映",
+      "invalidLines": "一部の行を解析できません。先に修正してください。",
+      "cwd": "作業ディレクトリ",
+      "unparsedLines": "解析できません: {{lines}}"
     },
     "id": "識別子（ユニーク）",
     "type": "タイプ",
@@ -1828,7 +2117,8 @@
       "commandRequired": "コマンドを入力してください",
       "singleServerObjectRequired": "単一の MCP サーバーオブジェクトを貼り付けてください（トップレベルの mcpServers は不要）",
       "saveFailed": "保存に失敗しました",
-      "deleteFailed": "削除に失敗しました"
+      "deleteFailed": "削除に失敗しました",
+      "jsonInvalidDetail": "無効な JSON: {{error}}"
     },
     "validation": {
       "ok": "コマンドが見つかりました",
@@ -1865,6 +2155,10 @@
         "name": "@upstash/context7-mcp",
         "description": "最新のライブラリドキュメントとコード例を提供する Context7 ドキュメント検索ツール。キー設定で上限が拡張されます"
       }
+    },
+    "syncSkip": {
+      "hint": "{{app}} は同期されていません：設定ディレクトリ {{dir}} が存在しません。{{app}} を一度起動してから、サーバーを再度切り替えてください。",
+      "badge": "{{app}}：未同期"
     }
   },
   "prompts": {
@@ -1903,6 +2197,8 @@
     "disableFailed": "無効化に失敗しました",
     "importSuccess": "インポートしました",
     "importFailed": "インポートに失敗しました",
+    "liveFileDiffers": "現在のプロンプトファイルが CC Switch の外部で編集され、有効なプロンプトと異なっています。プロンプトを再度有効にするか編集すると、それらの変更は上書きされます。",
+    "importLiveChanges": "外部の変更をインポート",
     "confirm": {
       "deleteTitle": "削除の確認",
       "deleteMessage": "プロンプト「{{name}}」を削除してもよろしいですか？"
@@ -1941,7 +2237,9 @@
     "applySuccess": "プロジェクトを適用しました",
     "applyFailed": "プロジェクトの適用に失敗しました: {{detail}}",
     "applyWarnings": "プロジェクトを適用しました（警告 {{warningCount}} 件）：\n{{details}}",
-    "clearSuccess": "プロジェクトを使用しない状態に切り替えました"
+    "clearSuccess": "プロジェクトを使用しない状態に切り替えました",
+    "previewMcp": "{{count}} 個の MCP",
+    "previewTitle": "適用すると有効になります：{{summary}}"
   },
   "workspace": {
     "title": "ワークスペースファイル",
@@ -2077,7 +2375,9 @@
       "legacyTimeoutDescription": "この設定ではまだ agents.defaults.timeout を使用しています。ここで保存すると timeoutSeconds に移行されます。",
       "saveSuccess": "Agents 設定を保存しました",
       "saveFailed": "Agents 設定の保存に失敗しました",
-      "loadFailed": "Agents 設定の読み込みに失敗しました"
+      "loadFailed": "Agents 設定の読み込みに失敗しました",
+      "primaryRequired": "フォールバックを追加する前にプライマリモデルを選択してください。",
+      "positiveInteger": "{{min}} 以上の整数を入力してください。"
     },
     "health": {
       "title": "OpenClaw 設定の警告を検出しました",
@@ -2088,7 +2388,10 @@
       "parseFailed": "openclaw.json を有効な JSON5 として解析できませんでした。ここで編集する前にファイルを修正してください。"
     },
     "primaryModel": "プライマリモデル",
-    "fallbackModel": "フォールバックモデル"
+    "fallbackModel": "フォールバックモデル",
+    "externalChange": "この設定はディスク上で変更されました。未保存の編集内容は保持されています。",
+    "reloadFromDisk": "編集を破棄して再読み込み",
+    "modelsOrderHint": "最初のモデルがデフォルト（Primary）で、その他はフォールバックです。矢印で順序を変更できます。"
   },
   "hermes": {
     "form": {
@@ -2164,7 +2467,9 @@
       "selectAll": "すべて選択",
       "clearSelection": "選択を解除",
       "deleteSelected": "選択 {{count}} 件を削除",
-      "deleting": "削除中..."
+      "deleting": "削除中...",
+      "hideValue": "値を隠す",
+      "showValue": "値を表示"
     },
     "field": {
       "value": "値",
@@ -2177,7 +2482,10 @@
     },
     "delete": {
       "success": "環境変数を削除しました",
-      "error": "環境変数の削除に失敗しました"
+      "error": "環境変数の削除に失敗しました",
+      "undo": "元に戻す",
+      "skippedTitle": "{{count}} 個の変数を CC Switch で削除できませんでした",
+      "skippedDescription": "{{names}} はプロセス環境（launchd、systemd、~/.zshenv、または親シェル）から来ています。設定されている場所で削除してから、CC Switch を再起動してください。"
     },
     "backup": {
       "location": "バックアップ場所: {{path}}"
@@ -2190,6 +2498,15 @@
     },
     "error": {
       "noSelection": "削除する環境変数を選択してください"
+    },
+    "restore": {
+      "success": "環境変数を復元しました",
+      "error": "環境変数の復元に失敗しました"
+    },
+    "profile": {
+      "copy": "シェルプロファイルとしてコピー",
+      "copied": "環境変数をコピーしました（API キーを含みます）",
+      "copyFailed": "環境変数をエクスポートできませんでした"
     }
   },
   "skills": {
@@ -2317,6 +2634,10 @@
     "uninstallConfirm": "「{{name}}」をアンインストールしますか？すべてのアプリからこのスキルが削除され、削除前にローカルバックアップが自動作成されます。",
     "uninstallInMainPanel": "メインパネルからスキルをアンインストールしてください",
     "notFound": "スキルが見つかりません",
+    "openReadme": "README を開く",
+    "uninstallWarnings": "一部のファイルを削除できませんでした。手動で削除してください",
+    "unmanagedConflictHint": "{{name}} という名前の管理対象スキルがありますが、このアプリでは有効になっておらず、このフォルダーは CC Switch のコピーではありません。インポートする前に、どちらのバージョンを使うか確認してください。",
+    "unmanagedConflict": "名前の競合",
     "backup": {
       "location": "バックアップ場所: {{path}}"
     },
@@ -2400,7 +2721,16 @@
       "title": "MCP サーバーを一括インポート",
       "targetApps": "ターゲットアプリ",
       "serverCount": "MCP サーバー（{{count}} 件）",
-      "enabledWarning": "インポート後、指定したすべてのアプリに即座に書き込まれます"
+      "enabledWarning": "インポート後、指定したすべてのアプリに即座に書き込まれます",
+      "executionWarning": "MCP サーバーは対象アプリの起動時に、あなたのユーザー権限でこのコンピューター上のコマンドを実行します。下のコマンド、引数、環境変数をすべて確認し、信頼できる提供元のサーバーだけをインポートしてください。",
+      "parseFailed": "MCP 設定をデコードできませんでした。",
+      "command": "コマンド",
+      "env": "環境変数",
+      "headers": "ヘッダー",
+      "riskyCommand": "このサーバーはシェルやダウンローダーを実行するか、引数にシェルのメタ文字を含んでいます。任意のコードを実行できます。",
+      "enableNowLabel": "対象アプリで今すぐ有効にする（各アプリの設定ファイルに書き込む）",
+      "linkRequestedEnable": "このリンクはこれらのサーバーを直ちに有効にするよう求めています。上のチェックボックスをオンにした場合にのみ有効になります。",
+      "disabledHint": "サーバーは無効の状態で CC Switch に保存され、アプリの設定ファイルは変更されません。MCP ページでアプリごとに有効にできます。"
     },
     "prompt": {
       "title": "システムプロンプトをインポート",
@@ -2408,7 +2738,9 @@
       "name": "名前",
       "description": "説明",
       "contentPreview": "内容プレビュー",
-      "enabledWarning": "インポート後すぐにこのプロンプトが有効になり、他は無効になります"
+      "enabledWarning": "インポート後すぐにこのプロンプトが有効になり、他は無効になります",
+      "lineCount": "{{count}} 行、{{chars}} 文字",
+      "enableNowLabel": "今すぐ有効化：{{app}} の現在のプロンプトファイルをこの内容で置き換えます（現在のファイルはバックアッププロンプトとして保存されます）"
     },
     "skill": {
       "title": "Claude スキルリポジトリを追加",
@@ -2425,7 +2757,36 @@
     "usageApiKey": "使用量 API キー",
     "usageBaseUrl": "使用量クエリ URL",
     "usageAutoInterval": "自動クエリ",
-    "usageAutoIntervalValue": "{{minutes}} 分ごと"
+    "usageAutoIntervalValue": "{{minutes}} 分ごと",
+    "endpointHostLabel": "リクエストの送信先",
+    "usageScriptSource": "スクリプトのソース",
+    "usageScriptDecodeFailed": "（スクリプトをデコードできませんでした）",
+    "usageScriptEnableLabel": "この使用量スクリプトを有効にする（使用量を照会するたびに CC Switch 内で実行されます）",
+    "switchRequestedWarning": "このリンクはこのプロバイダーを直ちに現在のプロバイダーにするよう求めています。その場合、{{app}} のすべての通信が {{host}} に送られます。下のチェックボックスをオンにした場合にのみ切り替えます。",
+    "switchNowLabel": "今すぐこのプロバイダーに切り替える（{{app}} のすべての通信を {{host}} に送る）",
+    "switchNowWarning": "インポート直後から、プロンプトやファイルの内容を含む {{app}} のすべての通信が {{host}} に送られます。",
+    "firstProviderNotice": "{{app}} にはまだ有効なプロバイダーがないため、このプロバイダーが現在のプロバイダーになります。",
+    "bundleProvider": "プロバイダー",
+    "bundleMcp": "MCP サーバー",
+    "bundlePrompt": "プロンプト",
+    "bundleSkill": "スキルリポジトリ",
+    "bundleDescription": "このリンクには {{count}} 件の項目が含まれています。各項目を確認し、インポートしないものはチェックを外してください。",
+    "bundlePartial": "{{total}} 件中 {{ok}} 件をインポートしました",
+    "bundleSuccess": "{{count}} 件をインポートしました",
+    "importBundle": "バンドルをインポート",
+    "trustPublisher": "今後のリンクのために、この鍵を「{{publisher}}」として記憶する",
+    "queuedRequests": "この後にさらに {{count}} 件のインポート要求が表示されます。",
+    "unsignedLink": "署名なしリンク",
+    "unsignedLinkHint": "このリンクは誰でも作成できます。出所が信頼できる場合のみインポートしてください。",
+    "signedBy": "{{publisher}} による署名",
+    "signedByUnverified": "「{{publisher}}」を名乗る鍵による署名",
+    "signatureKeyId": "鍵 ID {{keyId}}",
+    "publisherMismatch": "この名前は既知の発行者のものですが、リンクは別の鍵で署名されています。なりすましの可能性があります。",
+    "publisherNew": "署名は有効ですが、CC Switch はこの鍵を初めて確認しました。",
+    "usageScriptSendsKeyTo": "有効にすると、このスクリプトは API キーを次の宛先に送信する可能性があります: {{hosts}}",
+    "usageScriptContacts": "有効にすると、このスクリプトは次の宛先に接続します: {{hosts}}",
+    "usageScriptNoHosts": "このスクリプトは実行時にリクエスト URL を組み立てます。データの送信先はソースを確認してください。",
+    "usageScriptPrivateHosts": "ローカルまたはプライベートネットワークのアドレスにもアクセスします: {{hosts}}"
   },
   "iconPicker": {
     "search": "アイコンを検索",
@@ -2454,14 +2815,34 @@
     "skillsFailedDescription": "Skills 画面で「既存をインポート」をクリックして手動でインポートしてください（または再起動して再試行）。"
   },
   "agents": {
-    "title": "エージェント"
+    "title": "エージェント",
+    "created": "エージェント {{name}} を作成しました",
+    "description": "~/.claude/agents にある Claude Code のサブエージェントです。Claude Code の次回起動時に読み込まれます。",
+    "new": "新しいエージェント",
+    "empty": "サブエージェントはまだありません。作成して始めましょう。",
+    "invalidHint": "frontmatter には name と description が必要です。ないと Claude Code はこのファイルを無視します。",
+    "invalid": "frontmatter が無効です",
+    "create": "エージェントを作成",
+    "comingSoon": {
+      "title": "近日公開",
+      "description": "エージェント管理機能は現在開発中です。強力な自律機能にご期待ください。"
+    },
+    "field": {
+      "name": "名前",
+      "nameInvalid": "小文字の英字、数字、ハイフンを使用してください。",
+      "description": "このエージェントを使用するタイミング",
+      "model": "モデル",
+      "tools": "ツール",
+      "prompt": "システムプロンプト"
+    }
   },
   "health": {
     "operational": "正常",
     "degraded": "低下",
     "failed": "失敗",
     "circuitOpen": "サーキットオープン",
-    "consecutiveFailures": "{{count}} 回連続失敗"
+    "consecutiveFailures": "{{count}} 回連続失敗",
+    "responseTimeSuffix": "（{{ms}} ms）"
   },
   "failover": {
     "enabled": "{{app}} フェイルオーバーが有効になりました",
@@ -2469,12 +2850,15 @@
     "toggleFailed": "操作に失敗しました: {{detail}}",
     "inQueue": "キュー内",
     "addQueue": "追加",
+    "priorityBadge": "P{{priority}}",
+    "toggleLabel": "{{app}} フェイルオーバー",
     "priority": {
       "tooltip": "フェイルオーバー優先度 {{priority}}"
     },
     "tooltip": {
       "enabled": "{{app}} フェイルオーバーが有効\nキューの優先度（P1→P2→...）で使用します",
-      "disabled": "{{app}} フェイルオーバーを有効にする\nキューの P1 に即時切替し、失敗時は次を順に試行します"
+      "disabled": "{{app}} フェイルオーバーを有効にする\nキューの P1 に即時切替し、失敗時は次を順に試行します",
+      "takeoverRequired": "フェイルオーバーを有効にする前に {{app}} を引き継いでください"
     }
   },
   "proxy": {
@@ -2572,7 +2956,13 @@
       "invalidAddress": "無効なアドレスです。IPv4（例: 127.0.0.1）、IPv6（例: ::1）、または localhost を入力してください",
       "configSaved": "ルーティング設定を保存しました",
       "configSaveFailed": "設定の保存に失敗しました",
-      "restartRequired": "アドレスまたはポートの変更を反映するにはルーティングサービスの再起動が必要です"
+      "restartRequired": "アドレスまたはポートの変更を反映するにはルーティングサービスの再起動が必要です",
+      "lanExposure": {
+        "tokenCopied": "アクセストークンをコピーしました",
+        "title": "このアドレスではルーティングサービスが他のデバイスに公開されます",
+        "description": "このアドレスにアクセスできる人は誰でも、あなたのプロバイダーのクレジットを消費できる可能性があります。他のデバイスからのリクエストは、下のアクセストークンを \"Authorization: Bearer <token>\"（または x-api-key / x-goog-api-key）として送る必要があります。このコンピューター上のアプリはトークンなしで引き続き使えます。信頼できるネットワークでのみ使用してください。",
+        "tokenLabel": "アクセストークン"
+      }
     },
     "switchFailed": "切り替えに失敗しました: {{error}}",
     "takeover": {
@@ -2583,7 +2973,8 @@
       "tooltip": {
         "active": "{{appLabel}} がルーティング中 - {{address}}:{{port}}\nホットスイッチングのためプロバイダを切り替え",
         "broken": "{{appLabel}} がルーティング中ですが、ルーティングサービスが実行されていません",
-        "inactive": "{{appLabel}} のリクエストをローカルルーティング経由でルーティング"
+        "inactive": "{{appLabel}} のリクエストをローカルルーティング経由でルーティング",
+        "lanExposed": "ネットワークアドレスで待ち受け中：他のデバイスにはアクセストークンが必要です"
       }
     },
     "failover": {
@@ -2607,7 +2998,13 @@
       "removeFailed": "削除に失敗しました",
       "reorderSuccess": "キュー順序を更新しました",
       "reorderFailed": "順序の更新に失敗しました",
-      "toggleFailed": "状態の更新に失敗しました"
+      "toggleFailed": "状態の更新に失敗しました",
+      "circuitReset": "サーキットブレーカーをリセットしました",
+      "lastFailure": "最終失敗 {{time}}: {{error}}",
+      "moveUp": "上へ移動",
+      "moveDown": "下へ移動",
+      "test": "接続テスト",
+      "resetCircuit": "サーキットブレーカーをリセット"
     },
     "autoFailover": {
       "info": "フェイルオーバーキューに複数のプロバイダーが設定されている場合、リクエストが失敗すると優先度順に試行します。プロバイダーが連続失敗のしきい値に達すると、サーキットブレーカーが開き、一時的にスキップされます。",
@@ -2643,7 +3040,8 @@
       "maxRetriesHint": "リクエスト失敗時のリトライ回数（0-10）",
       "streamingFirstByteHint": "最初のデータチャンクを待つ最大時間、範囲 1-120 秒、デフォルト 60 秒",
       "streamingIdleHint": "データチャンク間の最大間隔、範囲 60-600 秒、0 で無効化（途中停止を防止）",
-      "nonStreamingHint": "非ストリーミングリクエストの合計タイムアウト、範囲 60-1200 秒、デフォルト 600 秒（10 分）"
+      "nonStreamingHint": "非ストリーミングリクエストの合計タイムアウト、範囲 60-1200 秒、デフォルト 600 秒（10 分）",
+      "rangeError": "{{min}} から {{max}} までの整数を入力してください。"
     },
     "logging": {
       "enabled": "ログ記録が有効になりました",
@@ -2652,10 +3050,56 @@
     },
     "server": {
       "started": "ルーティングサービスが開始されました - {{address}}:{{port}}",
-      "startFailed": "ルーティングサービスの開始に失敗しました: {{detail}}"
+      "startFailed": "ルーティングサービスの開始に失敗しました: {{detail}}",
+      "stopped": "ルーティングサービスが停止しました",
+      "stopFailed": "ルーティングサービスの停止に失敗しました: {{detail}}"
     },
     "stoppedWithRestore": "ルーティングサービスが停止し、すべてのルーティング設定が復元されました",
-    "stopWithRestoreFailed": "停止に失敗しました: {{detail}}"
+    "stopWithRestoreFailed": "停止に失敗しました: {{detail}}",
+    "inspector": {
+      "title": "最近のリクエスト",
+      "errorsOnly": "エラーのみ",
+      "lastError": "最新のエラー：{{error}}",
+      "lastRequestAt": "最新のリクエスト：{{time}}",
+      "empty": "今日のリクエストはありません",
+      "openDetail": "{{time}} のリクエスト {{status}} {{model}}",
+      "view": "リクエスト表示",
+      "tabLog": "リクエストログ",
+      "tabAttempts": "プロバイダー試行"
+    },
+    "flightRecorder": {
+      "served": "応答済み",
+      "failover": "フェイルオーバー済み",
+      "aborted": "中断",
+      "skipped": "スキップ",
+      "copied": "最近のリクエストを JSON Lines としてコピーしました",
+      "copyFailed": "最近のリクエストのコピーに失敗しました",
+      "hint": "プロキシ起動以降、各リクエストが試行したすべてのプロバイダーです。メモリ内にのみ保持されます。",
+      "export": "JSON Lines としてコピー",
+      "empty": "プロキシ起動以降のリクエストはありません",
+      "ok": "OK",
+      "fail": "失敗"
+    },
+    "routing": {
+      "saved": "ルーティング設定を保存しました",
+      "saveFailed": "ルーティング設定の保存に失敗しました",
+      "title": "ルーティング",
+      "description": "リクエストがキュー内のどのプロバイダーを最初に試すかを決めます。フェイルオーバーは引き続きキューの残りを順に試します。",
+      "strategyLabel": "ルーティング戦略",
+      "weightsHint": "重みが大きいほど最初に試される頻度が高くなります。0 は最初に試されないことを意味します。",
+      "sticky": "スティッキーセッション",
+      "stickyHint": "会話を最初のリクエストを処理したプロバイダーに固定し、プロンプトキャッシュを有効に保ちます。",
+      "stickyTtl": "最終使用後の固定期間（秒、0 = デフォルト）",
+      "maxConcurrent": "プロバイダーごとの最大同時リクエスト数（0 = 無制限）。ビジーなプロバイダーはスキップされます",
+      "strategy": {
+        "priority": "優先順位",
+        "roundRobin": "ラウンドロビン",
+        "weighted": "重み付け"
+      }
+    },
+    "discover": {
+      "open": "ローカルルーティングとフェイルオーバー"
+    }
   },
   "streamCheck": {
     "reachable": "{{providerName}} は接続可能 ({{responseTimeMs}}ms)",
@@ -2669,7 +3113,8 @@
     "timeout": "タイムアウト（秒）",
     "maxRetries": "最大リトライ回数",
     "degradedThreshold": "低速判定しきい値（ミリ秒）",
-    "error": "{{providerName}} のチェックでエラーが発生しました: {{error}}"
+    "error": "{{providerName}} のチェックでエラーが発生しました: {{error}}",
+    "rangeError": "{{min}} から {{max}} までの整数を入力してください。"
   },
   "proxyConfig": {
     "proxyEnabled": "ルーティング総スイッチ",
@@ -2760,7 +3205,8 @@
     "savedAndSynced": "すべてのアプリに保存・同期されました",
     "saveAndSyncError": "保存と同期に失敗しました",
     "configJsonPreview": "設定 JSON プレビュー",
-    "configJsonPreviewHint": "以下は各アプリに同期される設定内容です（表示されているフィールドのみ上書きされ、他のカスタム設定は保持されます）"
+    "configJsonPreviewHint": "以下は各アプリに同期される設定内容です（表示されているフィールドのみ上書きされ、他のカスタム設定は保持されます）",
+    "savedButSyncFailed": "統合プロバイダーを保存しましたが、同期に失敗しました"
   },
   "omo": {
     "editProfile": "OMO 設定を編集",
@@ -2971,5 +3417,255 @@
     "expiredHint": "{{tool}}コマンドを実行してログインを更新してください",
     "queryFailed": "クエリに失敗しました",
     "refresh": "更新"
+  },
+  "errorBoundary": {
+    "copyDiagnostics": "診断情報をコピー",
+    "description": "CC Switch のこの部分を表示できませんでした。設定は変更されていません。",
+    "openConfigFolder": "設定フォルダを開く",
+    "restart": "再起動",
+    "retry": "再試行",
+    "title": "問題が発生しました"
+  },
+  "onboarding": {
+    "back": "戻る",
+    "done": {
+      "description": "準備が完了しました。開いているターミナルセッションを再起動して、各ツールに新しい設定を読み込ませてください。",
+      "manual": "ユーザーマニュアルを開く",
+      "mcp": "MCP・プロンプト・スキル：一度管理するだけで、すべてのツールに同期できます。",
+      "proxy": "ルーティングとフェイルオーバー：ローカルルーティングサービス経由でリクエストを転送し、失敗時は次のプロバイダーへ自動で切り替えます。",
+      "usage": "利用状況：プロバイダーごとのコストを集計し、日次または月次の予算上限を設定できます。"
+    },
+    "finish": "完了",
+    "next": "次へ",
+    "providers": {
+      "add": "プロバイダーを追加",
+      "count": "{{count}} 件のプロバイダーを設定済み",
+      "description": "現在使用中の設定をインポートするか、プリセットからプロバイダーを追加してください。切り替えを行うには、各ツールに少なくとも 1 つのプロバイダーが必要です。",
+      "import": "現在の設定をインポート",
+      "imported": "既存の設定を「default」という名前のプロバイダーとして保存しました。",
+      "none": "まだプロバイダーがありません",
+      "nothingToImport": "既存の設定が見つかりませんでした。"
+    },
+    "reopen": "セットアップガイド",
+    "skip": "セットアップをスキップ",
+    "start": "セットアップを開始",
+    "stepOf": "ステップ {{current}} / {{total}}",
+    "tools": {
+      "description": "使用するツールを選択してください。ホーム画面には選択したツールのみが表示されます。後から設定で変更できます。",
+      "detected": "インストール済み",
+      "detecting": "検出中…",
+      "notDetected": "見つかりません",
+      "pickOne": "ツールを 1 つ以上選択してください。"
+    },
+    "welcome": {
+      "body": "CC Switch は Claude Code、Claude Desktop、Codex、Gemini CLI、Grok Build、OpenCode、OpenClaw、Hermes のプロバイダー、MCP サーバー、プロンプト、スキルを管理します。これらのツールをすでに設定していた場合、CC Switch はその設定を「default」という名前のプロバイダーとして保存しているため、何も失われません。",
+      "wizardHint": "この簡単なセットアップでは、使用するツールの選択、既存設定のインポート、最初のプロバイダーの追加を行います。スキップしても、後で 設定 → バージョン情報 から再度開けます。"
+    }
+  },
+  "projects": {
+    "missingProfile": "（削除されたプロジェクト）",
+    "actionFailed": "ディレクトリのバインドに失敗しました: {{detail}}",
+    "bindSuccess": "{{path}} をバインドしました",
+    "applyWarnings": "適用しました（警告 {{count}} 件）:\n{{details}}",
+    "applySuccessFiles": "適用しました。更新されたファイル:\n{{details}}",
+    "applySuccess": "ディレクトリのバインドを適用しました",
+    "bindingsTitle": "ディレクトリのバインド",
+    "bindingsDescription": "フォルダー（その git リポジトリのルート）をプロジェクトにバインドし、ワンクリックで適用します。プロジェクトファイルをオンにすると、{{apps}} はそのフォルダー内のファイルでのみプロジェクトのプロバイダーを使用し、他のフォルダーはそれぞれのプロバイダーを維持します。",
+    "noBindings": "バインドされたフォルダーはまだありません",
+    "projectFilesBadge": "プロジェクトファイル",
+    "apply": "今すぐ適用",
+    "unbind": "バインドを解除",
+    "selectProfile": "バインドするプロジェクト",
+    "projectLevel": "プロジェクトファイルに書き込む",
+    "bindFolder": "フォルダーをバインド…"
+  },
+  "palette": {
+    "openSettings": "設定を開く",
+    "goBack": "前のページに戻る",
+    "shortcut": "コマンドパレットを開く",
+    "title": "コマンドパレット",
+    "placeholder": "プロバイダー、アプリ、ページを切り替え...",
+    "empty": "一致する項目がありません",
+    "apps": "アプリを切り替え",
+    "pages": "ページを開く",
+    "shortcuts": "キーボードショートカット"
+  },
+  "deeplinkAction": {
+    "failed": "ディープリンクを処理できませんでした: {{error}}",
+    "providerNotFound": "{{app}} にプロバイダー「{{provider}}」がありません",
+    "profileNotFound": "「{{name}}」という名前のプロジェクトがありません",
+    "switchTitle": "プロバイダーを切り替えますか？",
+    "switchMessage": "リンクが {{app}} を「{{provider}}」に切り替えるよう要求しています。",
+    "switchConfirm": "切り替え",
+    "profileTitle": "プロジェクトを適用しますか？",
+    "profileMessage": "リンクがプロジェクト「{{name}}」を適用するよう要求しています。",
+    "profileConfirm": "適用"
+  },
+  "logRetention": {
+    "pruned": "{{count}} 件のリクエストログを削除しました（使用量の集計は保持されます）",
+    "title": "リクエストログの保持期間",
+    "description": "リクエストごとのメタデータ（モデル、トークン、ステータス、セッション ID、エラー）はこの期間保持され、その後日次の使用量集計にまとめられます。リクエストとレスポンスの本文は保存されません。",
+    "days": "{{count}} 日",
+    "deleteNow": "リクエストログを今すぐ削除",
+    "dbSize": "データベースサイズ: {{size}}",
+    "confirmTitle": "リクエストログを削除しますか？",
+    "confirmMessage": "すべてのリクエストログは、トークンとコストを日次集計に加算した後に削除されます。使用量グラフの集計は残りますが、リクエストの詳細は失われます。",
+    "streamCheckTitle": "接続チェックログの保持期間",
+    "streamCheckDescription": "プロバイダーの接続チェック結果は、指定した日数が経過すると削除されます。",
+    "keepForever": "無期限に保持"
+  },
+  "policy": {
+    "signatureInvalid": "署名を検証できなかったため、管理ポリシーファイルを無視しました。",
+    "invalid": "読み込めなかったため、管理ポリシーファイルを無視しました。",
+    "defaultName": "組織",
+    "allowedEndpoints": "許可されたエンドポイント:",
+    "deniedEndpoints": "拒否されたエンドポイント:",
+    "disabledFeatures": "無効化された機能:",
+    "managedBy": "ポリシーによる管理: {{name}}",
+    "signed": "署名済み"
+  },
+  "sessionExport": {
+    "saved": "セッションを {{path}} にエクスポートしました",
+    "failed": "エクスポートに失敗しました: {{error}}",
+    "export": "エクスポート",
+    "markdown": "Markdown (.md)",
+    "json": "JSON (.json)"
+  },
+  "helpLink": {
+    "open": "マニュアルを開く"
+  },
+  "shortcuts": {
+    "show": "キーボードショートカットを表示",
+    "title": "キーボードショートカット",
+    "description": "現在のページで使用できるショートカットです。"
+  },
+  "startupWarnings": {
+    "settingsCorrupt": {
+      "title": "設定ファイルを読み込めませんでした",
+      "description": "settings.json が無効だったため、{{path}} に退避しました。現在はデフォルト設定を使用しています。設定で確認してください。"
+    },
+    "configDirUnavailable": {
+      "title": "データディレクトリを使用できません",
+      "description": "設定されたデータディレクトリ {{path}} が存在しません。CC Switch はデフォルトのディレクトリを使用しています。設定 > 詳細 > 設定ディレクトリ を確認してください。"
+    },
+    "proxyRestoreFailed": {
+      "title": "プロキシ引き継ぎを復元できませんでした",
+      "description": "{{app}} のプロキシ引き継ぎの復元に失敗しました：{{error}}。設定 > ルーティング を開いて再度有効にしてください。"
+    },
+    "generic": {
+      "title": "起動時の警告"
+    }
+  },
+  "workbench": {
+    "promptCopy": {
+      "title": "他のアプリで使用",
+      "done": "プロンプトを {{count}} 個のアプリにコピーしました",
+      "description": "「{{name}}」を他のアプリのプロンプト一覧にコピーします。CC Switch 以外で編集された既存のプロンプトファイルは、バックアッププロンプトとして保持されます。",
+      "activate": "コピー先で有効なプロンプトにする",
+      "copy": "コピー"
+    },
+    "audit": {
+      "exported": "監査ログを {{path}} に保存しました",
+      "filter": "操作、ソース、ID で絞り込む",
+      "export": "JSONL をエクスポート",
+      "empty": "記録されたイベントはまだありません。",
+      "time": "時刻",
+      "actor": "ソース",
+      "action": "操作",
+      "entity": "対象"
+    },
+    "history": {
+      "restoredMissingKeys": "バージョンを復元しました。API キーを再入力してください（履歴には保存されません）。",
+      "restored": "バージョンを復元しました",
+      "description": "各プロバイダーの直近 50 バージョンです。切り替え時に使用中の設定から書き戻された変更も含みます。API キーが履歴に保存されることはありません。",
+      "empty": "記録された変更はまだありません。",
+      "entities": "履歴のあるプロバイダー",
+      "versions": "{{count}} バージョン",
+      "deleted": "削除済み",
+      "pick": "プロバイダーを選択するとバージョンが表示されます。",
+      "restore": "このバージョンを復元",
+      "moreChanges": "他 {{count}} 件",
+      "restoreConfirm": "このプロバイダーを {{when}} のバージョンで置き換えますか？使用中のプロバイダーの場合、ライブ設定が書き換えられます。現在の API キーは保持されます。",
+      "title": "変更履歴と監査ログ",
+      "subtitle": "何がどこから変更されたかを確認し、ロールバック"
+    },
+    "tools": {
+      "activated": "プロファイルをツールの設定ファイルに書き込みました",
+      "importedName": "現在の設定",
+      "description": "専用タブのない CLI ツールのエンドポイント、キー、モデルを切り替えます。一覧にあるキーのみ変更し、他の設定やコメントは保持され、元のファイルはバックアップされます。{{dir}} に JSON 記述ファイルを置くとツールを追加できます。",
+      "detected": "検出済み",
+      "notDetected": "未検出",
+      "importLive": "現在の設定をインポート",
+      "addProfile": "プロファイルを追加",
+      "noProfiles": "プロファイルはまだありません。",
+      "active": "使用中",
+      "apply": "適用",
+      "editProfile": "プロファイルを編集",
+      "deleteProfile": "プロファイルを削除",
+      "profileName": "プロファイル名",
+      "secretKept": "保存済み — 空欄のままで保持",
+      "deleteConfirm": "プロファイル「{{name}}」を削除しますか？ツールの設定ファイルは変更されません。",
+      "title": "その他の CLI ツール",
+      "subtitle": "Qwen Code、Aider などのエンドポイント、キー、モデルのプロファイル"
+    },
+    "projectUsage": {
+      "title": "プロジェクト別の利用状況",
+      "description": "リクエストをセッションに照合し、セッションの Git リポジトリごとにまとめます。",
+      "range": "期間",
+      "lastDays": "過去 {{count}} 日間",
+      "empty": "この期間に記録されたリクエストはありません。",
+      "project": "プロジェクト",
+      "sessions": "セッション",
+      "requests": "リクエスト",
+      "tokens": "トークン",
+      "cost": "コスト",
+      "unattributed": "未分類",
+      "total": "合計"
+    },
+    "recovery": {
+      "title": "または、このバージョンで開けるバックアップを復元",
+      "description": "現在のデータベースはバックアップフォルダーに保持されるため、後からアップグレードすることもできます。バックアップ以降の変更は含まれません。",
+      "restore": "復元して再起動"
+    },
+    "sessionCost": {
+      "title": "記録されたリクエスト {{requests}} 件 · 入力 {{input}} / 出力 {{output}} トークン"
+    },
+    "bundle": {
+      "exported": "プロバイダー {{providers}} 件、MCP サーバー {{mcp}} 件、プロンプト {{prompts}} 件を保存しました（シークレット {{secrets}} 件を削除）",
+      "applied": "インポート完了：追加 {{added}} 件、更新 {{updated}} 件、スキップ {{skipped}} 件",
+      "statusNew": "新規",
+      "statusIdentical": "変更なし",
+      "statusConflict": "既存 — 差分あり",
+      "exportTitle": "共有バンドルをエクスポート",
+      "mcp": "MCP サーバー",
+      "prompts": "プロンプト",
+      "stripSecrets": "API キーとトークンを削除",
+      "secretsWarning": "このファイルには API キーが含まれます。信頼できる経路でのみ共有してください。",
+      "export": "エクスポート…",
+      "importTitle": "共有バンドルをインポート",
+      "importDescription": "項目は既存のデータにマージされ、何も有効化されません。既存の項目は許可した場合にのみ置き換えられ、そのキーは保持されます。",
+      "chooseFile": "ファイルを選択…",
+      "enterKey": "キーを入力（任意）",
+      "overwrite": "差分のある既存項目を置き換える",
+      "import": "{{count}} 件をインポート",
+      "title": "共有バンドル",
+      "subtitle": "キーを含めずにプロバイダー、MCP サーバー、プロンプトを共有"
+    }
+  },
+  "validation": {
+    "codex": {
+      "wireApi": {
+        "invalid": "wire_api \"{{value}}\" はサポートされていません。次のいずれかを使用してください：{{allowed}}"
+      },
+      "modelProvider": {
+        "undefined": "model_provider \"{{value}}\" に対応する [model_providers.{{value}}] テーブルがありません"
+      }
+    },
+    "env": {
+      "keyCase": "\"{{value}}\" は \"{{expected}}\" と記述してください"
+    },
+    "toml": {
+      "syntax": "TOML 構文エラー：{{message}}"
+    }
   }
 }

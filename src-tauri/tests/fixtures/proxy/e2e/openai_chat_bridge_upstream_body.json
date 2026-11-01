@@ -1,0 +1,27 @@
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": "You are a terse assistant.",
+      "role": "system"
+    },
+    {
+      "content": "Hello",
+      "role": "user"
+    },
+    {
+      "content": "Hi.",
+      "role": "assistant"
+    },
+    {
+      "content": "Say goodbye in French.",
+      "role": "user"
+    }
+  ],
+  "model": "claude-sonnet-4-5",
+  "stop": [
+    "END"
+  ],
+  "stream": false,
+  "temperature": 0.2
+}

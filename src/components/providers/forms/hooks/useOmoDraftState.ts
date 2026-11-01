@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from "react";
 import {
   buildOmoSlimProfilePreview,
   buildOmoProfilePreview,
-} from "@/types/omo";
+} from "@/config/omo";
 
 interface UseOmoDraftStateParams {
   initialOmoSettings: Record<string, unknown> | undefined;

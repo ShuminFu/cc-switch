@@ -226,12 +226,32 @@ pub(crate) fn split_leading_think_block(text: &str) -> Option<(String, String)> 
     ))
 }
 
-pub(crate) fn strip_leading_think_open_tag(text: &str) -> Option<String> {
+/// Byte offset where the reasoning body starts (just after a leading
+/// `<think>` tag, optionally preceded by whitespace).
+pub(crate) fn leading_think_body_start(text: &str) -> Option<usize> {
     let leading_ws_len = text.len() - text.trim_start().len();
-    let after_ws = &text[leading_ws_len..];
-    after_ws
-        .strip_prefix(THINK_OPEN_TAG)
-        .map(|value| value.trim().to_string())
+    text[leading_ws_len..]
+        .starts_with(THINK_OPEN_TAG)
+        .then_some(leading_ws_len + THINK_OPEN_TAG.len())
+}
+
+/// Byte offset (relative to `from`) of the closing `</think>` tag.
+pub(crate) fn find_think_close(text: &str, from: usize) -> Option<usize> {
+    text[from..].find(THINK_CLOSE_TAG)
+}
+
+/// Text following a `</think>` tag with the conventional separator removed.
+pub(crate) fn think_answer_after(text: &str, close_start: usize) -> &str {
+    strip_think_answer_separator(&text[close_start + THINK_CLOSE_TAG.len()..])
+}
+
+/// Length of the longest suffix of `text` that is a proper prefix of
+/// `</think>` (bytes that must be held back because the tag may be split).
+pub(crate) fn partial_think_close_suffix_len(text: &str) -> usize {
+    (1..THINK_CLOSE_TAG.len())
+        .rev()
+        .find(|&n| text.len() >= n && text.ends_with(&THINK_CLOSE_TAG[..n]))
+        .unwrap_or(0)
 }
 
 fn strip_think_answer_separator(text: &str) -> &str {

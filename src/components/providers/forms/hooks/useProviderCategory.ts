@@ -1,12 +1,11 @@
 import { useState, useEffect } from "react";
 import type { ProviderCategory } from "@/types";
 import type { AppId } from "@/lib/api";
-import { providerPresets } from "@/config/claudeProviderPresets";
-import { codexProviderPresets } from "@/config/codexProviderPresets";
-import { geminiProviderPresets } from "@/config/geminiProviderPresets";
-import { opencodeProviderPresets } from "@/config/opencodeProviderPresets";
-import { openclawProviderPresets } from "@/config/openclawProviderPresets";
-import { hermesProviderPresets } from "@/config/hermesProviderPresets";
+import {
+  CUSTOM_PRESET_ID,
+  findPresetEntry,
+  getPresetCategory,
+} from "@/config/presetRegistry";
 
 interface UseProviderCategoryProps {
   appId: AppId;
@@ -16,8 +15,9 @@ interface UseProviderCategoryProps {
 }
 
 /**
- * 管理供应商类别状态
- * 根据选择的预设自动更新类别
+ * Provider category state: follows the selected preset in add mode, fixed to
+ * the stored category in edit mode. Presets are resolved through the preset
+ * registry by stable id (FE-PROV-19).
  */
 export function useProviderCategory({
   appId,
@@ -26,67 +26,23 @@ export function useProviderCategory({
   initialCategory,
 }: UseProviderCategoryProps) {
   const [category, setCategory] = useState<ProviderCategory | undefined>(
-    // 编辑模式：使用 initialCategory
     isEditMode ? initialCategory : undefined,
   );
 
   useEffect(() => {
-    // 编辑模式：只在初始化时设置，后续不自动更新
     if (isEditMode) {
       setCategory(initialCategory);
       return;
     }
 
-    if (selectedPresetId === "custom") {
+    if (selectedPresetId === CUSTOM_PRESET_ID) {
       setCategory("custom");
       return;
     }
 
-    if (!selectedPresetId) return;
-
-    // 从预设 ID 提取索引
-    const match = selectedPresetId.match(
-      /^(claude|codex|gemini|opencode|openclaw|hermes)-(\d+)$/,
-    );
-    if (!match) return;
-
-    const [, type, indexStr] = match;
-    const index = parseInt(indexStr, 10);
-
-    if (type === "codex" && appId === "codex") {
-      const preset = codexProviderPresets[index];
-      if (preset) {
-        setCategory(
-          preset.category || (preset.isOfficial ? "official" : undefined),
-        );
-      }
-    } else if (type === "claude" && appId === "claude") {
-      const preset = providerPresets[index];
-      if (preset) {
-        setCategory(
-          preset.category || (preset.isOfficial ? "official" : undefined),
-        );
-      }
-    } else if (type === "gemini" && appId === "gemini") {
-      const preset = geminiProviderPresets[index];
-      if (preset) {
-        setCategory(preset.category || undefined);
-      }
-    } else if (type === "opencode" && appId === "opencode") {
-      const preset = opencodeProviderPresets[index];
-      if (preset) {
-        setCategory(preset.category || undefined);
-      }
-    } else if (type === "openclaw" && appId === "openclaw") {
-      const preset = openclawProviderPresets[index];
-      if (preset) {
-        setCategory(preset.category || undefined);
-      }
-    } else if (type === "hermes" && appId === "hermes") {
-      const preset = hermesProviderPresets[index];
-      if (preset) {
-        setCategory(preset.category || undefined);
-      }
+    const entry = findPresetEntry(appId, selectedPresetId);
+    if (entry) {
+      setCategory(getPresetCategory(entry.preset));
     }
   }, [appId, selectedPresetId, isEditMode, initialCategory]);
 

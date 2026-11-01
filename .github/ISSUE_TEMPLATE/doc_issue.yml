@@ -23,8 +23,10 @@ body:
       multiple: true
       options:
         - English
-        - 中文
+        - 简体中文
+        - 繁體中文
         - 日本語
+        - Deutsch (README_DE.md)
     validations:
       required: true
 

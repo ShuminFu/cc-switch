@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 
 use crate::app_config::AppType;
@@ -8,7 +8,7 @@ use crate::error::AppError;
 use crate::services::skill::{SkillStorageLocation, SyncMethod};
 
 /// 自定义端点配置（历史兼容，实际存储在 provider.meta.custom_endpoints）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomEndpoint {
     pub url: String,
@@ -116,14 +116,24 @@ pub struct WebDavSyncSettings {
     pub base_url: String,
     #[serde(default)]
     pub username: String,
+    /// In memory this always holds the real password. On disk it is blank
+    /// when the password lives in the OS keychain (see `password_in_keychain`).
     #[serde(default)]
     pub password: String,
+    /// Set in `settings.json` when the password is stored in the OS keychain
+    /// (CMD-04). Managed by `crate::secrets::sync_credentials`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub password_in_keychain: bool,
     #[serde(default = "default_remote_root")]
     pub remote_root: String,
     #[serde(default = "default_profile")]
     pub profile: String,
     #[serde(default)]
     pub status: WebDavSyncStatus,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Default for WebDavSyncSettings {
@@ -134,6 +144,7 @@ impl Default for WebDavSyncSettings {
             base_url: String::new(),
             username: String::new(),
             password: String::new(),
+            password_in_keychain: false,
             remote_root: default_remote_root(),
             profile: default_profile(),
             status: WebDavSyncStatus::default(),
@@ -193,8 +204,14 @@ pub struct S3SyncSettings {
     pub bucket: String,
     #[serde(default)]
     pub access_key_id: String,
+    /// In memory this always holds the real secret. On disk it is blank when
+    /// the secret lives in the OS keychain (see `secret_in_keychain`).
     #[serde(default)]
     pub secret_access_key: String,
+    /// Set in `settings.json` when the secret access key is stored in the OS
+    /// keychain (CMD-04). Managed by `crate::secrets::sync_credentials`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub secret_in_keychain: bool,
     #[serde(default)]
     pub endpoint: String,
     #[serde(default = "default_remote_root")]
@@ -214,6 +231,7 @@ impl Default for S3SyncSettings {
             bucket: String::new(),
             access_key_id: String::new(),
             secret_access_key: String::new(),
+            secret_in_keychain: false,
             endpoint: String::new(),
             remote_root: default_remote_root(),
             profile: default_profile(),
@@ -277,6 +295,25 @@ impl S3SyncSettings {
             && self.access_key_id.is_empty()
             && self.secret_access_key.is_empty()
     }
+}
+
+/// End-to-end encryption of sync artifacts (SEC-06 / SVC-04).
+///
+/// Applies to both WebDAV and S3 sync. Managed only by the dedicated
+/// `sync_encryption_*` commands, never by `save_settings`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncEncryptionSettings {
+    /// When true, uploads are encrypted and refused if the passphrase is
+    /// unavailable (never silently uploaded in plaintext).
+    #[serde(default)]
+    pub enabled: bool,
+    /// In memory the real passphrase; blank on disk when it is stored in the
+    /// OS keychain (see `passphrase_in_keychain`).
+    #[serde(default)]
+    pub passphrase: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub passphrase_in_keychain: bool,
 }
 
 /// 本机自动迁移状态。
@@ -378,8 +415,10 @@ pub struct AppSettings {
     #[serde(default = "default_show_profile_switcher")]
     pub show_profile_switcher: bool,
     /// Keep Codex ChatGPT login material in auth.json when switching to third-party providers.
-    /// Opt-in: defaults to false so third-party switches cleanly overwrite auth.json.
-    #[serde(default)]
+    /// Defaults to true for new installs (CFG-38): third-party providers get a
+    /// provider-scoped bearer token in config.toml and the login cache survives.
+    /// An explicit `false` in an existing settings file is honoured.
+    #[serde(default = "default_true")]
     pub preserve_codex_official_auth_on_switch: bool,
     /// Run official Codex providers under the shared "custom" model_provider id
     /// so official sessions share one resume-history bucket with third-party
@@ -397,6 +436,9 @@ pub struct AppSettings {
     /// User has confirmed the first-run welcome notice
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_run_notice_confirmed: Option<bool>,
+    /// User has confirmed the WebDAV auto-sync traffic warning
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_sync_confirmed: Option<bool>,
     /// User has confirmed the common config first-run notice
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub common_config_confirmed: Option<bool>,
@@ -465,6 +507,10 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub s3_sync: Option<S3SyncSettings>,
 
+    // ===== 同步加密设置 =====
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_encryption: Option<SyncEncryptionSettings>,
+
     // ===== WebDAV 备份设置（旧版，保留向后兼容）=====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webdav_backup: Option<serde_json::Value>,
@@ -488,6 +534,20 @@ pub struct AppSettings {
     // ===== 本机自动迁移状态 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_migrations: Option<LocalMigrations>,
+
+    // ===== 系统通知 / 后台健康探测 =====
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notifications: Option<crate::services::notifications::NotificationSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_probe: Option<crate::proxy::health::HealthProbeSettings>,
+
+    // ===== Provider API-key vault (DB-02 / PRODUCT-01) =====
+    /// Keep provider API keys/tokens in the OS keychain and only placeholders
+    /// in `cc-switch.db`. Opt-in, device-local (never synced). Changed only
+    /// through [`set_provider_secret_vault`], which runs the data migration;
+    /// whole-settings saves keep the current value.
+    #[serde(default)]
+    pub provider_secret_vault: bool,
 }
 
 fn default_show_in_tray() -> bool {
@@ -518,11 +578,12 @@ impl Default for AppSettings {
             usage_dashboard_refresh_interval_ms: None,
             enable_failover_toggle: false,
             show_profile_switcher: true,
-            preserve_codex_official_auth_on_switch: false,
+            preserve_codex_official_auth_on_switch: true,
             unify_codex_session_history: false,
             unify_codex_migrate_existing: None,
             failover_confirmed: None,
             first_run_notice_confirmed: None,
+            auto_sync_confirmed: None,
             common_config_confirmed: None,
             language: None,
             visible_apps: None,
@@ -545,11 +606,15 @@ impl Default for AppSettings {
             skill_storage_location: SkillStorageLocation::default(),
             webdav_sync: None,
             s3_sync: None,
+            sync_encryption: None,
             webdav_backup: None,
             backup_interval_hours: None,
             backup_retain_count: None,
             preferred_terminal: None,
             local_migrations: None,
+            notifications: None,
+            health_probe: None,
+            provider_secret_vault: false,
         }
     }
 }
@@ -640,60 +705,164 @@ impl AppSettings {
         let Some(path) = Self::settings_path() else {
             return Self::default();
         };
-        if let Ok(content) = fs::read_to_string(&path) {
-            match serde_json::from_str::<AppSettings>(&content) {
-                Ok(mut settings) => {
-                    settings.normalize_paths();
-                    settings
-                }
-                Err(err) => {
-                    log::warn!(
-                        "解析设置文件失败，将使用默认设置。路径: {}, 错误: {}",
-                        path.display(),
-                        err
-                    );
-                    Self::default()
-                }
+        let settings = Self::load_from_path(&path);
+        // CMD-04 migration: settings written by older versions (or while no
+        // keychain was available) hold credentials in plaintext. Re-save once
+        // so they move into the keychain; on failure they stay where they are.
+        if crate::secrets::sync_credentials::has_plaintext_credentials(&settings) {
+            if let Err(err) = save_settings_to_path(&settings, &path) {
+                log::warn!("[Secrets] Failed to migrate sync credentials to the keychain: {err}");
             }
-        } else {
-            Self::default()
+        }
+        settings
+    }
+
+    /// 从指定路径加载设置。
+    ///
+    /// 文件不存在时返回默认值；文件存在但无法解析时，先把损坏文件改名为
+    /// `settings.json.corrupt-<timestamp>` 保留现场（避免随后的任意一次保存
+    /// 用默认值覆盖掉用户唯一的副本），记录 error 日志，再回退到默认值。
+    fn load_from_path(path: &Path) -> Self {
+        let content = match fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Self::default(),
+            Err(err) => {
+                log::error!(
+                    "读取设置文件失败，将使用默认设置。路径: {}, 错误: {}",
+                    path.display(),
+                    err
+                );
+                return Self::default();
+            }
+        };
+        match serde_json::from_str::<AppSettings>(&content) {
+            Ok(mut settings) => {
+                settings.normalize_paths();
+                // CMD-04: resolve keychain-held sync credentials. Plaintext
+                // credentials found on disk are moved to the keychain on the
+                // next save (see `load_from_file`).
+                crate::secrets::sync_credentials::internalize_from_disk(&mut settings);
+                settings
+            }
+            Err(err) => {
+                match backup_corrupt_settings_file(path) {
+                    Ok(backup) => {
+                        log::error!(
+                            "设置文件已损坏，已备份为 {} 并使用默认设置。路径: {}, 错误: {}",
+                            backup.display(),
+                            path.display(),
+                            err
+                        );
+                        crate::init_status::push_startup_warning(
+                            crate::init_status::StartupWarning {
+                                kind: "settings_corrupt".to_string(),
+                                app_type: None,
+                                path: Some(backup.display().to_string()),
+                                message: err.to_string(),
+                            },
+                        );
+                    }
+                    Err(backup_err) => log::error!(
+                        "设置文件已损坏且备份失败，将使用默认设置。路径: {}, 解析错误: {}, 备份错误: {}",
+                        path.display(),
+                        err,
+                        backup_err
+                    ),
+                }
+                Self::default()
+            }
         }
     }
 }
 
+/// 把无法解析的设置文件改名为 `<name>.corrupt-<timestamp>`，返回备份路径。
+fn backup_corrupt_settings_file(path: &Path) -> std::io::Result<PathBuf> {
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "settings.json".to_string());
+    let ts = chrono::Local::now().format("%Y%m%d-%H%M%S%.3f");
+    let mut backup = path.with_file_name(format!("{file_name}.corrupt-{ts}"));
+    let mut n = 1;
+    while backup.exists() {
+        backup = path.with_file_name(format!("{file_name}.corrupt-{ts}-{n}"));
+        n += 1;
+    }
+    fs::rename(path, &backup)?;
+    Ok(backup)
+}
+
 fn save_settings_file(settings: &AppSettings) -> Result<(), AppError> {
-    let mut normalized = settings.clone();
-    normalized.normalize_paths();
     let Some(path) = AppSettings::settings_path() else {
         return Err(AppError::Config("无法获取用户主目录".to_string()));
     };
+    save_settings_to_path(settings, &path)
+}
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
-    }
+/// 原子写入设置文件：先写同目录临时文件（unix 上 0600）并 fsync，再 rename 覆盖。
+/// 崩溃/断电/磁盘满时磁盘上只会是完整的旧文件或完整的新文件。
+fn save_settings_to_path(settings: &AppSettings, path: &Path) -> Result<(), AppError> {
+    use std::io::Write;
+
+    let mut normalized = settings.clone();
+    normalized.normalize_paths();
+    // CMD-04: keep sync credentials out of settings.json when a keychain is available.
+    crate::secrets::sync_credentials::externalize_for_disk(&mut normalized);
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| AppError::Config("无效的设置文件路径".to_string()))?;
+    fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
 
     let json = serde_json::to_string_pretty(&normalized)
         .map_err(|e| AppError::JsonSerialize { source: e })?;
+
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| AppError::Config("无效的设置文件路径".to_string()))?
+        .to_string_lossy()
+        .to_string();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let tmp = parent.join(format!(".{file_name}.tmp.{}.{nanos}", std::process::id()));
+
+    let write_result = (|| -> Result<(), AppError> {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp).map_err(|e| AppError::io(&tmp, e))?;
+        file.write_all(json.as_bytes())
+            .map_err(|e| AppError::io(&tmp, e))?;
+        file.sync_all().map_err(|e| AppError::io(&tmp, e))?;
+        drop(file);
+        // std::fs::rename 在 Windows 上使用 MOVEFILE_REPLACE_EXISTING，可直接覆盖。
+        fs::rename(&tmp, path).map_err(|e| AppError::IoContext {
+            context: format!(
+                "原子替换设置文件失败: {} -> {}",
+                tmp.display(),
+                path.display()
+            ),
+            source: e,
+        })
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    write_result?;
+
     #[cfg(unix)]
     {
-        use std::fs::OpenOptions;
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&path)
-            .map_err(|e| AppError::io(&path, e))?;
-        file.write_all(json.as_bytes())
-            .map_err(|e| AppError::io(&path, e))?;
-    }
-
-    #[cfg(not(unix))]
-    {
-        fs::write(&path, json).map_err(|e| AppError::io(&path, e))?;
+        // 尽力 fsync 目录，确保 rename 本身落盘。
+        if let Ok(dir) = fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
     }
 
     Ok(())
@@ -706,21 +875,7 @@ fn settings_store() -> &'static RwLock<AppSettings> {
 }
 
 fn resolve_override_path(raw: &str) -> PathBuf {
-    if raw == "~" {
-        if let Some(home) = dirs::home_dir() {
-            return home;
-        }
-    } else if let Some(stripped) = raw.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    } else if let Some(stripped) = raw.strip_prefix("~\\") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    }
-
-    PathBuf::from(raw)
+    crate::config::expand_tilde(raw)
 }
 
 pub fn get_settings() -> AppSettings {
@@ -741,33 +896,74 @@ pub fn get_settings_for_frontend() -> AppSettings {
     if let Some(s3) = &mut settings.s3_sync {
         s3.secret_access_key.clear();
     }
+    if let Some(enc) = &mut settings.sync_encryption {
+        enc.passphrase.clear();
+    }
     settings.webdav_backup = None;
     settings
 }
 
-pub fn update_settings(mut new_settings: AppSettings) -> Result<(), AppError> {
-    new_settings.normalize_paths();
-    save_settings_file(&new_settings)?;
-
-    let mut guard = settings_store().write().unwrap_or_else(|e| {
+fn settings_write_guard() -> std::sync::RwLockWriteGuard<'static, AppSettings> {
+    settings_store().write().unwrap_or_else(|e| {
         log::warn!("设置锁已毒化，使用恢复值: {e}");
         e.into_inner()
-    });
+    })
+}
+
+/// 整体替换设置。写锁在落盘前获取，保证与其他写入者（`mutate_settings`、
+/// `update_settings_with`）串行，内存与文件不会交错成不同版本。
+pub fn update_settings(mut new_settings: AppSettings) -> Result<(), AppError> {
+    new_settings.normalize_paths();
+    let mut guard = settings_write_guard();
+    // The vault flag only changes together with its data migration.
+    new_settings.provider_secret_vault = guard.provider_secret_vault;
+    save_settings_file(&new_settings)?;
     *guard = new_settings;
     Ok(())
+}
+
+/// 在同一把写锁内完成 读取-合并-写入：`build` 拿到当前设置并返回要保存的新设置，
+/// 返回保存前的旧设置（供调用方比较或回滚）。这样并发的 `set_current_provider`、
+/// 同步状态更新等写入不会插入到读取与写入之间而被旧值覆盖。
+pub fn update_settings_with<F>(build: F) -> Result<AppSettings, AppError>
+where
+    F: FnOnce(&AppSettings) -> AppSettings,
+{
+    let mut guard = settings_write_guard();
+    let previous = guard.clone();
+    let mut next = build(&previous);
+    next.normalize_paths();
+    // The vault flag only changes together with its data migration.
+    next.provider_secret_vault = previous.provider_secret_vault;
+    save_settings_file(&next)?;
+    *guard = next;
+    Ok(previous)
 }
 
 fn mutate_settings<F>(mutator: F) -> Result<(), AppError>
 where
     F: FnOnce(&mut AppSettings),
 {
-    let mut guard = settings_store().write().unwrap_or_else(|e| {
-        log::warn!("设置锁已毒化，使用恢复值: {e}");
-        e.into_inner()
-    });
+    update_settings_with(|current| {
+        let mut next = current.clone();
+        mutator(&mut next);
+        next
+    })
+    .map(|_| ())
+}
+
+/// Whether the provider API-key vault is switched on for this device.
+pub fn provider_secret_vault_enabled() -> bool {
+    get_settings().provider_secret_vault
+}
+
+/// Persist the provider API-key vault flag. Callers must run the matching
+/// data migration (`crate::secrets::provider_vault_admin`).
+#[cfg_attr(test, allow(dead_code))]
+pub fn set_provider_secret_vault(enabled: bool) -> Result<(), AppError> {
+    let mut guard = settings_write_guard();
     let mut next = guard.clone();
-    mutator(&mut next);
-    next.normalize_paths();
+    next.provider_secret_vault = enabled;
     save_settings_file(&next)?;
     *guard = next;
     Ok(())
@@ -878,6 +1074,9 @@ pub fn reload_settings() -> Result<(), AppError> {
 }
 
 pub fn get_claude_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .claude_config_dir
@@ -886,6 +1085,9 @@ pub fn get_claude_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_codex_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .codex_config_dir
@@ -894,6 +1096,9 @@ pub fn get_codex_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_gemini_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .gemini_config_dir
@@ -902,6 +1107,9 @@ pub fn get_gemini_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_grok_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .grok_config_dir
@@ -910,6 +1118,9 @@ pub fn get_grok_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_opencode_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .opencode_config_dir
@@ -918,6 +1129,9 @@ pub fn get_opencode_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_openclaw_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .openclaw_config_dir
@@ -926,6 +1140,9 @@ pub fn get_openclaw_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_hermes_override_dir() -> Option<PathBuf> {
+    if crate::config::thread_isolated() {
+        return None; // TEST-09: thread-isolated tests ignore shared overrides
+    }
     let settings = settings_store().read().ok()?;
     settings
         .hermes_config_dir
@@ -1135,6 +1352,20 @@ pub fn set_s3_sync_settings(settings: Option<S3SyncSettings>) -> Result<(), AppE
     })
 }
 
+/// Current sync encryption settings (in memory, with the real passphrase).
+pub fn get_sync_encryption_settings() -> Option<SyncEncryptionSettings> {
+    settings_store().read().ok()?.sync_encryption.clone()
+}
+
+/// Replace the sync encryption settings (`None` disables encryption).
+pub fn set_sync_encryption_settings(
+    settings: Option<SyncEncryptionSettings>,
+) -> Result<(), AppError> {
+    mutate_settings(|current| {
+        current.sync_encryption = settings;
+    })
+}
+
 pub fn update_s3_sync_status(status: WebDavSyncStatus) -> Result<(), AppError> {
     mutate_settings(|current| {
         if let Some(s3) = current.s3_sync.as_mut() {
@@ -1177,5 +1408,145 @@ mod tests {
         .expect("visible apps");
 
         assert!(!visible.is_visible(&AppType::ClaudeDesktop));
+    }
+
+    #[test]
+    fn auto_sync_confirmed_round_trips_through_camel_case_json() {
+        let parsed: AppSettings = serde_json::from_value(serde_json::json!({
+            "autoSyncConfirmed": true
+        }))
+        .expect("parse settings");
+        assert_eq!(parsed.auto_sync_confirmed, Some(true));
+
+        let value = serde_json::to_value(&parsed).expect("serialize settings");
+        assert_eq!(
+            value.get("autoSyncConfirmed"),
+            Some(&serde_json::json!(true))
+        );
+
+        // 旧文件没有该字段仍可加载，且不会写出 null
+        let old: AppSettings = serde_json::from_value(serde_json::json!({
+            "showInTray": false
+        }))
+        .expect("parse old settings");
+        assert_eq!(old.auto_sync_confirmed, None);
+        let value = serde_json::to_value(&old).expect("serialize old settings");
+        assert!(value.get("autoSyncConfirmed").is_none());
+    }
+
+    #[test]
+    fn settings_file_save_and_load_round_trip_new_fields() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(".cc-switch").join("settings.json");
+        let settings = AppSettings {
+            auto_sync_confirmed: Some(true),
+            language: Some("ja".to_string()),
+            current_provider_hermes: Some("h1".to_string()),
+            ..AppSettings::default()
+        };
+
+        save_settings_to_path(&settings, &path).expect("save settings");
+        let loaded = AppSettings::load_from_path(&path);
+
+        assert_eq!(loaded.auto_sync_confirmed, Some(true));
+        assert_eq!(loaded.language.as_deref(), Some("ja"));
+        assert_eq!(loaded.current_provider_hermes.as_deref(), Some("h1"));
+
+        // 原子写入不应留下临时文件
+        let leftovers: Vec<_> = fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n != "settings.json")
+            .collect();
+        assert!(leftovers.is_empty(), "unexpected files: {leftovers:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn settings_file_is_written_with_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        save_settings_to_path(&AppSettings::default(), &path).expect("first save");
+        save_settings_to_path(&AppSettings::default(), &path).expect("overwrite save");
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    /// CMD-04: with a keychain (the in-memory test backend), settings.json
+    /// holds no sync credential, and loading restores them in memory.
+    #[test]
+    #[serial_test::serial]
+    fn settings_file_keeps_sync_credentials_in_keychain() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        let settings = AppSettings {
+            webdav_sync: Some(WebDavSyncSettings {
+                base_url: "https://dav.example.com".to_string(),
+                username: "alice".to_string(),
+                password: "webdav-pass-123".to_string(),
+                ..WebDavSyncSettings::default()
+            }),
+            s3_sync: Some(S3SyncSettings {
+                bucket: "bucket".to_string(),
+                region: "us-east-1".to_string(),
+                access_key_id: "AKID".to_string(),
+                secret_access_key: "s3-secret-456".to_string(),
+                ..S3SyncSettings::default()
+            }),
+            ..AppSettings::default()
+        };
+        save_settings_to_path(&settings, &path).expect("save");
+
+        let on_disk = fs::read_to_string(&path).unwrap();
+        assert!(!on_disk.contains("webdav-pass-123"), "{on_disk}");
+        assert!(!on_disk.contains("s3-secret-456"), "{on_disk}");
+
+        let loaded = AppSettings::load_from_path(&path);
+        assert_eq!(loaded.webdav_sync.unwrap().password, "webdav-pass-123");
+        assert_eq!(loaded.s3_sync.unwrap().secret_access_key, "s3-secret-456");
+    }
+
+    #[test]
+    fn corrupt_settings_file_is_backed_up_instead_of_silently_replaced() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        let corrupt = "{\"language\": \"ja\", \"showInTray\": tru";
+        fs::write(&path, corrupt).unwrap();
+
+        let loaded = AppSettings::load_from_path(&path);
+        assert_eq!(loaded.language, None, "falls back to defaults");
+
+        assert!(!path.exists(), "corrupt file must be moved aside");
+        let backups: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("settings.json.corrupt-")
+            })
+            .collect();
+        assert_eq!(backups.len(), 1, "exactly one corrupt backup");
+        assert_eq!(fs::read_to_string(&backups[0]).unwrap(), corrupt);
+
+        // 之后的保存不会覆盖备份
+        save_settings_to_path(&loaded, &path).expect("save defaults");
+        assert_eq!(fs::read_to_string(&backups[0]).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn missing_settings_file_loads_defaults_without_backup() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+
+        let loaded = AppSettings::load_from_path(&path);
+        assert!(loaded.show_in_tray);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 }

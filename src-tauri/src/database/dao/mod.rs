@@ -4,6 +4,7 @@
 
 pub mod failover;
 pub mod mcp;
+pub mod pricing;
 pub mod profiles;
 pub mod prompts;
 pub mod providers;
@@ -14,6 +15,9 @@ pub mod skills;
 pub mod stream_check;
 pub mod universal_providers;
 pub mod usage_rollup;
+
+#[cfg(test)]
+mod tests;
 
 // 所有 DAO 方法都通过 Database impl 提供，无需单独导出
 // 导出 FailoverQueueItem / Profile 供外部使用

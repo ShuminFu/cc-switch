@@ -1,12 +1,15 @@
+import { CopyEnvProfileMenu } from "@/components/env/CopyEnvProfileMenu";
 import {
   Activity,
   BarChart3,
   Check,
   Copy,
   Edit,
+  FileDiff,
   Loader2,
   Minus,
   Play,
+  Link2,
   Plus,
   Terminal,
   Trash2,
@@ -19,9 +22,15 @@ import type { AppId } from "@/lib/api";
 
 interface ProviderActionsProps {
   appId?: AppId;
+  /** Enables the "copy as shell profile" menu (SVC-35). */
+  providerId?: string;
   isCurrent: boolean;
   isInConfig?: boolean;
+  /** Additive apps: live config ids not loaded yet (FE-PROV-51). */
+  isConfigStatusLoading?: boolean;
   isTesting?: boolean;
+  // Some provider mutation is in flight; disable the main/failover button
+  isActionPending?: boolean;
   isProxyTakeover?: boolean;
   isOmo?: boolean;
   onSwitch: () => void;
@@ -33,6 +42,10 @@ interface ProviderActionsProps {
   onRemoveFromConfig?: () => void;
   onDisableOmo?: () => void;
   onOpenTerminal?: () => void;
+  /** Copy a ccswitch:// share link (without the API key). */
+  onShare?: () => void;
+  /** Open the "Preview changes" diff of what a switch would write (CFG-22). */
+  onPreview?: () => void;
   isAutoFailoverEnabled?: boolean;
   isInFailoverQueue?: boolean;
   onToggleFailover?: (enabled: boolean) => void;
@@ -58,9 +71,12 @@ interface MainButtonState {
 
 export function ProviderActions({
   appId,
+  providerId,
   isCurrent,
   isInConfig = false,
+  isConfigStatusLoading = false,
   isTesting,
+  isActionPending = false,
   isProxyTakeover = false,
   isOmo = false,
   onSwitch,
@@ -72,6 +88,8 @@ export function ProviderActions({
   onRemoveFromConfig,
   onDisableOmo,
   onOpenTerminal,
+  onShare,
+  onPreview,
   isAutoFailoverEnabled = false,
   isInFailoverQueue = false,
   onToggleFailover,
@@ -95,6 +113,7 @@ export function ProviderActions({
     !isAdditiveMode && !isOmo && isAutoFailoverEnabled && onToggleFailover;
 
   const handleMainButtonClick = () => {
+    if (isActionPending) return;
     if (isOmo) {
       if (isCurrent) {
         onDisableOmo?.();
@@ -142,6 +161,18 @@ export function ProviderActions({
 
     // 累加模式（OpenCode 非 OMO / OpenClaw）
     if (isAdditiveMode) {
+      if (isConfigStatusLoading) {
+        return {
+          disabled: true,
+          variant: "secondary" as const,
+          className: "",
+          icon: <Loader2 className="h-4 w-4 animate-spin" />,
+          text: "",
+          title: t("provider.configStatusLoading", {
+            defaultValue: "Checking the app config…",
+          }),
+        };
+      }
       if (isInConfig) {
         return {
           disabled: isDefaultModel === true,
@@ -151,7 +182,7 @@ export function ProviderActions({
             isDefaultModel && "opacity-40 cursor-not-allowed",
           ),
           icon: <Minus className="h-4 w-4" />,
-          text: t("provider.removeFromConfig", { defaultValue: "移除" }),
+          text: t("provider.removeFromConfig", { defaultValue: "Remove" }),
         };
       }
       return {
@@ -160,7 +191,7 @@ export function ProviderActions({
         className:
           "bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-700",
         icon: <Plus className="h-4 w-4" />,
-        text: t("provider.addToConfig", { defaultValue: "添加" }),
+        text: t("provider.addToConfig", { defaultValue: "Add" }),
       };
     }
 
@@ -172,7 +203,7 @@ export function ProviderActions({
           className:
             "bg-blue-100 text-blue-600 hover:bg-blue-200 dark:bg-blue-900/50 dark:text-blue-400 dark:hover:bg-blue-900/70",
           icon: <Check className="h-4 w-4" />,
-          text: t("failover.inQueue", { defaultValue: "已加入" }),
+          text: t("failover.inQueue", { defaultValue: "In queue" }),
         };
       }
       return {
@@ -181,7 +212,7 @@ export function ProviderActions({
         className:
           "bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700",
         icon: <Plus className="h-4 w-4" />,
-        text: t("failover.addQueue", { defaultValue: "加入" }),
+        text: t("failover.addQueue", { defaultValue: "Add" }),
       };
     }
 
@@ -223,23 +254,25 @@ export function ProviderActions({
   const canDelete =
     !isReadOnly && (isOmo || isAdditiveMode ? true : !isCurrent);
   const readOnlyHint = t("provider.managedByHermesHint", {
-    defaultValue: "由 Hermes 管理，请在 Hermes Web UI 中编辑",
+    defaultValue:
+      "Defined in Hermes' providers: dict. Edit or remove it via Hermes Web UI.",
   });
 
   return (
     <div className="flex items-center gap-1.5">
       {(appId === "openclaw" || appId === "hermes") &&
         isInConfig &&
+        !isConfigStatusLoading &&
         onSetAsDefault &&
         (() => {
           const activeLabel =
             appId === "hermes"
-              ? t("provider.inUse", { defaultValue: "已在用" })
-              : t("provider.isDefault", { defaultValue: "当前默认" });
+              ? t("provider.inUse", { defaultValue: "In Use" })
+              : t("provider.isDefault", { defaultValue: "Current Default" });
           const inactiveLabel =
             appId === "hermes"
-              ? t("provider.enable", { defaultValue: "启用" })
-              : t("provider.setAsDefault", { defaultValue: "设为默认" });
+              ? t("provider.enable", { defaultValue: "Enable" })
+              : t("provider.setAsDefault", { defaultValue: "Set Default" });
           return (
             <Button
               size="sm"
@@ -272,7 +305,9 @@ export function ProviderActions({
           size="sm"
           variant={buttonState.variant}
           onClick={handleMainButtonClick}
-          disabled={buttonState.disabled}
+          disabled={buttonState.disabled || isActionPending}
+          aria-busy={isActionPending || isConfigStatusLoading || undefined}
+          aria-label={buttonState.text ? undefined : buttonState.title}
           className={cn("w-[4.5rem] px-2.5", buttonState.className)}
         >
           {buttonState.icon}
@@ -280,7 +315,10 @@ export function ProviderActions({
         </Button>
       </span>
 
-      <div className="flex items-center gap-1">
+      {/* Secondary actions: revealed on hover/focus where hover exists,
+          always visible on touch; the main button is always shown
+          (FE-PROV-29). */}
+      <div className="flex items-center gap-1 duration-200 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity">
         <Button
           size="icon"
           variant="ghost"
@@ -298,9 +336,13 @@ export function ProviderActions({
         <Button
           size="icon"
           variant="ghost"
-          onClick={onDuplicate}
-          title={t("provider.duplicate")}
-          className={iconButtonClass}
+          onClick={isReadOnly ? undefined : onDuplicate}
+          disabled={isReadOnly}
+          title={isReadOnly ? readOnlyHint : t("provider.duplicate")}
+          className={cn(
+            iconButtonClass,
+            isReadOnly && "opacity-40 cursor-not-allowed text-muted-foreground",
+          )}
         >
           <Copy className="h-4 w-4" />
         </Button>
@@ -309,8 +351,10 @@ export function ProviderActions({
           size="icon"
           variant="ghost"
           onClick={onTest || undefined}
-          disabled={isTesting}
-          title={t("provider.connectivityCheck", "检测连通")}
+          disabled={isTesting || !onTest}
+          title={t("provider.connectivityCheck", {
+            defaultValue: "Check connectivity",
+          })}
           className={cn(
             iconButtonClass,
             !onTest && "opacity-40 cursor-not-allowed text-muted-foreground",
@@ -327,6 +371,7 @@ export function ProviderActions({
           size="icon"
           variant="ghost"
           onClick={onConfigureUsage || undefined}
+          disabled={!onConfigureUsage}
           title={t("provider.configureUsage")}
           className={cn(
             iconButtonClass,
@@ -337,12 +382,49 @@ export function ProviderActions({
           <BarChart3 className="h-4 w-4" />
         </Button>
 
+        {appId && providerId && (
+          <CopyEnvProfileMenu appId={appId} providerId={providerId} iconOnly />
+        )}
+
+        {onPreview && (
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onPreview}
+            title={t("provider.preview.title", {
+              defaultValue: "Preview changes",
+            })}
+            aria-label={t("provider.preview.title", {
+              defaultValue: "Preview changes",
+            })}
+            className={iconButtonClass}
+          >
+            <FileDiff className="h-4 w-4" />
+          </Button>
+        )}
+
+        {onShare && (
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onShare}
+            title={t("provider.copyShareLink", {
+              defaultValue: "Copy share link (without API key)",
+            })}
+            className={iconButtonClass}
+          >
+            <Link2 className="h-4 w-4" />
+          </Button>
+        )}
+
         {onOpenTerminal && (
           <Button
             size="icon"
             variant="ghost"
             onClick={onOpenTerminal}
-            title={t("provider.openTerminal", "打开终端")}
+            title={t("provider.openTerminal", {
+              defaultValue: "Open terminal",
+            })}
             className={cn(
               iconButtonClass,
               "hover:text-emerald-600 dark:hover:text-emerald-400",
@@ -356,6 +438,7 @@ export function ProviderActions({
           size="icon"
           variant="ghost"
           onClick={canDelete ? onDelete : undefined}
+          disabled={!canDelete}
           title={isReadOnly ? readOnlyHint : t("common.delete")}
           className={cn(
             iconButtonClass,

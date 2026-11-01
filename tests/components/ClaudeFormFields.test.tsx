@@ -24,6 +24,9 @@ vi.mock("@/lib/api/copilot", () => ({
 vi.mock("@/lib/api/model-fetch", () => ({
   fetchCodexOauthModels: modelFetchApiMock.fetchCodexOauthModels,
   fetchModelsForConfig: modelFetchApiMock.fetchModelsForConfig,
+}));
+
+vi.mock("@/components/providers/forms/shared/showFetchModelsError", () => ({
   showFetchModelsError: modelFetchApiMock.showFetchModelsError,
 }));
 
@@ -141,7 +144,7 @@ describe("ClaudeFormFields", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "providerForm.fetchModels",
+        name: "Fetch Models",
       }),
     );
 
@@ -164,7 +167,7 @@ describe("ClaudeFormFields", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "providerForm.fetchModels",
+        name: "Fetch Models",
       }),
     );
 
@@ -186,7 +189,7 @@ describe("ClaudeFormFields", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "一键设置",
+        name: "Quick Set",
       }),
     );
 

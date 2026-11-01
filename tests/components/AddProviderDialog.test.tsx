@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
 import type { ProviderFormValues } from "@/components/providers/forms/ProviderForm";
@@ -24,26 +26,52 @@ vi.mock("@/components/ui/dialog", () => ({
   ),
 }));
 
-let mockFormValues: ProviderFormValues;
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
+  },
+}));
 
-vi.mock("@/components/providers/forms/ProviderForm", () => ({
-  ProviderForm: ({
-    onSubmit,
-  }: {
-    onSubmit: (values: ProviderFormValues) => void;
-  }) => (
+let mockFormValues: ProviderFormValues;
+const formMountCount = vi.hoisted(() => ({ value: 0 }));
+
+vi.mock("@/components/universal", () => ({
+  UniversalProviderPanel: () => <div data-testid="universal-panel" />,
+}));
+
+function MockProviderForm({
+  onSubmit,
+}: {
+  onSubmit: (values: ProviderFormValues) => void;
+}) {
+  useEffect(() => {
+    formMountCount.value += 1;
+  }, []);
+  return (
     <form
       id="provider-form"
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit(mockFormValues);
       }}
-    />
+    >
+      <input aria-label="mock-provider-name" defaultValue="" />
+    </form>
+  );
+}
+
+vi.mock("@/components/providers/forms/ProviderForm", () => ({
+  ProviderForm: (props: { onSubmit: (values: ProviderFormValues) => void }) => (
+    <MockProviderForm {...props} />
   ),
 }));
 
 describe("AddProviderDialog", () => {
   beforeEach(() => {
+    formMountCount.value = 0;
     mockFormValues = {
       name: "Test Provider",
       websiteUrl: "https://provider.example.com",
@@ -74,7 +102,7 @@ describe("AddProviderDialog", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "common.add",
+        name: "Add",
       }),
     );
 
@@ -110,7 +138,7 @@ describe("AddProviderDialog", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "common.add",
+        name: "Add",
       }),
     );
 
@@ -158,12 +186,67 @@ context_window = 500000
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "common.add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
 
     const submitted = handleSubmit.mock.calls[0][0];
     expect(submitted.icon).toBeUndefined();
     expect(submitted.iconColor).toBeUndefined();
+  });
+
+  it("does not throw or submit when the form emits malformed settingsConfig (FE-PROV-26)", async () => {
+    const handleSubmit = vi.fn().mockResolvedValue(undefined);
+    const handleOpenChange = vi.fn();
+    mockFormValues = {
+      name: "Broken",
+      websiteUrl: "",
+      settingsConfig: "{ not json",
+    };
+
+    render(
+      <AddProviderDialog
+        open
+        onOpenChange={handleOpenChange}
+        appId="claude"
+        onSubmit={handleSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    const { toast } = await import("sonner");
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(handleSubmit).not.toHaveBeenCalled();
+    expect(handleOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("keeps the app-specific form mounted across a Universal tab switch (FE-PROV-04)", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <AddProviderDialog
+        open
+        onOpenChange={vi.fn()}
+        appId="claude"
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    const nameInput = screen.getByLabelText("mock-provider-name");
+    await user.type(nameInput, "My provider");
+    expect(formMountCount.value).toBe(1);
+
+    await user.click(screen.getByRole("tab", { name: /Universal/ }));
+    expect(await screen.findByTestId("universal-panel")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("tab", { name: /provider\.tabProviderFor|Provider$/ }),
+    );
+
+    expect(screen.getByLabelText("mock-provider-name")).toHaveValue(
+      "My provider",
+    );
+    expect(formMountCount.value).toBe(1);
   });
 });

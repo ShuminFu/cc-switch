@@ -11,6 +11,7 @@ import type {
   UniversalProviderModels,
 } from "@/types";
 import { deepClone } from "@/utils/deepClone";
+import { registerPresetCatalog } from "./presetCatalog";
 
 /**
  * 统一供应商预设接口
@@ -130,3 +131,6 @@ export function findPresetByType(
 ): UniversalProviderPreset | undefined {
   return universalProviderPresets.find((p) => p.providerType === providerType);
 }
+
+// Remote signed catalog overlay (PRODUCT-07); the list above stays the default.
+registerPresetCatalog("universal", universalProviderPresets);

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Server, Activity, Zap, Globe, ShieldAlert } from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
@@ -13,23 +13,39 @@ import { Badge } from "@/components/ui/badge";
 import { ProxyPanel } from "@/components/proxy";
 import { AutoFailoverConfigPanel } from "@/components/proxy/AutoFailoverConfigPanel";
 import { FailoverQueueManager } from "@/components/proxy/FailoverQueueManager";
+import { RoutingConfigPanel } from "@/components/proxy/RoutingConfigPanel";
 import { RectifierConfigPanel } from "@/components/settings/RectifierConfigPanel";
 import { GlobalProxySettings } from "@/components/settings/GlobalProxySettings";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ToggleRow } from "@/components/ui/toggle-row";
 import { useProxyStatus } from "@/hooks/useProxyStatus";
 import type { SettingsFormState } from "@/hooks/useSettings";
+import { PROXY_CAPABLE_APPS, getAppLabel } from "@/config/proxyApps";
 
 interface ProxyTabContentProps {
   settings: SettingsFormState;
   onAutoSave: (updates: Partial<SettingsFormState>) => Promise<boolean | void>;
+  /** Section the settings search asked to open (FE-UI-38). */
+  expandSection?: { section: string; nonce: number } | null;
 }
 
 export function ProxyTabContent({
   settings,
   onAutoSave,
+  expandSection,
 }: ProxyTabContentProps) {
   const { t } = useTranslation();
+  const [openSections, setOpenSections] = useState<string[]>(() =>
+    expandSection ? [expandSection.section] : [],
+  );
+  useEffect(() => {
+    if (!expandSection) return;
+    setOpenSections((prev) =>
+      prev.includes(expandSection.section)
+        ? prev
+        : [...prev, expandSection.section],
+    );
+  }, [expandSection]);
   const [showProxyConfirm, setShowProxyConfirm] = useState(false);
   const [showFailoverConfirm, setShowFailoverConfirm] = useState(false);
 
@@ -89,7 +105,12 @@ export function ProxyTabContent({
       transition={{ duration: 0.3 }}
       className="space-y-4"
     >
-      <Accordion type="multiple" defaultValue={[]} className="w-full space-y-4">
+      <Accordion
+        type="multiple"
+        value={openSections}
+        onValueChange={setOpenSections}
+        className="w-full space-y-4"
+      >
         {/* Local Proxy */}
         <AccordionItem
           value="proxy"
@@ -171,13 +192,20 @@ export function ProxyTabContent({
                 </div>
               )}
 
-              <Tabs defaultValue="claude" className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="claude">Claude</TabsTrigger>
-                  <TabsTrigger value="codex">Codex</TabsTrigger>
-                  <TabsTrigger value="gemini">Gemini</TabsTrigger>
+              <Tabs defaultValue={PROXY_CAPABLE_APPS[0]} className="w-full">
+                <TabsList
+                  className="grid w-full"
+                  style={{
+                    gridTemplateColumns: `repeat(${PROXY_CAPABLE_APPS.length}, minmax(0, 1fr))`,
+                  }}
+                >
+                  {PROXY_CAPABLE_APPS.map((appType) => (
+                    <TabsTrigger key={appType} value={appType}>
+                      {getAppLabel(appType)}
+                    </TabsTrigger>
+                  ))}
                 </TabsList>
-                {(["claude", "codex", "gemini"] as const).map((appType) => {
+                {PROXY_CAPABLE_APPS.map((appType) => {
                   const failoverDisabled =
                     !isRunning || !(takeoverStatus?.[appType] ?? false);
                   return (
@@ -205,6 +233,9 @@ export function ProxyTabContent({
                           appType={appType}
                           disabled={failoverDisabled}
                         />
+                      </div>
+                      <div className="border-t border-border/50 pt-6">
+                        <RoutingConfigPanel appType={appType} />
                       </div>
                     </TabsContent>
                   );

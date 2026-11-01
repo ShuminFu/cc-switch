@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { useTranslation } from "react-i18next";
 import { Save } from "lucide-react";
 import { toast } from "sonner";
@@ -7,41 +7,33 @@ import { extractErrorMessage } from "@/utils/errorUtils";
 import { Button } from "@/components/ui/button";
 import JsonEditor from "@/components/JsonEditor";
 import { parseOpenClawEnvEditorValue } from "./utils";
+import { useDarkMode } from "@/hooks/useDarkMode";
+import { useEditableBuffer } from "./hooks/useEditableBuffer";
+import { ExternalChangeAlert } from "./ExternalChangeAlert";
+
+const envToEditorValue = (envData: Record<string, unknown> | null) =>
+  envData && Object.keys(envData).length > 0
+    ? JSON.stringify(envData, null, 2)
+    : "{}";
 
 const EnvPanel: React.FC = () => {
   const { t } = useTranslation();
   const { data: envData, isLoading } = useOpenClawEnv();
   const saveEnvMutation = useSaveOpenClawEnv();
-  const [editorValue, setEditorValue] = useState("{}");
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    const nextValue =
-      envData && Object.keys(envData).length > 0
-        ? JSON.stringify(envData, null, 2)
-        : "{}";
-    setEditorValue(nextValue);
-  }, [envData]);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
+  const isDarkMode = useDarkMode();
+  const {
+    form: editorValue,
+    setForm: setEditorValue,
+    externalChange,
+    reload,
+    markSaved,
+  } = useEditableBuffer(envData, envToEditorValue, "{}");
 
   const handleSave = async () => {
     try {
       const env = parseOpenClawEnvEditorValue(editorValue);
       await saveEnvMutation.mutateAsync(env);
+      markSaved();
       toast.success(t("openclaw.env.saveSuccess"));
     } catch (error) {
       const detail = extractErrorMessage(error);
@@ -87,6 +79,8 @@ const EnvPanel: React.FC = () => {
             "Edit the full env section as JSON. Nested objects such as env.vars and env.shellEnv are supported.",
         })}
       </p>
+
+      {externalChange && <ExternalChangeAlert onReload={reload} />}
 
       <JsonEditor
         value={editorValue}

@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ProjectBindingsSection } from "@/components/projects/ProjectBindingsSection";
 import {
   useDeleteProfileMutation,
   useProfilesQuery,
@@ -165,6 +166,7 @@ export function ProfileManageDialog({
               </div>
             ))}
           </div>
+          <ProjectBindingsSection profiles={profiles} />
           <DialogFooter>
             <Button
               type="button"

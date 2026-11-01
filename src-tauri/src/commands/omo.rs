@@ -10,6 +10,7 @@ pub async fn read_omo_local_file() -> Result<OmoLocalFileData, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_current_omo_provider_id(state: State<'_, AppState>) -> Result<String, String> {
     let provider = state
         .db
@@ -19,6 +20,7 @@ pub async fn get_current_omo_provider_id(state: State<'_, AppState>) -> Result<S
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn disable_current_omo(state: State<'_, AppState>) -> Result<(), String> {
     let providers = state
         .db
@@ -44,6 +46,7 @@ pub async fn read_omo_slim_local_file() -> Result<OmoLocalFileData, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_current_omo_slim_provider_id(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
@@ -55,6 +58,7 @@ pub async fn get_current_omo_slim_provider_id(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn disable_current_omo_slim(state: State<'_, AppState>) -> Result<(), String> {
     let providers = state
         .db

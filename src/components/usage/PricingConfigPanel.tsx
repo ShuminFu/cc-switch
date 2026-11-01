@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Table,
@@ -28,12 +28,17 @@ import {
 } from "@/components/ui/select";
 import { useModelPricing, useDeleteModelPricing } from "@/lib/query/usage";
 import { PricingEditModal } from "./PricingEditModal";
-import { isNonNegativeDecimalString, type ModelPricing } from "@/types/usage";
+import {
+  isNonNegativeDecimalString,
+  KNOWN_APP_TYPES,
+  type ModelPricing,
+} from "@/types/usage";
 import { Plus, Pencil, Trash2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { proxyApi } from "@/lib/api/proxy";
 
-const PRICING_APPS = ["claude", "codex", "gemini", "grokbuild"] as const;
+// Every app the usage dashboard can attribute cost to (FE-UI-29).
+const PRICING_APPS = KNOWN_APP_TYPES;
 type PricingApp = (typeof PRICING_APPS)[number];
 type PricingModelSource = "request" | "response";
 
@@ -44,6 +49,23 @@ interface AppConfig {
 
 type AppConfigState = Record<PricingApp, AppConfig>;
 
+const defaultConfigs = (): AppConfigState =>
+  Object.fromEntries(
+    PRICING_APPS.map((app) => [app, { multiplier: "1", source: "response" }]),
+  ) as AppConfigState;
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : "Unknown error";
+
+async function saveAppDefaults(app: PricingApp, config: AppConfig) {
+  await proxyApi.setDefaultCostMultiplier(app, config.multiplier.trim());
+  await proxyApi.setPricingModelSource(app, config.source);
+}
+
 export function PricingConfigPanel() {
   const { t } = useTranslation();
   const { data: pricing, isLoading, error } = useModelPricing();
@@ -53,17 +75,21 @@ export function PricingConfigPanel() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   // 三个应用的配置状态
-  const [appConfigs, setAppConfigs] = useState<AppConfigState>({
-    claude: { multiplier: "1", source: "response" },
-    codex: { multiplier: "1", source: "response" },
-    gemini: { multiplier: "1", source: "response" },
-    grokbuild: { multiplier: "1", source: "response" },
-  });
+  const [appConfigs, setAppConfigs] = useState<AppConfigState>(defaultConfigs);
   const [originalConfigs, setOriginalConfigs] = useState<AppConfigState | null>(
     null,
   );
   const [isConfigLoading, setIsConfigLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [failedApps, setFailedApps] = useState<PricingApp[]>([]);
+  // Loading must not re-run (and reset edits) when the language changes.
+  const tRef = useRef(t);
+  tRef.current = t;
+
+  const isAppDirty = (app: PricingApp) =>
+    originalConfigs !== null &&
+    (appConfigs[app].multiplier !== originalConfigs[app].multiplier ||
+      appConfigs[app].source !== originalConfigs[app].source);
 
   // 检查是否有改动
   const isDirty =
@@ -80,59 +106,54 @@ export function PricingConfigPanel() {
 
     const loadAllConfigs = async () => {
       setIsConfigLoading(true);
-      try {
-        const results = await Promise.all(
-          PRICING_APPS.map(async (app) => {
-            const [multiplier, source] = await Promise.all([
-              proxyApi.getDefaultCostMultiplier(app),
-              proxyApi.getPricingModelSource(app),
-            ]);
-            return {
-              app,
-              multiplier,
-              source: (source === "request"
-                ? "request"
-                : "response") as PricingModelSource,
-            };
+      const results = await Promise.allSettled(
+        PRICING_APPS.map(async (app) => {
+          const [multiplier, source] = await Promise.all([
+            proxyApi.getDefaultCostMultiplier(app),
+            proxyApi.getPricingModelSource(app),
+          ]);
+          return {
+            app,
+            multiplier,
+            source: (source === "request"
+              ? "request"
+              : "response") as PricingModelSource,
+          };
+        }),
+      );
+      if (!isMounted) return;
+
+      const newState = defaultConfigs();
+      const failures: string[] = [];
+      results.forEach((result, idx) => {
+        if (result.status === "fulfilled") {
+          newState[result.value.app] = {
+            multiplier: result.value.multiplier,
+            source: result.value.source,
+          };
+        } else {
+          failures.push(
+            `${tRef.current(`apps.${PRICING_APPS[idx]}`)}: ${errorMessage(result.reason)}`,
+          );
+        }
+      });
+      setAppConfigs(newState);
+      setOriginalConfigs(newState);
+      if (failures.length > 0) {
+        toast.error(
+          tRef.current("settings.globalProxy.pricingLoadFailed", {
+            error: failures.join("; "),
           }),
         );
-
-        if (!isMounted) return;
-
-        const newState: AppConfigState = {
-          claude: { multiplier: "1", source: "response" },
-          codex: { multiplier: "1", source: "response" },
-          gemini: { multiplier: "1", source: "response" },
-          grokbuild: { multiplier: "1", source: "response" },
-        };
-        for (const result of results) {
-          newState[result.app] = {
-            multiplier: result.multiplier,
-            source: result.source,
-          };
-        }
-        setAppConfigs(newState);
-        setOriginalConfigs(newState);
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : typeof error === "string"
-              ? error
-              : "Unknown error";
-        toast.error(
-          t("settings.globalProxy.pricingLoadFailed", { error: message }),
-        );
-      } finally {
-        if (isMounted) setIsConfigLoading(false);
       }
+      setIsConfigLoading(false);
     };
 
     loadAllConfigs();
     return () => {
       isMounted = false;
     };
-  }, [t]);
+  }, []);
 
   // 保存所有配置
   const handleSaveAll = async () => {
@@ -141,44 +162,57 @@ export function PricingConfigPanel() {
       const trimmed = appConfigs[app].multiplier.trim();
       if (!trimmed) {
         toast.error(
-          `${t(`apps.${app}`)}: ${t("settings.globalProxy.defaultCostMultiplierRequired")}`,
+          t("settings.globalProxy.appFieldError", {
+            defaultValue: "{{app}}: {{message}}",
+            app: t(`apps.${app}`),
+            message: t("settings.globalProxy.defaultCostMultiplierRequired"),
+          }),
         );
         return;
       }
       if (!isNonNegativeDecimalString(trimmed)) {
         toast.error(
-          `${t(`apps.${app}`)}: ${t("settings.globalProxy.defaultCostMultiplierInvalid")}`,
+          t("settings.globalProxy.appFieldError", {
+            defaultValue: "{{app}}: {{message}}",
+            app: t(`apps.${app}`),
+            message: t("settings.globalProxy.defaultCostMultiplierInvalid"),
+          }),
         );
         return;
       }
     }
 
     setIsSaving(true);
-    try {
-      await Promise.all(
-        PRICING_APPS.flatMap((app) => [
-          proxyApi.setDefaultCostMultiplier(
-            app,
-            appConfigs[app].multiplier.trim(),
-          ),
-          proxyApi.setPricingModelSource(app, appConfigs[app].source),
-        ]),
-      );
+    // Save each changed app independently so a failure for one app neither
+    // hides which app failed nor discards the others' saved state.
+    const dirtyApps = PRICING_APPS.filter(isAppDirty);
+    const results = await Promise.allSettled(
+      dirtyApps.map((app) => saveAppDefaults(app, appConfigs[app])),
+    );
+    const saved = dirtyApps.filter((_, i) => results[i].status === "fulfilled");
+    const failures = dirtyApps.flatMap((app, i) => {
+      const result = results[i];
+      return result.status === "rejected"
+        ? [{ app, reason: errorMessage(result.reason) }]
+        : [];
+    });
+    setOriginalConfigs((prev) => {
+      const next = { ...(prev ?? defaultConfigs()) };
+      for (const app of saved) next[app] = { ...appConfigs[app] };
+      return next;
+    });
+    setFailedApps(failures.map((f) => f.app));
+    if (failures.length === 0) {
       toast.success(t("settings.globalProxy.pricingSaved"));
-      setOriginalConfigs({ ...appConfigs });
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === "string"
-            ? error
-            : "Unknown error";
+    } else {
+      const details = failures
+        .map((f) => `${t(`apps.${f.app}`)}: ${f.reason}`)
+        .join("; ");
       toast.error(
-        t("settings.globalProxy.pricingSaveFailed", { error: message }),
+        t("settings.globalProxy.pricingSaveFailed", { error: details }),
       );
-    } finally {
-      setIsSaving(false);
     }
+    setIsSaving(false);
   };
 
   const handleDelete = (modelId: string) => {
@@ -276,8 +310,18 @@ export function PricingConfigPanel() {
                         : ""
                     }
                   >
-                    <td className="px-3 py-1.5 font-medium">
+                    <td
+                      className="px-3 py-1.5 font-medium"
+                      data-testid={`pricing-app-${app}`}
+                    >
                       {t(`apps.${app}`)}
+                      {failedApps.includes(app) && isAppDirty(app) && (
+                        <span className="ml-1 text-xs text-destructive">
+                          {t("settings.globalProxy.pricingSaveFailedBadge", {
+                            defaultValue: "(not saved)",
+                          })}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-1.5">
                       <Input

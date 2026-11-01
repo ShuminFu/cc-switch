@@ -1,5 +1,5 @@
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 /// 供应商图标信息
 #[derive(Debug, Clone)]
@@ -11,176 +11,177 @@ pub struct ProviderIcon {
 
 /// 供应商名称到图标的默认映射
 #[allow(dead_code)]
-pub static DEFAULT_PROVIDER_ICONS: Lazy<HashMap<&'static str, ProviderIcon>> = Lazy::new(|| {
-    let mut m = HashMap::new();
+pub static DEFAULT_PROVIDER_ICONS: LazyLock<HashMap<&'static str, ProviderIcon>> =
+    LazyLock::new(|| {
+        let mut m = HashMap::new();
 
-    // AI 服务商
-    m.insert(
-        "openai",
-        ProviderIcon {
-            name: "openai",
-            color: "#00A67E",
-        },
-    );
-    m.insert(
-        "anthropic",
-        ProviderIcon {
-            name: "anthropic",
-            color: "#D4915D",
-        },
-    );
-    m.insert(
-        "claude",
-        ProviderIcon {
-            name: "claude",
-            color: "#D4915D",
-        },
-    );
-    m.insert(
-        "google",
-        ProviderIcon {
-            name: "google",
-            color: "#4285F4",
-        },
-    );
-    m.insert(
-        "gemini",
-        ProviderIcon {
-            name: "gemini",
-            color: "#4285F4",
-        },
-    );
-    m.insert(
-        "deepseek",
-        ProviderIcon {
-            name: "deepseek",
-            color: "#1E88E5",
-        },
-    );
-    m.insert(
-        "kimi",
-        ProviderIcon {
-            name: "kimi",
-            color: "#6366F1",
-        },
-    );
-    m.insert(
-        "moonshot",
-        ProviderIcon {
-            name: "moonshot",
-            color: "#6366F1",
-        },
-    );
-    m.insert(
-        "zhipu",
-        ProviderIcon {
-            name: "zhipu",
-            color: "#0F62FE",
-        },
-    );
-    m.insert(
-        "minimax",
-        ProviderIcon {
-            name: "minimax",
-            color: "#FF6B6B",
-        },
-    );
-    m.insert(
-        "baidu",
-        ProviderIcon {
-            name: "baidu",
-            color: "#2932E1",
-        },
-    );
-    m.insert(
-        "alibaba",
-        ProviderIcon {
-            name: "alibaba",
-            color: "#FF6A00",
-        },
-    );
-    m.insert(
-        "tencent",
-        ProviderIcon {
-            name: "tencent",
-            color: "#00A4FF",
-        },
-    );
-    m.insert(
-        "meta",
-        ProviderIcon {
-            name: "meta",
-            color: "#0081FB",
-        },
-    );
-    m.insert(
-        "microsoft",
-        ProviderIcon {
-            name: "microsoft",
-            color: "#00A4EF",
-        },
-    );
-    m.insert(
-        "cohere",
-        ProviderIcon {
-            name: "cohere",
-            color: "#39594D",
-        },
-    );
-    m.insert(
-        "perplexity",
-        ProviderIcon {
-            name: "perplexity",
-            color: "#20808D",
-        },
-    );
-    m.insert(
-        "mistral",
-        ProviderIcon {
-            name: "mistral",
-            color: "#FF7000",
-        },
-    );
-    m.insert(
-        "huggingface",
-        ProviderIcon {
-            name: "huggingface",
-            color: "#FFD21E",
-        },
-    );
+        // AI 服务商
+        m.insert(
+            "openai",
+            ProviderIcon {
+                name: "openai",
+                color: "#00A67E",
+            },
+        );
+        m.insert(
+            "anthropic",
+            ProviderIcon {
+                name: "anthropic",
+                color: "#D4915D",
+            },
+        );
+        m.insert(
+            "claude",
+            ProviderIcon {
+                name: "claude",
+                color: "#D4915D",
+            },
+        );
+        m.insert(
+            "google",
+            ProviderIcon {
+                name: "google",
+                color: "#4285F4",
+            },
+        );
+        m.insert(
+            "gemini",
+            ProviderIcon {
+                name: "gemini",
+                color: "#4285F4",
+            },
+        );
+        m.insert(
+            "deepseek",
+            ProviderIcon {
+                name: "deepseek",
+                color: "#1E88E5",
+            },
+        );
+        m.insert(
+            "kimi",
+            ProviderIcon {
+                name: "kimi",
+                color: "#6366F1",
+            },
+        );
+        m.insert(
+            "moonshot",
+            ProviderIcon {
+                name: "moonshot",
+                color: "#6366F1",
+            },
+        );
+        m.insert(
+            "zhipu",
+            ProviderIcon {
+                name: "zhipu",
+                color: "#0F62FE",
+            },
+        );
+        m.insert(
+            "minimax",
+            ProviderIcon {
+                name: "minimax",
+                color: "#FF6B6B",
+            },
+        );
+        m.insert(
+            "baidu",
+            ProviderIcon {
+                name: "baidu",
+                color: "#2932E1",
+            },
+        );
+        m.insert(
+            "alibaba",
+            ProviderIcon {
+                name: "alibaba",
+                color: "#FF6A00",
+            },
+        );
+        m.insert(
+            "tencent",
+            ProviderIcon {
+                name: "tencent",
+                color: "#00A4FF",
+            },
+        );
+        m.insert(
+            "meta",
+            ProviderIcon {
+                name: "meta",
+                color: "#0081FB",
+            },
+        );
+        m.insert(
+            "microsoft",
+            ProviderIcon {
+                name: "microsoft",
+                color: "#00A4EF",
+            },
+        );
+        m.insert(
+            "cohere",
+            ProviderIcon {
+                name: "cohere",
+                color: "#39594D",
+            },
+        );
+        m.insert(
+            "perplexity",
+            ProviderIcon {
+                name: "perplexity",
+                color: "#20808D",
+            },
+        );
+        m.insert(
+            "mistral",
+            ProviderIcon {
+                name: "mistral",
+                color: "#FF7000",
+            },
+        );
+        m.insert(
+            "huggingface",
+            ProviderIcon {
+                name: "huggingface",
+                color: "#FFD21E",
+            },
+        );
 
-    // 云平台
-    m.insert(
-        "aws",
-        ProviderIcon {
-            name: "aws",
-            color: "#FF9900",
-        },
-    );
-    m.insert(
-        "azure",
-        ProviderIcon {
-            name: "azure",
-            color: "#0078D4",
-        },
-    );
-    m.insert(
-        "huawei",
-        ProviderIcon {
-            name: "huawei",
-            color: "#FF0000",
-        },
-    );
-    m.insert(
-        "cloudflare",
-        ProviderIcon {
-            name: "cloudflare",
-            color: "#F38020",
-        },
-    );
+        // 云平台
+        m.insert(
+            "aws",
+            ProviderIcon {
+                name: "aws",
+                color: "#FF9900",
+            },
+        );
+        m.insert(
+            "azure",
+            ProviderIcon {
+                name: "azure",
+                color: "#0078D4",
+            },
+        );
+        m.insert(
+            "huawei",
+            ProviderIcon {
+                name: "huawei",
+                color: "#FF0000",
+            },
+        );
+        m.insert(
+            "cloudflare",
+            ProviderIcon {
+                name: "cloudflare",
+                color: "#F38020",
+            },
+        );
 
-    m
-});
+        m
+    });
 
 /// 根据供应商名称智能推断图标
 #[allow(dead_code)]

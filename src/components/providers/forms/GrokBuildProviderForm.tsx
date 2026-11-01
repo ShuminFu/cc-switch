@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslation } from "react-i18next";
@@ -28,24 +28,22 @@ import type {
   ProviderCategory,
   ProviderMeta,
 } from "@/types";
-import type { ProviderFormProps, ProviderFormValues } from "./ProviderForm";
+import type { ProviderFormProps, ProviderFormValues } from "./adapters/types";
 import { BasicFormFields } from "./BasicFormFields";
 import { CodexFormFields } from "./CodexFormFields";
 import { ProviderPresetSelector } from "./ProviderPresetSelector";
-import {
-  codexProviderPresets,
-  type CodexProviderPreset,
-} from "@/config/codexProviderPresets";
+import type { CodexProviderPreset } from "@/config/codexProviderPresets";
 import {
   codexApiFormatFromWireApi,
   extractCodexBaseUrl,
   extractCodexModelName,
   extractCodexWireApi,
 } from "@/utils/providerConfigUtils";
+import { getPresetEntries } from "@/config/presetRegistry";
 import {
   buildGrokBuildConfig,
   parseGrokBuildConfig,
-  updateGrokBuildConfig,
+  updateGrokBuildConfigPreservingFormat,
   validateGrokBuildConfig,
 } from "@/utils/grokBuildConfig";
 import { resolveProviderIcon } from "@/utils/providerIcon";
@@ -55,9 +53,7 @@ type GrokBuildProviderFormProps = Omit<ProviderFormProps, "appId">;
 const grokPresetEntries: Array<{
   id: string;
   preset: CodexProviderPreset;
-}> = codexProviderPresets
-  .map((preset, index) => ({ id: `grokbuild-${index}`, preset }))
-  .filter(({ preset }) => preset.category !== "official" && !preset.isOfficial);
+}> = getPresetEntries("grokbuild");
 
 export const grokApiBackendFromApiFormat = (format: CodexApiFormat): string => {
   if (format === "openai_chat") return "chat_completions";
@@ -151,9 +147,16 @@ export function GrokBuildProviderForm({
   );
   const [isEndpointModalOpen, setIsEndpointModalOpen] = useState(false);
   const [presetEndpoints, setPresetEndpoints] = useState<string[]>([]);
-  const [draftCustomEndpoints, setDraftCustomEndpoints] = useState<string[]>(
-    [],
-  );
+  const [draftCustomEndpoints, setDraftState] = useState<string[]>([]);
+  // Edit mode: endpoint changes are applied by the edit dialog after the
+  // provider is saved, never directly from the panel (FE-PROV-10).
+  const [endpointsTouched, setEndpointsTouched] = useState(false);
+  const setDraftCustomEndpoints = useCallback((urls: string[]) => {
+    setDraftState(urls);
+    setEndpointsTouched(true);
+  }, []);
+  const pendingCustomEndpoints =
+    providerId && endpointsTouched ? draftCustomEndpoints : undefined;
 
   const form = useForm<ProviderFormData>({
     resolver: zodResolver(providerSchema),
@@ -181,15 +184,17 @@ export function GrokBuildProviderForm({
 
   const presetCategoryLabels = useMemo(
     () => ({
-      official: t("providerForm.categoryOfficial", { defaultValue: "官方" }),
+      official: t("providerForm.categoryOfficial", {
+        defaultValue: "Official",
+      }),
       cn_official: t("providerForm.categoryCnOfficial", {
-        defaultValue: "国内官方",
+        defaultValue: "Opensource Official",
       }),
       aggregator: t("providerForm.categoryAggregation", {
-        defaultValue: "聚合服务",
+        defaultValue: "Aggregation",
       }),
       third_party: t("providerForm.categoryThirdParty", {
-        defaultValue: "第三方",
+        defaultValue: "Third Party",
       }),
     }),
     [t],
@@ -220,7 +225,9 @@ export function GrokBuildProviderForm({
       contextWindow: Number.parseInt(contextWindow, 10),
       ...overrides,
     };
-    setRawConfig((current) => updateGrokBuildConfig(current, next));
+    setRawConfig((current) =>
+      updateGrokBuildConfigPreservingFormat(current, next),
+    );
   };
 
   const handlePresetChange = (presetId: string) => {
@@ -302,7 +309,8 @@ export function GrokBuildProviderForm({
     ) {
       toast.error(
         t("providerForm.requiredFields", {
-          defaultValue: "请填写供应商名称、API 地址、API Key 和模型",
+          defaultValue:
+            "Please fill in the provider name, API endpoint, API Key and model",
         }),
       );
       return;
@@ -310,13 +318,13 @@ export function GrokBuildProviderForm({
     if (!Number.isInteger(parsedContextWindow) || parsedContextWindow <= 0) {
       toast.error(
         t("grokBuild.contextWindowInvalid", {
-          defaultValue: "上下文窗口必须是正整数",
+          defaultValue: "Context window must be a positive integer",
         }),
       );
       return;
     }
 
-    const finalConfig = updateGrokBuildConfig(rawConfig, {
+    const finalConfig = updateGrokBuildConfigPreservingFormat(rawConfig, {
       model: profile,
       upstreamModel,
       baseUrl,
@@ -330,7 +338,7 @@ export function GrokBuildProviderForm({
       toast.error(
         t("grokBuild.invalidToml", {
           error: configError,
-          defaultValue: `config.toml 格式错误: ${configError}`,
+          defaultValue: "Invalid config.toml: {{error}}",
         }),
       );
       return;
@@ -385,17 +393,23 @@ export function GrokBuildProviderForm({
       presetCategory: category ?? "custom",
       isPartner,
       meta,
+      customEndpoints: pendingCustomEndpoints,
     };
 
     await onSubmit(payload);
   };
 
-  const rawConfigError = validateGrokBuildConfig(rawConfig);
+  // Validate once per config change, not on every render (FE-PROV-31).
+  const rawConfigError = useMemo(
+    () => validateGrokBuildConfig(rawConfig),
+    [rawConfig],
+  );
 
   return (
     <Form {...form}>
       <form
         id="provider-form"
+        noValidate
         onSubmit={form.handleSubmit(handleSubmit)}
         className="space-y-6"
       >
@@ -414,7 +428,7 @@ export function GrokBuildProviderForm({
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <FormItem>
             <FormLabel htmlFor="grokbuild-profile">
-              {t("grokBuild.profile", { defaultValue: "客户端模型档位" })}
+              {t("grokBuild.profile", { defaultValue: "Client model profile" })}
             </FormLabel>
             <Input
               id="grokbuild-profile"
@@ -448,7 +462,7 @@ export function GrokBuildProviderForm({
 
           <FormItem>
             <FormLabel htmlFor="grokbuild-context-window">
-              {t("grokBuild.contextWindow", { defaultValue: "上下文窗口" })}
+              {t("grokBuild.contextWindow", { defaultValue: "Context window" })}
             </FormLabel>
             <Input
               id="grokbuild-context-window"
@@ -491,6 +505,7 @@ export function GrokBuildProviderForm({
           isEndpointModalOpen={isEndpointModalOpen}
           onEndpointModalToggle={setIsEndpointModalOpen}
           onCustomEndpointsChange={setDraftCustomEndpoints}
+          pendingCustomEndpoints={pendingCustomEndpoints}
           autoSelect={endpointAutoSelect}
           onAutoSelectChange={setEndpointAutoSelect}
           codexModel={upstreamModel}
@@ -534,8 +549,8 @@ export function GrokBuildProviderForm({
             placeholder=""
             darkMode={isDarkMode}
             rows={12}
-            showValidation={false}
-            language="javascript"
+            showValidation={true}
+            language="toml"
           />
           {rawConfigError && (
             <p className="text-xs text-destructive">

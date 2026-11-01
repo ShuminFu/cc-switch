@@ -1,0 +1,5 @@
+# TEST-38: every home-directory lookup goes through the test-isolation seam,
+# so tests (and CC_SWITCH_TEST_HOME) can never touch the real user profile.
+disallowed-methods = [
+    { path = "dirs::home_dir", reason = "use crate::config::get_home_dir (honours the test home override)" },
+]

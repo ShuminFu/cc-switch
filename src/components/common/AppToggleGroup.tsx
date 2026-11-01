@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { AppId } from "@/lib/api/types";
 import { APP_IDS, APP_ICON_MAP } from "@/config/appConfig";
+import { AppIcon } from "@/components/AppIcon";
 
 interface AppToggleGroupProps {
   apps: Partial<Record<AppId, boolean>>;
@@ -21,7 +22,7 @@ export const AppToggleGroup: React.FC<AppToggleGroupProps> = ({
   return (
     <div className="flex items-center gap-1.5 flex-shrink-0">
       {appIds.map((app) => {
-        const { label, icon, activeClass } = APP_ICON_MAP[app];
+        const { label, activeClass } = APP_ICON_MAP[app];
         const enabled = apps[app];
         return (
           <Tooltip key={app}>
@@ -29,11 +30,15 @@ export const AppToggleGroup: React.FC<AppToggleGroupProps> = ({
               <button
                 type="button"
                 onClick={() => onToggle(app, !enabled)}
+                aria-label={label}
+                aria-pressed={!!enabled}
                 className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-                  enabled ? activeClass : "opacity-35 hover:opacity-70"
+                  enabled
+                    ? activeClass
+                    : "opacity-35 hover:opacity-70 focus-visible:opacity-100"
                 }`}
               >
-                {icon}
+                <AppIcon app={app} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">

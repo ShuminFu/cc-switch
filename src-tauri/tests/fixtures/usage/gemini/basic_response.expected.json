@@ -1,0 +1,10 @@
+{
+  "usage": {
+    "input_tokens": 100,
+    "output_tokens": 20,
+    "cache_read_tokens": 0,
+    "cache_creation_tokens": 0,
+    "model": "gemini-2.5-pro",
+    "message_id": null
+  }
+}

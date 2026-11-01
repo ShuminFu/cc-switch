@@ -1,0 +1,260 @@
+[
+  {
+    "event": "response.created",
+    "data": {
+      "type": "response.created",
+      "response": {
+        "id": "resp_chatcmpl-s4",
+        "object": "response",
+        "created_at": 1700000000,
+        "status": "in_progress",
+        "model": "deepseek-reasoner",
+        "output": [],
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        }
+      }
+    }
+  },
+  {
+    "event": "response.in_progress",
+    "data": {
+      "type": "response.in_progress",
+      "response": {
+        "id": "resp_chatcmpl-s4",
+        "object": "response",
+        "created_at": 1700000000,
+        "status": "in_progress",
+        "model": "deepseek-reasoner",
+        "output": [],
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        }
+      }
+    }
+  },
+  {
+    "event": "response.output_item.added",
+    "data": {
+      "type": "response.output_item.added",
+      "output_index": 0,
+      "item": {
+        "id": "rs_resp_chatcmpl-s4",
+        "type": "reasoning",
+        "status": "in_progress",
+        "summary": []
+      }
+    }
+  },
+  {
+    "event": "response.reasoning_summary_part.added",
+    "data": {
+      "type": "response.reasoning_summary_part.added",
+      "item_id": "rs_resp_chatcmpl-s4",
+      "output_index": 0,
+      "summary_index": 0,
+      "part": {
+        "type": "summary_text",
+        "text": ""
+      }
+    }
+  },
+  {
+    "event": "response.reasoning_summary_text.delta",
+    "data": {
+      "type": "response.reasoning_summary_text.delta",
+      "item_id": "rs_resp_chatcmpl-s4",
+      "output_index": 0,
+      "summary_index": 0,
+      "delta": "6*8 "
+    }
+  },
+  {
+    "event": "response.reasoning_summary_text.delta",
+    "data": {
+      "type": "response.reasoning_summary_text.delta",
+      "item_id": "rs_resp_chatcmpl-s4",
+      "output_index": 0,
+      "summary_index": 0,
+      "delta": "= 48."
+    }
+  },
+  {
+    "event": "response.reasoning_summary_text.done",
+    "data": {
+      "type": "response.reasoning_summary_text.done",
+      "item_id": "rs_resp_chatcmpl-s4",
+      "output_index": 0,
+      "summary_index": 0,
+      "text": "6*8 = 48."
+    }
+  },
+  {
+    "event": "response.reasoning_summary_part.done",
+    "data": {
+      "type": "response.reasoning_summary_part.done",
+      "item_id": "rs_resp_chatcmpl-s4",
+      "output_index": 0,
+      "summary_index": 0,
+      "part": {
+        "type": "summary_text",
+        "text": "6*8 = 48."
+      }
+    }
+  },
+  {
+    "event": "response.output_item.done",
+    "data": {
+      "type": "response.output_item.done",
+      "output_index": 0,
+      "item": {
+        "id": "rs_resp_chatcmpl-s4",
+        "type": "reasoning",
+        "summary": [
+          {
+            "type": "summary_text",
+            "text": "6*8 = 48."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "event": "response.output_item.added",
+    "data": {
+      "type": "response.output_item.added",
+      "output_index": 1,
+      "item": {
+        "id": "resp_chatcmpl-s4_msg",
+        "type": "message",
+        "status": "in_progress",
+        "role": "assistant",
+        "content": []
+      }
+    }
+  },
+  {
+    "event": "response.content_part.added",
+    "data": {
+      "type": "response.content_part.added",
+      "item_id": "resp_chatcmpl-s4_msg",
+      "output_index": 1,
+      "content_index": 0,
+      "part": {
+        "type": "output_text",
+        "text": "",
+        "annotations": []
+      }
+    }
+  },
+  {
+    "event": "response.output_text.delta",
+    "data": {
+      "type": "response.output_text.delta",
+      "item_id": "resp_chatcmpl-s4_msg",
+      "output_index": 1,
+      "content_index": 0,
+      "delta": "48"
+    }
+  },
+  {
+    "event": "response.output_text.done",
+    "data": {
+      "type": "response.output_text.done",
+      "item_id": "resp_chatcmpl-s4_msg",
+      "output_index": 1,
+      "content_index": 0,
+      "text": "48"
+    }
+  },
+  {
+    "event": "response.content_part.done",
+    "data": {
+      "type": "response.content_part.done",
+      "item_id": "resp_chatcmpl-s4_msg",
+      "output_index": 1,
+      "content_index": 0,
+      "part": {
+        "type": "output_text",
+        "text": "48",
+        "annotations": []
+      }
+    }
+  },
+  {
+    "event": "response.output_item.done",
+    "data": {
+      "type": "response.output_item.done",
+      "output_index": 1,
+      "item": {
+        "id": "resp_chatcmpl-s4_msg",
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "48",
+            "annotations": []
+          }
+        ]
+      }
+    }
+  },
+  {
+    "event": "response.completed",
+    "data": {
+      "type": "response.completed",
+      "response": {
+        "id": "resp_chatcmpl-s4",
+        "object": "response",
+        "created_at": 1700000000,
+        "status": "completed",
+        "model": "deepseek-reasoner",
+        "output": [
+          {
+            "id": "rs_resp_chatcmpl-s4",
+            "type": "reasoning",
+            "summary": [
+              {
+                "type": "summary_text",
+                "text": "6*8 = 48."
+              }
+            ]
+          },
+          {
+            "id": "resp_chatcmpl-s4_msg",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "48",
+                "annotations": []
+              }
+            ]
+          }
+        ],
+        "usage": {
+          "input_tokens": 25,
+          "output_tokens": 6,
+          "total_tokens": 31,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        }
+      }
+    }
+  }
+]

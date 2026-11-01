@@ -1,0 +1,6 @@
+data: {"id": "c3", "object": "chat.completion.chunk", "model": "m", "usage": null, "choices": [{"index": 0, "delta": {"content": "x"}}]}
+
+data: {"id": "c3", "object": "chat.completion.chunk", "model": "m", "choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13, "prompt_tokens_details": {"cached_tokens": 4}}}
+
+data: [DONE]
+

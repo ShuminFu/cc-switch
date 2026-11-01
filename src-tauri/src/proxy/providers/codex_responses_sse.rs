@@ -18,10 +18,7 @@ use serde_json::{json, Value};
 
 /// Serialize one Responses SSE event with the standard `event:`/`data:` framing.
 pub(crate) fn sse_event(event: &str, data: Value) -> Bytes {
-    Bytes::from(format!(
-        "event: {event}\ndata: {}\n\n",
-        serde_json::to_string(&data).unwrap_or_default()
-    ))
+    crate::proxy::sse::encode_event(event, &data)
 }
 
 // ---------------------------------------------------------------------------

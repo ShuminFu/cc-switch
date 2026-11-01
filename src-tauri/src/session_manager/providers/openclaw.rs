@@ -6,14 +6,15 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::openclaw_config::get_openclaw_dir;
+use crate::session_manager::cache::ScanCache;
 use crate::{
     config::write_json_file,
     session_manager::{SessionMessage, SessionMeta},
 };
 
 use super::utils::{
-    extract_text, parse_timestamp_to_ms, path_basename, read_head_tail_lines, truncate_summary,
-    TITLE_MAX_CHARS,
+    extract_text, file_mtime_ms, parse_timestamp_to_ms, path_basename, read_head_tail_lines,
+    truncate_summary, TITLE_MAX_CHARS,
 };
 
 const PROVIDER_ID: &str = "openclaw";
@@ -27,7 +28,7 @@ fn strip_message_id_suffix(text: &str) -> &str {
     }
 }
 
-pub fn scan_sessions() -> Vec<SessionMeta> {
+pub fn scan_sessions(cache: &ScanCache) -> Vec<SessionMeta> {
     let agents_dir = get_openclaw_dir().join("agents");
     if !agents_dir.exists() {
         return Vec::new();
@@ -65,7 +66,17 @@ pub fn scan_sessions() -> Vec<SessionMeta> {
                 continue;
             }
 
-            if let Some(meta) = parse_session(&path, Some(&display_names)) {
+            // Cached without display names (they live in sessions.json and
+            // are applied on every scan).
+            if let Some(mut meta) =
+                cache.get_or_parse(PROVIDER_ID, &path, || parse_session(&path, None))
+            {
+                if let Some(name) = display_names
+                    .get(&meta.session_id)
+                    .filter(|name| !name.is_empty())
+                {
+                    meta.title = Some(truncate_summary(name, TITLE_MAX_CHARS));
+                }
                 sessions.push(meta);
             }
         }
@@ -143,12 +154,8 @@ pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<boo
         .join("sessions.json");
     prune_sessions_index(&index_path, session_id, path)?;
 
-    std::fs::remove_file(path).map_err(|e| {
-        format!(
-            "Failed to delete OpenClaw session file {}: {e}",
-            path.display()
-        )
-    })?;
+    // SESS-41: move to the restorable session trash instead of deleting.
+    crate::session_manager::trash::move_to_trash("openclaw", session_id, &[path])?;
 
     Ok(true)
 }
@@ -287,13 +294,17 @@ fn parse_session(
     let summary = summary.map(|text| truncate_summary(&text, 160));
 
     Some(SessionMeta {
+        source: None,
+        session_key: None,
         provider_id: PROVIDER_ID.to_string(),
         session_id: session_id.clone(),
         title,
         summary,
         project_dir: cwd,
         created_at,
-        last_active_at,
+        // A tail without timestamps (e.g. a final line beyond the tail cap)
+        // falls back to the file modification time.
+        last_active_at: last_active_at.or_else(|| file_mtime_ms(path)),
         source_path: Some(path.to_string_lossy().to_string()),
         resume_command: None, // OpenClaw sessions are gateway-managed, no CLI resume
     })
