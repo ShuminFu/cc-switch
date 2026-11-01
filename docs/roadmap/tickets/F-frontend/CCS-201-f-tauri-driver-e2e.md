@@ -1,6 +1,6 @@
 # CCS-201: [e2e] Add a tauri-driver and WebdriverIO smoke on Linux that gates release
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:F`, `p2-medium`, `area:e2e`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:F`, `p2-medium`, `area:e2e`
 
 > **Ticket key:** `f-tauri-driver-e2e` · **Phase:** F · **Priority:** p2-medium · **Effort:** M · **Depends on:** `p0-ci-build-smoke`, `p0-ci-release-gated`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -92,3 +92,16 @@ By the repository owner's decision on 2026-10-31, the following checks that need
 ### Still blocked by
 
 - Make the tauri-build-smoke E2E job a required status check under branch protection. Triage lists this as part of closing AC1. **Needs:** A maintainer has to change the GitHub repo settings (branch protection / required checks).
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- Make the tauri-build-smoke E2E job a required status check under branch protection. Triage lists this as part of closing AC1. **Needs:** A maintainer has to change the GitHub repo settings (branch protection / required checks).
+
+What a future maintainer would need to do to verify or finish them:
+
+- After `tauri-build-smoke` has run green at least once, add it as a required status check under Settings > Branches (or Rulesets) > `main`.
+- AC1 and AC2 stay unticked: no green CI run and no tag-triggered release run with a failing smoke has been observed (skipped on 2026-10-31).

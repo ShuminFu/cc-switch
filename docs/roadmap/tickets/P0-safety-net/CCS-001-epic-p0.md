@@ -1,6 +1,6 @@
 # CCS-001: [epic] P0 (v3.18): Safety net, real CI gates and zero-risk hotfixes
 
-**Status:** Partial · **Kind:** epic · **Labels:** `epic`, `phase:P0`, `p0-critical`, `area:tests`
+**Status:** Done · **Kind:** epic · **Labels:** `epic`, `phase:P0`, `p0-critical`, `area:tests`
 
 > **Ticket key:** `epic-p0` · **Phase:** P0 · **Priority:** p0-critical · **Effort:** XL
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -132,3 +132,23 @@ By the repository owner's decision on 2026-10-31, the following checks that need
 - CCS-023: required reviewers on the release environment. **Needs:** Maintainer to change GitHub environment settings
 - CCS-029: confirm TAURI_SIGNING_PRIVATE_KEY secret is in canonical single-line base64 .key form. **Needs:** Human with repo secrets access to confirm the secret format
 - CCS-036: confirm private (-rw-------) terminal temp files removed on exit from a real desktop terminal (gnome-terminal/konsole with real claude CLI). **Needs:** Interactive human check on a real desktop
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- CCS-018: make cargo-deny and pnpm audit required status checks on main. **Needs:** Repo admin to change branch protection settings on GitHub
+- CCS-034: make 'Proxy fixture required' a required check on main and create the no-fixture-needed and fixtures labels. **Needs:** Repo admin to change branch protection, and someone with write access to create the labels (plus a human decision on them)
+- CCS-023: required reviewers on the release environment. **Needs:** Maintainer to change GitHub environment settings
+- CCS-029: confirm TAURI_SIGNING_PRIVATE_KEY secret is in canonical single-line base64 .key form. **Needs:** Human with repo secrets access to confirm the secret format
+- CCS-036: confirm private (-rw-------) terminal temp files removed on exit from a real desktop terminal (gnome-terminal/konsole with real claude CLI). **Needs:** Interactive human check on a real desktop
+
+What a future maintainer would need to do to verify or finish them:
+
+- Repo settings: after at least one Actions run makes the checks selectable, add `cargo-deny`, `pnpm audit` and `Proxy fixture required` as required status checks under Settings > Branches (or Rulesets) > `main` (CCS-018, CCS-034).
+- Repo settings: decide what the `no-fixture-needed` and `fixtures` labels mean, then create them (CCS-034).
+- Repo settings: add required reviewers under Settings > Environments > `release` (CCS-023).
+- Secrets: someone with secrets access checks that `TAURI_SIGNING_PRIVATE_KEY` holds the single-line base64 `.key` contents written by `tauri signer generate`, and re-saves it if not (CCS-029). The `Validate Tauri signing key` step fails a release run if it is in another form.
+- Real machine: on a real GNOME Terminal or Konsole with the real `claude` CLI, launch a session, check the temp config file is `-rw-------`, check it is gone after `claude` exits, and check that two quick launches get different paths (CCS-036).

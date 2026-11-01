@@ -1,6 +1,6 @@
 # CCS-184: [sessions] Support session resume on Windows and Linux
 
-**Status:** Partial · **Kind:** feature · **Labels:** `feature`, `phase:P5`, `p3-low`, `area:sessions`
+**Status:** Done · **Kind:** feature · **Labels:** `feature`, `phase:P5`, `p3-low`, `area:sessions`
 
 > **Ticket key:** `p5-session-resume-cross-platform` · **Phase:** P5 · **Priority:** p3-low · **Effort:** M · **Depends on:** `p5-misc-split-terminal`, `p1-ipc-session-terminal`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -130,3 +130,18 @@ By the repository owner's decision on 2026-10-31, checks that need a GitHub Acti
 
 - Manual session resume on a real Windows desktop (cmd /K, PowerShell -NoExit, Windows Terminal, real npm claude.cmd shim). **Needs:** Interactive human check on a real Windows machine. Wine cannot stand in for start/wt/PowerShell, and CCS-249 covers only the .bat content.
 - Manual session resume on a real Linux desktop terminal (gnome-terminal/konsole). **Needs:** Interactive human check on a real GNOME/KDE desktop session. CCS-248's xvfb/xterm automation covers most of it but not the real desktop terminals.
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- Manual session resume on a real Windows desktop (cmd /K, PowerShell -NoExit, Windows Terminal, real npm claude.cmd shim). **Needs:** Interactive human check on a real Windows machine. Wine cannot stand in for start/wt/PowerShell, and CCS-249 covers only the .bat content.
+- Manual session resume on a real Linux desktop terminal (gnome-terminal/konsole). **Needs:** Interactive human check on a real GNOME/KDE desktop session. CCS-248's xvfb/xterm automation covers most of it but not the real desktop terminals.
+
+What a future maintainer would need to do to verify or finish them:
+
+- On a real Windows desktop: resume a session through cmd /K, PowerShell -NoExit and Windows Terminal, with the real npm `claude.cmd` shim installed, and confirm the session resumes. CCS-249 only checked the `.bat` content under Wine.
+- On a real GNOME or KDE desktop: resume through GNOME Terminal and Konsole. CCS-248 covered xterm under xvfb only.
+- The acceptance box above stays unticked.

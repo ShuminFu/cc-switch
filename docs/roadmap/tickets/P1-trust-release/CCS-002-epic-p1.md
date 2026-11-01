@@ -1,6 +1,6 @@
 # CCS-002: [epic] P1 (v3.19): Trust release with security and correctness fixes, no structural change
 
-**Status:** Partial · **Kind:** epic · **Labels:** `epic`, `phase:P1`, `p0-critical`, `area:security`
+**Status:** Done · **Kind:** epic · **Labels:** `epic`, `phase:P1`, `p0-critical`, `area:security`
 
 > **Ticket key:** `epic-p1` · **Phase:** P1 · **Priority:** p0-critical · **Effort:** XL · **Depends on:** `epic-p0`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -132,3 +132,17 @@ By the repository owner's decision on 2026-10-31, the following checks that need
 ### Still blocked by
 
 - CCS-100 AC2b (listed in the epic's 'What remains'): on a real Mac, confirm other commands keep responding while a real Keychain prompt is open, and that the quota falls back to the credentials file after 20 s if the prompt is ignored. **Needs:** An interactive human check on a macOS machine with a real Keychain entry. This is not Actions-only, so CCS-100 stays Partial.
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- CCS-100 AC2b (listed in the epic's 'What remains'): on a real Mac, confirm other commands keep responding while a real Keychain prompt is open, and that the quota falls back to the credentials file after 20 s if the prompt is ignored. **Needs:** An interactive human check on a macOS machine with a real Keychain entry. This is not Actions-only, so CCS-100 stays Partial.
+
+What a future maintainer would need to do to verify or finish them:
+
+- On a real Mac with a real Keychain entry (Claude Code-credentials, Codex Auth or gemini-cli-oauth): trigger the quota query, leave the Keychain prompt open, confirm other commands still respond, then ignore the prompt and confirm the quota falls back to the credentials file after 20 s (CCS-100 AC2b).
+- Child CCS-061 is also closed with its IPv6 run skipped: on any host with IPv6 loopback, run `CCS_REQUIRE_IPV6=1 cargo test --manifest-path src-tauri/Cargo.toml proxy::hyper_client` and confirm the two `[::1]` tests pass (with the variable set they fail instead of skipping).
+- Criterion 5 (Windows rename and owner-only DACL) still has only Wine evidence (skipped on 2026-10-31).

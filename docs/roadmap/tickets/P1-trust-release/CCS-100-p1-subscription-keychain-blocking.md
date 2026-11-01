@@ -1,6 +1,6 @@
 # CCS-100: [usage] Run macOS keychain reads off the async workers, with a timeout
 
-**Status:** Partial · **Kind:** bug · **Labels:** `bug`, `phase:P1`, `p2-medium`, `area:usage`
+**Status:** Done · **Kind:** bug · **Labels:** `bug`, `phase:P1`, `p2-medium`, `area:usage`
 
 > **Ticket key:** `p1-subscription-keychain-blocking` · **Phase:** P1 · **Priority:** p2-medium · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -65,3 +65,16 @@ By the repository owner's decision on 2026-10-31, the following checks that need
 ### Still blocked by
 
 - AC2b: Check by hand that other commands keep responding while a real macOS keychain prompt is open, and that the quota falls back to the credentials file after the 20 s timeout if the prompt is ignored. **Needs:** Someone using a real Mac with a real Keychain entry (Claude Code-credentials / Codex Auth / gemini-cli-oauth) who can trigger and leave the prompt open.
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- AC2b: Check by hand that other commands keep responding while a real macOS keychain prompt is open, and that the quota falls back to the credentials file after the 20 s timeout if the prompt is ignored. **Needs:** Someone using a real Mac with a real Keychain entry (Claude Code-credentials / Codex Auth / gemini-cli-oauth) who can trigger and leave the prompt open.
+
+What a future maintainer would need to do to verify or finish them:
+
+- On a real Mac with a real Keychain entry (Claude Code-credentials, Codex Auth or gemini-cli-oauth): trigger the quota query, leave the Keychain prompt open and confirm other commands keep responding; then ignore the prompt and confirm the quota falls back to the credentials file after the 20 s timeout.
+- AC2a (`cargo clippy` on the macOS runner) was skipped on 2026-10-31 and has not run either. The acceptance boxes above were left as they were.

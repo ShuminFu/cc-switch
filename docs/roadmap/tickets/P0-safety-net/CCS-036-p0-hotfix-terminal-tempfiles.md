@@ -1,6 +1,6 @@
 # CCS-036: [terminal] Write provider terminal config and launcher scripts as private, uniquely named temp files
 
-**Status:** Partial · **Kind:** security · **Labels:** `security`, `phase:P0`, `p1-high`, `area:terminal`
+**Status:** Done · **Kind:** security · **Labels:** `security`, `phase:P0`, `p1-high`, `area:terminal`
 
 > **Ticket key:** `p0-hotfix-terminal-tempfiles` · **Phase:** P0 · **Priority:** p1-high · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -141,3 +141,16 @@ By the repository owner's decision on 2026-10-31, the following checks that need
 ### Still blocked by
 
 - Confirm on a real desktop terminal (gnome-terminal/konsole) with the real claude CLI that the config file is -rw-------, is removed after claude exits, and that quick A-then-B launches each get their own config path (CCS-223 covered this headless with xterm under xvfb and a stub claude only). **Needs:** Interactive human check on a real Linux desktop session with the real claude CLI installed
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- Confirm on a real desktop terminal (gnome-terminal/konsole) with the real claude CLI that the config file is -rw-------, is removed after claude exits, and that quick A-then-B launches each get their own config path (CCS-223 covered this headless with xterm under xvfb and a stub claude only). **Needs:** Interactive human check on a real Linux desktop session with the real claude CLI installed
+
+What a future maintainer would need to do to verify or finish them:
+
+- On a real Linux desktop (GNOME Terminal or Konsole) with the real `claude` CLI installed: launch a session from CC Switch, run `ls -l` on the temp config path (expect `-rw-------`), exit `claude` and confirm the file is removed, then launch A and B quickly and confirm each gets its own path. CCS-223 only covered this headless with xterm under xvfb and a stub `claude`.
+- The macOS and Windows cfg branches have still never been compiled or run (skipped on 2026-10-31).

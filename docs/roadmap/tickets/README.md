@@ -18,25 +18,25 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-015](P0-safety-net/CCS-015-p0-untested-module-tests.md) | chore | p2 | S | [tests] Add unit tests for untested proxy helpers, failover switch and balance parsing |  | Done |
 | [CCS-016](P0-safety-net/CCS-016-p0-ci-clippy-all-targets.md) | chore | p2 | S | [ci] Run clippy with --all-targets |  | Done |
 | [CCS-017](P0-safety-net/CCS-017-p0-ci-eslint-prettier.md) | chore | p2 | M | [ci] Add ESLint with a baseline and extend Prettier to tests/ |  | Done |
-| [CCS-018](P0-safety-net/CCS-018-p0-ci-cargo-deny.md) | chore | p2 | S | [ci] Gate on dependency advisories with cargo-deny and pnpm audit |  | Partial |
+| [CCS-018](P0-safety-net/CCS-018-p0-ci-cargo-deny.md) | chore | p2 | S | [ci] Gate on dependency advisories with cargo-deny and pnpm audit |  | Done |
 | [CCS-019](P0-safety-net/CCS-019-p0-ci-coverage-report.md) | chore | p3 | S | [ci] Publish report-only coverage from cargo-llvm-cov and vitest |  | Done |
 | [CCS-020](P0-safety-net/CCS-020-p0-ci-i18n-parity.md) | chore | p2 | S | [i18n] Add a locale parity and used-key check to CI |  | Done |
 | [CCS-021](P0-safety-net/CCS-021-p0-i18n-missing-keys.md) | bug | p2 | S | [i18n] Add 10 keys that are used in code but missing from every locale |  | Done |
 | [CCS-022](P0-safety-net/CCS-022-p0-i18n-zhtw-keys.md) | bug | p3 | S | [i18n] Translate the 30 missing zh-TW keys and drop 2 unused zh-TW-only keys |  | Done |
-| [CCS-023](P0-safety-net/CCS-023-p0-ci-release-gated.md) | chore | p1 | S | [ci] Require green CI on the tag SHA before release builds |  | Partial |
+| [CCS-023](P0-safety-net/CCS-023-p0-ci-release-gated.md) | chore | p1 | S | [ci] Require green CI on the tag SHA before release builds |  | Done |
 | [CCS-024](P0-safety-net/CCS-024-p0-ci-build-smoke.md) | chore | p2 | S | [ci] Add a vite production build and a Linux tauri build smoke to PR CI |  | Done |
 | [CCS-025](P0-safety-net/CCS-025-p0-ci-toolchain-msrv.md) | chore | p2 | S | [ci] Use rust-toolchain.toml as the single toolchain source and fix the false MSRV |  | Done |
 | [CCS-026](P0-safety-net/CCS-026-p0-ci-node-version.md) | chore | p3 | S | [ci] Read the Node version from .node-version in CI and release |  | Done |
 | [CCS-027](P0-safety-net/CCS-027-p0-ci-permissions.md) | security | p3 | S | [ci] Add a minimal permissions block to ci.yml |  | Done |
 | [CCS-028](P0-safety-net/CCS-028-p0-ci-pin-actions.md) | security | p1 | S | [ci] Pin every GitHub Action to a commit SHA |  | Done |
-| [CCS-029](P0-safety-net/CCS-029-p0-ci-release-secrets-env.md) | security | p1 | S | [ci] Pass release secrets via env: and stop exporting signing material to GITHUB_ENV | CCS-028 | Partial |
+| [CCS-029](P0-safety-net/CCS-029-p0-ci-release-secrets-env.md) | security | p1 | S | [ci] Pass release secrets via env: and stop exporting signing material to GITHUB_ENV | CCS-028 | Done |
 | [CCS-030](P0-safety-net/CCS-030-p0-ci-updater-sig-fatal.md) | bug | p1 | S | [ci] Fail the release when an updater artifact or signature is missing and validate latest.json |  | Done |
 | [CCS-031](P0-safety-net/CCS-031-p0-ci-release-concurrency.md) | chore | p3 | S | [ci] Never cancel an in-progress release publish |  | Done |
 | [CCS-032](P0-safety-net/CCS-032-p0-ci-prerelease-promotion.md) | chore | p3 | S | [ci] Document or automate promoting a prerelease to latest for the updater |  | Done |
 | [CCS-033](P0-safety-net/CCS-033-p0-ci-release-hygiene.md) | chore | p3 | M | [ci] Add rust-cache, a version consistency check, provenance attestation and SHA256SUMS | CCS-028 | Done |
-| [CCS-034](P0-safety-net/CCS-034-p0-dev-acceptance-process.md) | chore | p2 | S | [process] Add the ACCEPTANCE playbook, the fixture-required PR rule and the fix-commit KPI | CCS-008 | Partial |
+| [CCS-034](P0-safety-net/CCS-034-p0-dev-acceptance-process.md) | chore | p2 | S | [process] Add the ACCEPTANCE playbook, the fixture-required PR rule and the fix-commit KPI | CCS-008 | Done |
 | [CCS-035](P0-safety-net/CCS-035-p0-hotfix-deeplink-redaction.md) | security | p1 | S | [deeplink] Stop leaking raw deeplink URLs to logs and to the webview console |  | Done |
-| [CCS-036](P0-safety-net/CCS-036-p0-hotfix-terminal-tempfiles.md) | security | p1 | S | [terminal] Write provider terminal config and launcher scripts as private, uniquely named temp files |  | Partial |
+| [CCS-036](P0-safety-net/CCS-036-p0-hotfix-terminal-tempfiles.md) | security | p1 | S | [terminal] Write provider terminal config and launcher scripts as private, uniquely named temp files |  | Done |
 | [CCS-037](P0-safety-net/CCS-037-p0-hotfix-sync-skip-session-log.md) | bug | p2 | S | [sync] Preserve local session_log_sync cursors on WebDAV/S3 import |  | Done |
 | [CCS-038](P0-safety-net/CCS-038-p0-hotfix-session-sync-blocking.md) | bug | p1 | S | [usage] Move session-log sync off tokio workers and off the main thread |  | Done |
 | [CCS-039](P0-safety-net/CCS-039-p0-hotfix-providerform-parse.md) | bug | p0 | S | [provider-form] Block save when Codex or Gemini config fails to parse instead of silently saving the initial config |  | Done |
@@ -78,7 +78,7 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-058](P1-trust-release/CCS-058-p1-proxy-mask-url.md) | security | p3 | S | [proxy] Make mask_url panic-free and never echo credentials from unparseable proxy URLs |  | Done |
 | [CCS-059](P1-trust-release/CCS-059-p1-proxy-connect-status.md) | bug | p3 | S | [proxy] Parse the CONNECT status line instead of substring-matching " 200 " |  | Done |
 | [CCS-060](P1-trust-release/CCS-060-p1-proxy-connect-userinfo.md) | bug | p3 | S | [proxy] Percent-decode proxy credentials before building Proxy-Authorization |  | Done |
-| [CCS-061](P1-trust-release/CCS-061-p1-proxy-connect-ipv6.md) | bug | p3 | S | [proxy] Strip IPv6 brackets before TCP connect and TLS server-name parsing |  | Partial |
+| [CCS-061](P1-trust-release/CCS-061-p1-proxy-connect-ipv6.md) | bug | p3 | S | [proxy] Strip IPv6 brackets before TCP connect and TLS server-name parsing |  | Done |
 | [CCS-062](P1-trust-release/CCS-062-p1-bridge-tool-result.md) | bug | p2 | S | [bridge] Convert array tool_result content properly in Anthropic->OpenAI Chat (text, images, is_error) | CCS-008 | Done |
 | [CCS-063](P1-trust-release/CCS-063-p1-bridge-image-document.md) | bug | p2 | S | [bridge] Handle URL-source images and document blocks in Anthropic->OpenAI Chat | CCS-008 | Done |
 | [CCS-064](P1-trust-release/CCS-064-p1-bridge-chat-stream-terminal.md) | bug | p2 | M | [bridge] Port the terminal state machine to the Chat->Anthropic stream converter | CCS-008 | Done |
@@ -117,7 +117,7 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-097](P1-trust-release/CCS-097-p1-session-sync-final-entry.md) | bug | p2 | S | [usage] Upgrade imported partial streaming snapshots when the final session entry arrives | CCS-096 | Done |
 | [CCS-098](P1-trust-release/CCS-098-p1-switch-provider-off-main.md) | bug | p3 | S | [providers] Run the switch_provider command off the main thread |  | Done |
 | [CCS-099](P1-trust-release/CCS-099-p1-switch-lock-all-apps.md) | bug | p3 | S | [providers] Take the per-app switch lock for every app type | CCS-098 | Done |
-| [CCS-100](P1-trust-release/CCS-100-p1-subscription-keychain-blocking.md) | bug | p2 | S | [usage] Run macOS keychain reads off the async workers, with a timeout |  | Partial |
+| [CCS-100](P1-trust-release/CCS-100-p1-subscription-keychain-blocking.md) | bug | p2 | S | [usage] Run macOS keychain reads off the async workers, with a timeout |  | Done |
 | [CCS-101](P1-trust-release/CCS-101-p1-skill-zip-extraction.md) | security | p3 | S | [skills] Use enclosed_name and size limits when extracting skill repo archives |  | Done |
 | [CCS-102](P1-trust-release/CCS-102-p1-gemini-env-writer.md) | bug | p3 | S | [gemini] Validate .env keys and values, strip quotes when parsing, and keep unknown lines | CCS-012 | Done |
 | [CCS-103](P1-trust-release/CCS-103-p1-claude-json-optimistic.md) | bug | p3 | S | [claude] Use optimistic concurrency for read-modify-write of ~/.claude.json | CCS-079 | Done |
@@ -211,8 +211,8 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-169](P4-app-adapters-persistence/CCS-169-p4-retention-panel.md) | feature | p3 | S | [settings] Add a retention and DB-size panel | CCS-161 | Done |
 | [CCS-170](P4-app-adapters-persistence/CCS-170-p4-live-config-journal.md) | feature | p3 | M | [apps] Keep a live-config journal with one-click undo of the last switch | CCS-149 | Done |
 | [CCS-171](P4-app-adapters-persistence/CCS-171-p4-usage-rescan.md) | feature | p3 | M | [usage] Add a usage re-scan action and a per-source data-quality report | CCS-159 | Done |
-| [CCS-172](P4-app-adapters-persistence/CCS-172-p4-keychain-secrets.md) | feature | p2 | L | [security] Store secrets in the OS keychain or credential manager | CCS-083, CCS-155 | Partial |
-| [CCS-173](P4-app-adapters-persistence/CCS-173-p4-sync-snapshot-auth.md) | feature | p2 | M | [sync] Authenticate WebDAV/S3 snapshots with an HMAC and refuse unsigned remote imports | CCS-086, CCS-172 | Partial |
+| [CCS-172](P4-app-adapters-persistence/CCS-172-p4-keychain-secrets.md) | feature | p2 | L | [security] Store secrets in the OS keychain or credential manager | CCS-083, CCS-155 | Done |
+| [CCS-173](P4-app-adapters-persistence/CCS-173-p4-sync-snapshot-auth.md) | feature | p2 | M | [sync] Authenticate WebDAV/S3 snapshots with an HMAC and refuse unsigned remote imports | CCS-086, CCS-172 | Done |
 | [CCS-212](P4-app-adapters-persistence/CCS-212-p4-hot-switch-rollback-snapshot.md) | bug | p3 | S | [takeover] Keep the raw byte snapshot when a failed hot switch rolls back the live backup | CCS-152 | Done |
 | [CCS-232](P4-app-adapters-persistence/CCS-232-p4-apps-budget-ratchet.md) | chore | p2 | S | [apps-tests] Make the match-app counter skip test-only modules and ratchet both app budgets to today's counts |  | Done |
 | [CCS-233](P4-app-adapters-persistence/CCS-233-p4-apps-ninth-app-six-files.md) | refactor | p2 | M | [apps] Make a 9th app touch 6 or fewer backend files | CCS-232 | Done |
@@ -232,13 +232,13 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-175](P5-protocol-ir-commands/CCS-175-p5-session-side-store.md) | refactor | p2 | M | [proxy] Move the Gemini shadow, Codex chat history and reasoning bridge behind SessionSideStore | CCS-174 | Done |
 | [CCS-176](P5-protocol-ir-commands/CCS-176-p5-codec-openai-chat.md) | refactor | p2 | L | [proxy] Migrate the Anthropic<-OpenAI Chat bridge to codecs | CCS-175 | Done |
 | [CCS-177](P5-protocol-ir-commands/CCS-177-p5-codec-gemini.md) | refactor | p2 | L | [proxy] Migrate the Gemini bridge to codecs | CCS-176 | Done |
-| [CCS-178](P5-protocol-ir-commands/CCS-178-p5-codec-responses.md) | refactor | p2 | XL | [proxy] Migrate the Responses bridges to codecs and remove the legacy engine | CCS-177 | Partial |
+| [CCS-178](P5-protocol-ir-commands/CCS-178-p5-codec-responses.md) | refactor | p2 | XL | [proxy] Migrate the Responses bridges to codecs and remove the legacy engine | CCS-177 | Done |
 | [CCS-179](P5-protocol-ir-commands/CCS-179-p5-misc-split-terminal.md) | refactor | p2 | L | [commands] Split misc.rs into cli_tools services and a unified platform terminal stack | CCS-104, CCS-036 | Done |
 | [CCS-180](P5-protocol-ir-commands/CCS-180-p5-command-domains-permissions.md) | security | p2 | M | [ipc] Register commands per domain with collect_commands! and scope them with AppManifest permissions | CCS-179, CCS-117, CCS-075 | Done |
 | [CCS-181](P5-protocol-ir-commands/CCS-181-p5-thin-commands.md) | refactor | p2 | L | [commands] Make commands thin adapters over a Ctx/EventSink seam and reach 100% IpcError | CCS-180, CCS-114 | Done |
 | [CCS-182](P5-protocol-ir-commands/CCS-182-p5-app-shell-bootstrap.md) | refactor | p2 | M | [shell] Add a StartupStep pipeline with a startup diagnostics report and a single run-event router | CCS-181 | Done |
 | [CCS-183](P5-protocol-ir-commands/CCS-183-p5-tray-split.md) | refactor | p3 | M | [tray] Split the tray into model, menu and events driven by an event bus | CCS-182 | Done |
-| [CCS-184](P5-protocol-ir-commands/CCS-184-p5-session-resume-cross-platform.md) | feature | p3 | M | [sessions] Support session resume on Windows and Linux | CCS-179, CCS-074 | Partial |
+| [CCS-184](P5-protocol-ir-commands/CCS-184-p5-session-resume-cross-platform.md) | feature | p3 | M | [sessions] Support session resume on Windows and Linux | CCS-179, CCS-074 | Done |
 | [CCS-185](P5-protocol-ir-commands/CCS-185-p5-midstream-failover.md) | feature | p2 | M | [proxy] Fail over on errors that arrive before any content is streamed | CCS-174, CCS-127 | Done |
 | [CCS-186](P5-protocol-ir-commands/CCS-186-p5-usage-parity-ci.md) | chore | p3 | S | [usage] Run a usage parity checker over the fixture corpus in CI | CCS-140, CCS-178 | Done |
 | [CCS-187](P5-protocol-ir-commands/CCS-187-p5-gemini-cli-anthropic.md) | feature | p3 | M | [proxy] Add the first new client/upstream combination: Gemini CLI to an Anthropic upstream | CCS-177 | Done |
@@ -269,7 +269,7 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-198](F-frontend/CCS-198-f-lazy-views-locales.md) | refactor | p3 | M | [perf] Lazy-load heavy views, per-app presets and locales | CCS-197 | Done |
 | [CCS-199](F-frontend/CCS-199-f-typed-i18n.md) | refactor | p3 | M | [i18n] Type the i18n keys and remove the 691 inline defaultValue fallbacks | CCS-020, CCS-198 | Done |
 | [CCS-200](F-frontend/CCS-200-f-radix-dialog-component-tests.md) | refactor | p3 | M | [ui] Move custom overlays to Radix Dialog and add component tests for the large panels | CCS-191 | Done |
-| [CCS-201](F-frontend/CCS-201-f-tauri-driver-e2e.md) | chore | p2 | M | [e2e] Add a tauri-driver and WebdriverIO smoke on Linux that gates release | CCS-024, CCS-023 | Partial |
+| [CCS-201](F-frontend/CCS-201-f-tauri-driver-e2e.md) | chore | p2 | M | [e2e] Add a tauri-driver and WebdriverIO smoke on Linux that gates release | CCS-024, CCS-023 | Done |
 | [CCS-202](F-frontend/CCS-202-f-resize-listener-leak.md) | bug | p3 | S | [shell] Unregister the onResized listener when App unmounts before it resolves |  | Done |
 | [CCS-203](F-frontend/CCS-203-f-safe-storage.md) | bug | p3 | S | [shell] Wrap all localStorage access in safe helpers |  | Done |
 | [CCS-204](F-frontend/CCS-204-f-a11y-icon-buttons.md) | bug | p3 | S | [a11y] Give icon-only buttons accessible names |  | Done |

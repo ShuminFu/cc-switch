@@ -1,6 +1,6 @@
 # CCS-034: [process] Add the ACCEPTANCE playbook, the fixture-required PR rule and the fix-commit KPI
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p2-medium`, `area:process`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p2-medium`, `area:process`
 
 > **Ticket key:** `p0-dev-acceptance-process` · **Phase:** P0 · **Priority:** p2-medium · **Effort:** S · **Depends on:** `p0-golden-testkit-chat-gemini`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -111,3 +111,17 @@ By the repository owner's decision on 2026-10-31, the following checks that need
 
 - Make 'Proxy fixture required' a required status check in the branch protection rule for main. **Needs:** Repo admin to change GitHub branch protection settings
 - Create the `no-fixture-needed` and `fixtures` labels in the repository. **Needs:** Someone with repo write access to create the labels in GitHub repo settings, plus a human decision
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- Make 'Proxy fixture required' a required status check in the branch protection rule for main. **Needs:** Repo admin to change GitHub branch protection settings
+- Create the `no-fixture-needed` and `fixtures` labels in the repository. **Needs:** Someone with repo write access to create the labels in GitHub repo settings, plus a human decision
+
+What a future maintainer would need to do to verify or finish them:
+
+- Decide what the `no-fixture-needed` and `fixtures` labels mean (no decision was taken), then create them in the repository.
+- After `proxy-fixture.yml` has run at least once, add `Proxy fixture required` as a required status check under Settings > Branches (or Rulesets) > `main`.

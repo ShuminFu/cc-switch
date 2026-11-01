@@ -1,6 +1,6 @@
 # CCS-061: [proxy] Strip IPv6 brackets before TCP connect and TLS server-name parsing
 
-**Status:** Partial · **Kind:** bug · **Labels:** `bug`, `phase:P1`, `p3-low`, `area:proxy`
+**Status:** Done · **Kind:** bug · **Labels:** `bug`, `phase:P1`, `p3-low`, `area:proxy`
 
 > **Ticket key:** `p1-proxy-connect-ipv6` · **Phase:** P1 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -91,3 +91,17 @@ By the repository owner's decision on 2026-10-31, checks that need a GitHub Acti
 
 - AC1: connect_via_proxy_reaches_ipv6_literal_proxy (CONNECT responder on [::1]:0) must actually run its IPv6 assertions and pass. **Needs:** One cargo test run on a host with IPv6 loopback. A dev machine works, so it does not need GitHub Actions. This sandbox gets EAFNOSUPPORT, so the test skips early.
 - AC2: send_raw_request_reaches_ipv6_literal_upstream (send_raw_request to http://[::1]:<port>/ returns Ok without fallback) must actually run and pass. **Needs:** One cargo test run on a host with IPv6 loopback. A dev machine works, so it does not need GitHub Actions.
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- AC1: connect_via_proxy_reaches_ipv6_literal_proxy (CONNECT responder on [::1]:0) must actually run its IPv6 assertions and pass. **Needs:** One cargo test run on a host with IPv6 loopback. A dev machine works, so it does not need GitHub Actions. This sandbox gets EAFNOSUPPORT, so the test skips early.
+- AC2: send_raw_request_reaches_ipv6_literal_upstream (send_raw_request to http://[::1]:<port>/ returns Ok without fallback) must actually run and pass. **Needs:** One cargo test run on a host with IPv6 loopback. A dev machine works, so it does not need GitHub Actions.
+
+What a future maintainer would need to do to verify or finish them:
+
+- On any host with IPv6 loopback (a dev machine is enough), run `CCS_REQUIRE_IPV6=1 cargo test --manifest-path src-tauri/Cargo.toml proxy::hyper_client`. With the variable set, the two `[::1]` tests panic instead of skipping when IPv6 is missing, so a pass means they really ran. Then tick AC1 to AC3.
+- The acceptance boxes above stay unticked because the tests have never run their IPv6 assertions.

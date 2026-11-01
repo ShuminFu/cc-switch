@@ -1,6 +1,6 @@
 # CCS-018: [ci] Gate on dependency advisories with cargo-deny and pnpm audit
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p2-medium`, `area:ci`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p2-medium`, `area:ci`
 
 > **Ticket key:** `p0-ci-cargo-deny` · **Phase:** P0 · **Priority:** p2-medium · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -138,3 +138,16 @@ By the repository owner's decision on 2026-10-31, the following checks that need
 ### Still blocked by
 
 - Make the 'cargo-deny' and 'pnpm audit' checks required in branch protection for main. **Needs:** A repo admin has to change the GitHub branch-protection or ruleset settings (a repo settings change, not an Actions run)
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- Make the 'cargo-deny' and 'pnpm audit' checks required in branch protection for main. **Needs:** A repo admin has to change the GitHub branch-protection or ruleset settings (a repo settings change, not an Actions run)
+
+What a future maintainer would need to do to verify or finish them:
+
+- After at least one real run of `.github/workflows/audit.yml`, add the `cargo-deny` and `pnpm audit` checks as required status checks under Settings > Branches (or Rulesets) > `main`.
+- Unrelated to closure but still open in the baseline: the zstd advisories (RUSTSEC-2026-0391/0398/0403) stay ignored in `src-tauri/deny.toml` until an upstream fixed release can be adopted.

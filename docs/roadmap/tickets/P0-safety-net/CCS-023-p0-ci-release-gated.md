@@ -1,6 +1,6 @@
 # CCS-023: [ci] Require green CI on the tag SHA before release builds
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p1-high`, `area:ci`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p1-high`, `area:ci`
 
 > **Ticket key:** `p0-ci-release-gated` · **Phase:** P0 · **Priority:** p1-high · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -53,3 +53,16 @@ By the repository owner's decision on 2026-10-31, the following checks that need
 ### Still blocked by
 
 - Required reviewers on the `release` environment (Settings > Environments > release > Required reviewers). **Needs:** A maintainer has to change this GitHub repository/environment setting.
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- Required reviewers on the `release` environment (Settings > Environments > release > Required reviewers). **Needs:** A maintainer has to change this GitHub repository/environment setting.
+
+What a future maintainer would need to do to verify or finish them:
+
+- Add required reviewers under Settings > Environments > `release`.
+- The acceptance box for the fork test stays unticked: it was skipped on 2026-10-31 and has not been run. Push a `v*` tag on a commit with a failing test on a fork with Actions enabled and confirm `release`, `publish-release` and `assemble-latest-json` are skipped.

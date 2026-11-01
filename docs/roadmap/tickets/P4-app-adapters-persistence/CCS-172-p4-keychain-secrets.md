@@ -1,6 +1,6 @@
 # CCS-172: [security] Store secrets in the OS keychain or credential manager
 
-**Status:** Partial · **Kind:** feature · **Labels:** `feature`, `phase:P4`, `p2-medium`, `area:security`
+**Status:** Done · **Kind:** feature · **Labels:** `feature`, `phase:P4`, `p2-medium`, `area:security`
 
 > **Ticket key:** `p4-keychain-secrets` · **Phase:** P4 · **Priority:** p2-medium · **Effort:** L · **Depends on:** `p1-oauth-token-store-hardening`, `p4-per-app-settings-state`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -138,3 +138,20 @@ By the repository owner's decision on 2026-10-31, checks that need a GitHub Acti
 - Manual check on macOS: Keychain Access entries and prompts, plus the downgrade path (checklist in docs/dev/SECRET_STORAGE.md). **Needs:** A real Mac and a human tester running it interactively
 - Manual check on Windows: Credential Manager entries, owner-only ACL on the fallback secrets.json, PowerShell downgrade. **Needs:** A real Windows machine and a human tester
 - Manual check on a Linux desktop: the KWallet path and real interactive unlock prompts (CCS-240 already covered GNOME Keyring/Secret Service at the API level and the headless fallback). **Needs:** An interactive Linux desktop session (KDE/KWallet) and a human tester
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- Manual check on macOS: Keychain Access entries and prompts, plus the downgrade path (checklist in docs/dev/SECRET_STORAGE.md). **Needs:** A real Mac and a human tester running it interactively
+- Manual check on Windows: Credential Manager entries, owner-only ACL on the fallback secrets.json, PowerShell downgrade. **Needs:** A real Windows machine and a human tester
+- Manual check on a Linux desktop: the KWallet path and real interactive unlock prompts (CCS-240 already covered GNOME Keyring/Secret Service at the API level and the headless fallback). **Needs:** An interactive Linux desktop session (KDE/KWallet) and a human tester
+
+What a future maintainer would need to do to verify or finish them:
+
+- Run the manual checklist in `docs/dev/SECRET_STORAGE.md` on each platform and record the results here:
+  - macOS: Keychain Access entries, the prompts, and the downgrade path.
+  - Windows: Credential Manager entries, the owner-only ACL on the fallback `secrets.json`, and the PowerShell downgrade.
+  - Linux desktop: the KWallet path with real unlock prompts (CCS-240 covered Secret Service at the API level and the headless fallback only).

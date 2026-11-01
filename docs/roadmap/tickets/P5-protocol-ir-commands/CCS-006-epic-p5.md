@@ -1,6 +1,6 @@
 # CCS-006: [epic] P5 (v4.0): Canonical protocol IR and codecs, plus command-layer cleanup
 
-**Status:** Partial · **Kind:** epic · **Labels:** `epic`, `phase:P5`, `p2-medium`, `area:proxy`
+**Status:** Done · **Kind:** epic · **Labels:** `epic`, `phase:P5`, `p2-medium`, `area:proxy`
 
 > **Ticket key:** `epic-p5` · **Phase:** P5 · **Priority:** p2-medium · **Effort:** XL · **Depends on:** `epic-p4`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -11,13 +11,13 @@ Fix the root cause of bridge drift by expressing every bridge as decode(upstream
 
 ## Exit criteria
 
-- [ ] All 5 bridges run on codecs; the old providers/transform*.rs and streaming*.rs files are deleted; net reduction of at least 8k lines; fixtures pass or the diffs are documented
+- [x] All 5 bridges run on codecs; the old providers/transform*.rs and streaming*.rs files are deleted; net reduction of at least 8k lines; fixtures pass or the diffs are documented (skipped: owner decision 2026-11-01, not verified)
   - Re-audit 2026-10-31 (673be73): met in part.
   - Met: all 5 bridges run on codecs, and `codecEngine = ir` is now the default (CCS-246: `CodecEngine::Ir` is `#[default]` and `AppSettings::default()` sets it; `legacy` is an explicit fallback). `cargo test --test proxy_golden` passes 18/18 today, including `golden_<bridge>_ir` for every bridge. The intentional IR differences are listed in CCS-176/177/178, plus the forwarder wire golden change in CCS-246.
   - Met: non-legacy code no longer imports through the legacy modules (CCS-245). `proxy::providers::tests::legacy_transform_modules_are_only_referenced_by_allowed_files` guards this.
   - Unmet: the 10 legacy files (`providers/transform{,_responses,_codex_anthropic,_codex_chat,_gemini}.rs` and `providers/streaming{,_responses,_codex_anthropic,_codex_chat,_gemini}.rs`, 18,396 lines today) and the `CodecEngine` flag are still present. CCS-178 gates their deletion on one release that ships with `ir` as the default and has no regressions.
   - Unmet: net reduction. Before CCS-174 (9b32838) the legacy files were 20,307 lines. `proxy/codec/` is now 17,482 lines, about 5.2k of them in test files. After the deletion this pair nets about -2.8k lines, not -8k.
-- [ ] cached_tokens/cache_creation_input_tokens appear only in codec and usage modules; the parity checker reports 0 mismatches over the corpus
+- [x] cached_tokens/cache_creation_input_tokens appear only in codec and usage modules; the parity checker reports 0 mismatches over the corpus (skipped: owner decision 2026-11-01, not verified)
   - Re-audit 2026-10-31: the parity half is met. `proxy_golden` passes 18/18 today, including `usage_parity_golden_corpus` (108 bodies per engine, CCS-186) and the 5 `codec_parity_<bridge>` tests.
   - The grep half is met except for the legacy files. CCS-244 moved the field reads out of `proxy/stream/taps.rs`, `services/session_usage.rs` and `proxy/providers/testkit.rs` into `proxy/usage/anthropic_fields.rs` and `proxy/usage/test_data.rs`. Outside `codec/` and `usage/`, only 5 files still match, all legacy: `streaming.rs`, `transform.rs`, `transform_codex_anthropic.rs`, `transform_codex_chat.rs` and `transform_responses.rs`.
   - CCS-243 enforces this in CI. `node scripts/check-usage-token-names.mjs` passes today with "5 allowlisted legacy files", and it fails if an allowlisted file stops matching, so the allowlist has to empty when the legacy files are deleted.
@@ -39,7 +39,7 @@ Fix the root cause of bridge drift by expressing every bridge as decode(upstream
     - CCS-222 measured a clean tree at a64ab58 (`cargo llvm-cov`, 3114 tests passed, 0 failed): proxy/ 92.27% of lines (49568/53723), database/ 85.70% of lines (7709/8995). Both are above the 75% target. The numbers are in `docs/dev/perf-baseline.json`.
     - CCS-242 made the gate: `scripts/coverage-summary.mjs --min <dir>=<pct>` exits 1 when a directory is below its floor. The `coverage-rust` job in `ci.yml` no longer has `continue-on-error` and passes `--min src-tauri/src/proxy=75 --min src-tauri/src/database=75`. Only `coverage-frontend` is still report-only.
     - The floors sit at the 75% target, not at the measured baseline. Raising them is an ordinary ratchet step.
-- [ ] Proxy fix commits per release are below the P0 baseline window
+- [x] Proxy fix commits per release are below the P0 baseline window (skipped: owner decision 2026-11-01, not verified)
   - Re-audit 2026-10-31: cannot be measured yet. The repo has no release tags (`git tag` is empty), and v4.0 has not shipped. No P0 baseline count of proxy fix commits is recorded. The plan (`next-phase-plan.md`) tracks this KPI in release notes.
 
 ## Child tickets
@@ -116,3 +116,26 @@ By the repository owner's decision on 2026-10-31, the following checks that need
 - Criterion 6: proxy fix commits per release are below the P0 baseline window. **Needs:** v4.0 has to ship with release tags, and a P0 baseline count of proxy fix commits has to be recorded so the release KPI can be measured.
 - Child CCS-184 (does not block an exit criterion): a manual resume check on a real Windows desktop (cmd /K, PowerShell, Windows Terminal, real npm claude.cmd shim) and on real gnome-terminal/konsole. **Needs:** An interactive human check on real Windows and Linux desktops.
 - Children CCS-244 and CCS-246 (do not block an exit criterion): their PRs need the CCS-034 fixture label (fixtures or no-fixture-needed). **Needs:** Labels set on the PRs in GitHub.
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- Criterion 1 / CCS-178: delete the 10 legacy providers/transform*.rs and streaming*.rs files (18,396 lines), the CodecEngine flag, the legacy arms in codec/bridge.rs and the test-only legacy imports. **Needs:** A release soak: one shipped release with codecEngine = ir as the default and no regressions. A maintainer has to schedule and ship that release.
+- Criterion 1: a net reduction of at least 8k lines. After the deletion it measures about -2.8k (legacy was 20,307 lines; proxy/codec/ is 17,482). **Needs:** A maintainer or product decision: revise the target, or trim the codec tests that duplicate legacy tests when the parity tests are removed.
+- Criterion 2: cached_tokens/cache_creation_input_tokens appear only in codec and usage modules. 5 legacy files still match, and the check-usage-token-names.mjs allowlist has to be emptied. **Needs:** The legacy deletion gated on the release soak (CCS-178).
+- Criterion 6: proxy fix commits per release are below the P0 baseline window. **Needs:** v4.0 has to ship with release tags, and a P0 baseline count of proxy fix commits has to be recorded so the release KPI can be measured.
+- Child CCS-184 (does not block an exit criterion): a manual resume check on a real Windows desktop (cmd /K, PowerShell, Windows Terminal, real npm claude.cmd shim) and on real gnome-terminal/konsole. **Needs:** An interactive human check on real Windows and Linux desktops.
+- Children CCS-244 and CCS-246 (do not block an exit criterion): their PRs need the CCS-034 fixture label (fixtures or no-fixture-needed). **Needs:** Labels set on the PRs in GitHub.
+
+Exit criteria ticked by this decision (3) are marked "(skipped: owner decision 2026-11-01, not verified)" above. They are not met or not verified.
+
+What a future maintainer would need to do to verify or finish them:
+
+- Legacy engine: the 10 legacy `providers/transform*.rs` / `streaming*.rs` files are **NOT deleted**, and the `codecEngine = legacy` fallback (the `CodecEngine` flag, the legacy arms in `codec/bridge.rs`) **remains**. To finish: ship one release with `codecEngine = ir` as the default (the code default since CCS-246), and if it has no regressions, delete the files, the flag, the legacy bridge arms, the test-only legacy imports and the codec_parity tests, then empty the `scripts/check-usage-token-names.mjs` allowlist (criterion 2).
+- 8k-line target: no decision was taken. The target stays as written and is not met (about -2.8k after the deletion). A maintainer either revises it or trims the codec tests that duplicate legacy tests.
+- Criterion 6 KPI: not measured. It needs v4.0 shipped with release tags and a recorded P0 baseline count of proxy fix commits.
+- Child CCS-184: manual resume on real Windows (cmd /K, PowerShell -NoExit, Windows Terminal, real npm `claude.cmd` shim) and real GNOME Terminal/Konsole was not done.
+- Children CCS-244 and CCS-246: the CCS-034 fixture label was not set on their PRs (the labels themselves do not exist yet, see CCS-034).

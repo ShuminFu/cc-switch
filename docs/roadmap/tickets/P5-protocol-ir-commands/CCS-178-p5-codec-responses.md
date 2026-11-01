@@ -1,6 +1,6 @@
 # CCS-178: [proxy] Migrate the Responses bridges to codecs and remove the legacy engine
 
-**Status:** Partial · **Kind:** refactor · **Labels:** `refactor`, `phase:P5`, `p2-medium`, `area:proxy`
+**Status:** Done · **Kind:** refactor · **Labels:** `refactor`, `phase:P5`, `p2-medium`, `area:proxy`
 
 > **Ticket key:** `p5-codec-responses` · **Phase:** P5 · **Priority:** p2-medium · **Effort:** XL · **Depends on:** `p5-codec-gemini`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -198,3 +198,22 @@ By the repository owner's decision on 2026-10-31, checks that need a GitHub Acti
 - Net reduction of at least 8k lines (AC1). **Needs:** The release-gated deletion first, plus a maintainer decision because triage measures about -2.8k against the >= 8k target
 - Grep criterion: cached_tokens/cache_creation_input_tokens only in codec and usage modules (AC2). **Needs:** The release-gated deletion, plus a maintainer decision on whether stream/taps.rs, services/session_usage.rs and providers/testkit.rs count as usage/test modules (or CCS-244 is done)
 - Ship codecEngine = ir as the default (prerequisite for the soak, code in CCS-246). **Needs:** Maintainer release decision
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- Delete the 10 legacy transform*/streaming*.rs files (18,397 lines), the CodecEngine flag and codecEngine setting, the legacy bridge arms and the codec_parity tests. **Needs:** Release soak: one shipped release with codecEngine = ir and no regressions
+- Net reduction of at least 8k lines (AC1). **Needs:** The release-gated deletion first, plus a maintainer decision because triage measures about -2.8k against the >= 8k target
+- Grep criterion: cached_tokens/cache_creation_input_tokens only in codec and usage modules (AC2). **Needs:** The release-gated deletion, plus a maintainer decision on whether stream/taps.rs, services/session_usage.rs and providers/testkit.rs count as usage/test modules (or CCS-244 is done)
+- Ship codecEngine = ir as the default (prerequisite for the soak, code in CCS-246). **Needs:** Maintainer release decision
+
+What a future maintainer would need to do to verify or finish them:
+
+- The 10 legacy transform/streaming files are **NOT deleted**, and the `codecEngine = legacy` fallback **remains** (the `CodecEngine` flag, the `codecEngine` setting, the legacy bridge arms and the codec_parity tests are all still in place). `codecEngine = ir` is the default in code since CCS-246, but no release has shipped with it, so no soak has happened.
+- To finish: a maintainer ships a release with `codecEngine = ir` as the default; after one release with no regressions, delete the files, the flag and setting, the legacy bridge arms and the codec_parity tests, and empty the `scripts/check-usage-token-names.mjs` allowlist (AC2).
+- 8k-line target (AC1): no decision was taken. The target stays as written and is not met (about -2.8k after the deletion).
+- AC2 module question: no decision was taken on whether `stream/taps.rs`, `services/session_usage.rs` and `providers/testkit.rs` count as usage/test modules (CCS-244 has since moved the field reads out of them).
+- The acceptance boxes above stay unticked.

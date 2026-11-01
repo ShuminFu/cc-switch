@@ -1,6 +1,6 @@
 # CCS-173: [sync] Authenticate WebDAV/S3 snapshots with an HMAC and refuse unsigned remote imports
 
-**Status:** Partial · **Kind:** feature · **Labels:** `feature`, `phase:P4`, `p2-medium`, `area:sync`
+**Status:** Done · **Kind:** feature · **Labels:** `feature`, `phase:P4`, `p2-medium`, `area:sync`
 
 > **Ticket key:** `p4-sync-snapshot-auth` · **Phase:** P4 · **Priority:** p2-medium · **Effort:** M · **Depends on:** `p1-sql-import-sandbox`, `p4-keychain-secrets`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -129,3 +129,17 @@ By the repository owner's decision on 2026-10-31, checks that need a GitHub Acti
 
 - Make the sync key mandatory (refuse unsigned uploads/imports when no key is set). **Needs:** Product decision, to be made after the sync-key UI has shipped in a release
 - Bind the HMAC signature to the remote location/profile. **Needs:** Protocol decision plus a manifest version bump (maintainer decision)
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- Make the sync key mandatory (refuse unsigned uploads/imports when no key is set). **Needs:** Product decision, to be made after the sync-key UI has shipped in a release
+- Bind the HMAC signature to the remote location/profile. **Needs:** Protocol decision plus a manifest version bump (maintainer decision)
+
+What a future maintainer would need to do to verify or finish them:
+
+- No decision was taken on either item. Current behaviour stays as implemented: the sync key is optional; with no key set, uploads are unsigned and unsigned snapshots can still be imported (with a key set, an unsigned snapshot needs the one-time migration confirmation from CCS-238); the HMAC signature is not bound to the remote location or profile.
+- To act on it later: a maintainer decides whether to make the key mandatory (refuse unsigned uploads and imports without a key) once the sync-key UI has shipped in a release, and whether to bind the signature to the remote location/profile. Binding needs a manifest version bump, since older apps would fail the MAC check.

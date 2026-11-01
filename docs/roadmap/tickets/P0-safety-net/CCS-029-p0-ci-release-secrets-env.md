@@ -1,6 +1,6 @@
 # CCS-029: [ci] Pass release secrets via env: and stop exporting signing material to GITHUB_ENV
 
-**Status:** Partial · **Kind:** security · **Labels:** `security`, `phase:P0`, `p1-high`, `area:ci`
+**Status:** Done · **Kind:** security · **Labels:** `security`, `phase:P0`, `p1-high`, `area:ci`
 
 > **Ticket key:** `p0-ci-release-secrets-env` · **Phase:** P0 · **Priority:** p1-high · **Effort:** S · **Depends on:** `p0-ci-pin-actions`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -76,3 +76,16 @@ By the repository owner's decision on 2026-10-31, the following checks that need
 ### Still blocked by
 
 - Confirm the repository's TAURI_SIGNING_PRIVATE_KEY secret holds the canonical single-line base64 .key contents (as written by `tauri signer generate`); re-save it if it is stored as raw two-line text or the bare second line. **Needs:** A human with repository secrets access to check the secret's format and re-save it if needed
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- Confirm the repository's TAURI_SIGNING_PRIVATE_KEY secret holds the canonical single-line base64 .key contents (as written by `tauri signer generate`); re-save it if it is stored as raw two-line text or the bare second line. **Needs:** A human with repository secrets access to check the secret's format and re-save it if needed
+
+What a future maintainer would need to do to verify or finish them:
+
+- Someone with repository secrets access checks that `TAURI_SIGNING_PRIVATE_KEY` is the single-line base64 contents of the `.key` file written by `tauri signer generate` (decoded first line `untrusted comment:`), and re-saves it in that form if it is stored as raw two-line text or the bare second line.
+- The unticked acceptance boxes above were left as they were. AC3 (`.sig` on all 3 OSes) needs a tag run on a fork with the signing secrets; only the Linux leg was checked locally (CCS-220).

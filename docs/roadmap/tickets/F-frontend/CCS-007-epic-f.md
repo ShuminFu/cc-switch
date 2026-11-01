@@ -1,6 +1,6 @@
 # CCS-007: [epic] Track F: Frontend decomposition (runs in parallel from P2 bindings, lands by v4.0)
 
-**Status:** Partial · **Kind:** epic · **Labels:** `epic`, `phase:F`, `p2-medium`, `area:frontend`
+**Status:** Done · **Kind:** epic · **Labels:** `epic`, `phase:F`, `p2-medium`, `area:frontend`
 
 > **Ticket key:** `epic-f` · **Phase:** F · **Priority:** p2-medium · **Effort:** XL · **Depends on:** `epic-p2`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -14,7 +14,7 @@ Break up ProviderForm.tsx (2578 lines) and App.tsx, centralise query keys and in
 - [x] Per-app/per-preset settingsConfig goldens unchanged — `tests/components/providerFormGoldens` passes (part of the 22-file / 567-test targeted run below). The only snapshot edit since CCS-189 (`c080308`, CCS-199) changed two blocked-submit error strings to i18n keys, not any `settingsConfig` payload.
 - [x] Initial JS bundle at least 30% smaller than the v3.17 baseline — re-measured after the follow-ups with `vite build` into a scratch dir: the only script in `index.html` is 972.12 kB (gzip 319.19 kB), vs 4,229.39 kB for v3.17.0 (CCS-198): −77.0 %.
 - [x] Zero inline defaultValue fallbacks; validation messages localized in all 4 locales — `tests/i18n` (incl. `noInlineFallbacks`, parity, typed keys) and `tests/lib/validationMessagesI18n.test.ts` pass. Together with `tests/lint`, the goldens and `tests/ci/e2eSmoke.test.ts`: 22 files / 567 tests pass on vitest 4.1.12. The remaining `defaultValue` hits in `src/` are preset template defaults and Radix `Tabs`/`Accordion` props, not `t()` fallbacks. CCS-193 is Done; CCS-253 removed the last (dead) Chinese usage-script matchers.
-- [ ] tauri-driver smoke green on the Linux AppImage and blocking release — **not met (needs CI + GitHub settings)**: the wiring is in place. `ci.yml:315` runs the smoke on the debug build in `tauri-build-smoke`, `release.yml:355` runs it on the AppImage before Prepare Linux Assets/upload, and `tests/ci/e2eSmoke.test.ts` passes. Locally it passed on the debug binary (30/30) and the AppImage (5/5) (CCS-201). No green GitHub Actions run has been observed, and it is not yet a required check.
+- [x] tauri-driver smoke green on the Linux AppImage and blocking release (skipped: owner decision 2026-11-01, not verified) — **not met (needs CI + GitHub settings)**: the wiring is in place. `ci.yml:315` runs the smoke on the debug build in `tauri-build-smoke`, `release.yml:355` runs it on the AppImage before Prepare Linux Assets/upload, and `tests/ci/e2eSmoke.test.ts` passes. Locally it passed on the debug binary (30/30) and the AppImage (5/5) (CCS-201). No green GitHub Actions run has been observed, and it is not yet a required check.
 
 ## Child tickets
 f-settingsconfig-goldens, f-providerform-shell, f-providerform-core-apps, f-providerform-additive-apps, f-i18n-validation-messages, f-query-keys, f-mutation-appid-variables, f-mutation-live-ids, f-app-shell-split, f-lazy-views-locales, f-typed-i18n, f-radix-dialog-component-tests, f-tauri-driver-e2e, f-resize-listener-leak, f-safe-storage, f-a11y-icon-buttons, f-live-diff-preview, f-unsaved-changes-guard, f-switching-state, f-command-palette, f-unpriced-requests-export
@@ -77,3 +77,17 @@ By the repository owner's decision on 2026-10-31, the following checks that need
 ### Still blocked by
 
 - Epic exit criterion 'tauri-driver smoke ... blocking release' / CCS-201: tauri-build-smoke is not yet a required status check in branch protection. **Needs:** A maintainer has to add tauri-build-smoke as a required check in the GitHub branch protection settings (a GitHub repo settings change). Once that is done, CCS-201 and this epic can be set to Done.
+
+## Owner decision (2026-11-01): remaining checks skipped
+
+On 2026-11-01 the repository owner decided to close this ticket (Status: Done) without the remaining checks. The items below were **skipped. They were NOT verified and NOT performed**: no setting was changed, no manual or real-machine check was run, and no decision was taken on them. The GitHub Actions checks skipped on 2026-10-31 (section above) are also still unverified. Closing the ticket does not mean any of these passed.
+
+Skipped items, as recorded under "Still blocked by":
+
+- Epic exit criterion 'tauri-driver smoke ... blocking release' / CCS-201: tauri-build-smoke is not yet a required status check in branch protection. **Needs:** A maintainer has to add tauri-build-smoke as a required check in the GitHub branch protection settings (a GitHub repo settings change). Once that is done, CCS-201 and this epic can be set to Done.
+
+Exit criteria ticked by this decision (1) are marked "(skipped: owner decision 2026-11-01, not verified)" above. They are not met or not verified.
+
+What a future maintainer would need to do to verify or finish them:
+
+- After `tauri-build-smoke` has run green at least once, add it as a required status check under Settings > Branches (or Rulesets) > `main` (CCS-201). The smoke has only passed locally (debug binary 30/30, AppImage 5/5).
